@@ -8,6 +8,8 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
+  COMPACTION_TOKEN_THRESHOLD: '80000',
+  COMPACTION_TURN_THRESHOLD: '6',
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min

@@ -8,6 +8,8 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'COMPACTION_TOKEN_THRESHOLD',
+  'COMPACTION_TURN_THRESHOLD',
   'ONECLI_URL',
   'TZ',
 ]);
@@ -17,6 +19,14 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const COMPACTION_TOKEN_THRESHOLD =
+  process.env.COMPACTION_TOKEN_THRESHOLD ||
+  envConfig.COMPACTION_TOKEN_THRESHOLD ||
+  '80000';
+export const COMPACTION_TURN_THRESHOLD =
+  process.env.COMPACTION_TURN_THRESHOLD ||
+  envConfig.COMPACTION_TURN_THRESHOLD ||
+  '6';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

@@ -7,6 +7,8 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  COMPACTION_TOKEN_THRESHOLD,
+  COMPACTION_TURN_THRESHOLD,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -233,6 +235,10 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Forward auto-compaction thresholds to container
+  args.push('-e', `COMPACTION_TOKEN_THRESHOLD=${COMPACTION_TOKEN_THRESHOLD}`);
+  args.push('-e', `COMPACTION_TURN_THRESHOLD=${COMPACTION_TURN_THRESHOLD}`);
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -277,7 +283,11 @@ async function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    containerName: string,
+    resetTimeout: () => void,
+  ) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
@@ -329,7 +339,7 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    // onProcess called after resetTimeout is defined (below)
 
     let stdout = '';
     let stderr = '';
@@ -444,11 +454,13 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // Reset the timeout whenever there's activity (streaming output or IPC input)
     const resetTimeout = () => {
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
+
+    onProcess(container, containerName, resetTimeout);
 
     container.on('close', (code) => {
       clearTimeout(timeout);

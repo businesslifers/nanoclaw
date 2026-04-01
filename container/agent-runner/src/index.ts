@@ -338,7 +338,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; usage: { inputTokens: number; costUsd: number } }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -367,6 +367,13 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+
+  // Accumulate usage across all result messages in this query
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let totalCacheCreation = 0;
+  let totalCostUsd = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -453,17 +460,40 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Capture usage from result messages
+      const resultMsg = message as {
+        total_cost_usd?: number;
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
+      };
+      if (resultMsg.usage) {
+        totalInputTokens += resultMsg.usage.input_tokens || 0;
+        totalOutputTokens += resultMsg.usage.output_tokens || 0;
+        totalCacheRead += resultMsg.usage.cache_read_input_tokens || 0;
+        totalCacheCreation += resultMsg.usage.cache_creation_input_tokens || 0;
+      }
+      if (resultMsg.total_cost_usd) {
+        totalCostUsd += resultMsg.total_cost_usd;
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        usage: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          cacheReadInputTokens: totalCacheRead,
+          cacheCreationInputTokens: totalCacheCreation,
+          costUsd: totalCostUsd,
+        },
       });
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, usage: { inputTokens: totalInputTokens, costUsd: totalCostUsd } };
 }
 
 interface ScriptResult {
@@ -578,6 +608,13 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+
+  // Auto-compaction: track cumulative token usage across IPC turns
+  const COMPACTION_TOKEN_THRESHOLD = parseInt(process.env.COMPACTION_TOKEN_THRESHOLD || '80000', 10);
+  const COMPACTION_TURN_THRESHOLD = parseInt(process.env.COMPACTION_TURN_THRESHOLD || '6', 10);
+  let cumulativeInputTokens = 0;
+  let ipcTurnCount = 0;
+
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
@@ -590,6 +627,10 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
+      // Track usage for auto-compaction
+      cumulativeInputTokens += queryResult.usage.inputTokens;
+      ipcTurnCount++;
+
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
       // idle timer and cause a 30-min delay before the next _close).
@@ -600,6 +641,41 @@ async function main(): Promise<void> {
 
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+
+      // Auto-compact if cumulative input tokens or turn count exceed thresholds
+      if (cumulativeInputTokens > COMPACTION_TOKEN_THRESHOLD || ipcTurnCount >= COMPACTION_TURN_THRESHOLD) {
+        log(`Proactive compaction: ${cumulativeInputTokens} input tokens across ${ipcTurnCount} IPC turns`);
+        try {
+          for await (const message of query({
+            prompt: '/compact',
+            options: {
+              cwd: '/workspace/group',
+              resume: sessionId,
+              systemPrompt: undefined,
+              allowedTools: [],
+              env: sdkEnv,
+              permissionMode: 'bypassPermissions' as const,
+              allowDangerouslySkipPermissions: true,
+              settingSources: ['project', 'user'] as const,
+              hooks: {
+                PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+              },
+            },
+          })) {
+            if (message.type === 'system' && message.subtype === 'init') {
+              sessionId = message.session_id;
+            }
+            if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
+              log('Compact boundary observed — compaction completed');
+            }
+          }
+          writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+        } catch (err) {
+          log(`Auto-compaction failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        cumulativeInputTokens = 0;
+        ipcTurnCount = 0;
+      }
 
       log('Query ended, waiting for next IPC message...');
 
