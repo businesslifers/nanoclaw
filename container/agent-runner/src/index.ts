@@ -645,6 +645,7 @@ async function main(): Promise<void> {
       // Auto-compact if cumulative input tokens or turn count exceed thresholds
       if (cumulativeInputTokens > COMPACTION_TOKEN_THRESHOLD || ipcTurnCount >= COMPACTION_TURN_THRESHOLD) {
         log(`Proactive compaction: ${cumulativeInputTokens} input tokens across ${ipcTurnCount} IPC turns`);
+        writeOutput({ status: 'success', result: 'Organizing my thoughts...', newSessionId: sessionId });
         try {
           for await (const message of query({
             prompt: '/compact',
