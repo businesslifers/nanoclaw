@@ -29,17 +29,30 @@ test -f src/session-commands.ts && echo "Compact skill present" || echo "ERROR: 
 
 ## Phase 2: Apply Code Changes
 
-Merge the skill branch. The branch may be available from `upstream` or a skills remote — check which remotes have it:
+Check which remote has the skill branch:
 
 ```bash
+git fetch --all --prune 2>/dev/null
 git branch -r | grep skill/auto-compact
 ```
 
-Then merge from whichever remote has it:
+If no remote has it, the `skills` remote needs to be added:
 
 ```bash
-git fetch <remote> skill/auto-compact
-git merge <remote>/skill/auto-compact
+git remote -v | grep skills || echo "skills remote not found"
+```
+
+If the `skills` remote is missing, add it:
+
+```bash
+git remote add skills https://github.com/businesslifers/nanoclaw.git
+git fetch skills
+```
+
+Then merge the skill branch:
+
+```bash
+git merge skills/skill/auto-compact
 ```
 
 This adds:
