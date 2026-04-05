@@ -286,8 +286,13 @@ async function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    containerName: string,
+    resetTimeout: () => void,
+  ) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onStderr?: (line: string) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -337,8 +342,6 @@ export async function runContainerAgent(
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-
-    onProcess(container, containerName);
 
     let stdout = '';
     let stderr = '';
@@ -410,6 +413,9 @@ export async function runContainerAgent(
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
+        if (line && onStderr && line.includes('[agent-runner]')) {
+          onStderr(line);
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
@@ -458,6 +464,8 @@ export async function runContainerAgent(
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
+
+    onProcess(container, containerName, resetTimeout);
 
     container.on('close', (code) => {
       clearTimeout(timeout);

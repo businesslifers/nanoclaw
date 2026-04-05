@@ -36,6 +36,7 @@ import {
   deleteSession,
   getAllTasks,
   getLastBotMessageTimestamp,
+  getMessageFromMe,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -62,6 +63,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
+import { StatusTracker } from './status-tracker.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -77,6 +79,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker;
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -248,7 +251,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         triggerPattern.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (!hasTrigger) {
+      return true;
+    }
+  }
+
+  // Ensure all user messages are tracked — recovery messages enter processGroupMessages
+  // directly via the queue, bypassing startMessageLoop where markReceived normally fires.
+  // markReceived is idempotent (rejects duplicates), so this is safe for normal-path messages too.
+  for (const msg of missedMessages) {
+    statusTracker.markReceived(msg.id, chatJid, false, msg.sender);
+  }
+
+  // Mark all user messages as thinking (container is spawning)
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_from_me && !m.is_bot_message,
+  );
+  for (const msg of userMessages) {
+    statusTracker.markThinking(msg.id);
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -282,10 +302,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        for (const um of userMessages) {
+          statusTracker.markWorking(um.id);
+        }
+      }
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -302,6 +329,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'success') {
+      statusTracker.markAllDone(chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -314,22 +342,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
-        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+        'Agent error after output was sent, no piped messages to recover',
       );
+      statusTracker.markAllDone(chatJid);
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // No output sent — roll back everything so the full batch is retried
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
     );
+    statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
     return false;
   }
 
@@ -393,9 +421,19 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName, resetTimeout) =>
+        queue.registerProcess(chatJid, proc, containerName, group.folder, resetTimeout),
       wrappedOnOutput,
+      (line) => {
+        const cleaned = line.replace(/\[agent-runner]\s*/, '');
+        if (
+          /^(Using tool:|Thinking|Task notification:|Session initialized|Result #|Piping IPC)/.test(
+            cleaned,
+          )
+        ) {
+          statusTracker.setActivity(chatJid, cleaned);
+        }
+      },
     );
 
     if (output.newSessionId) {
@@ -502,6 +540,13 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
+          // Mark each user message as received (status emoji)
+          for (const msg of groupMessages) {
+            if (!msg.is_from_me && !msg.is_bot_message) {
+              statusTracker.markReceived(msg.id, chatJid, false, msg.sender);
+            }
+          }
+
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
@@ -515,6 +560,13 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Mark new user messages as thinking (only groupMessages were markReceived'd;
+            // accumulated allPending context messages are untracked and would no-op)
+            for (const msg of groupMessages) {
+              if (!msg.is_from_me && !msg.is_bot_message) {
+                statusTracker.markThinking(msg.id);
+              }
+            }
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -587,6 +639,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    await statusTracker.shutdown();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -674,6 +727,24 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
+  // Initialize status tracker (uses channels via callbacks, channels don't need to be connected yet)
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isTrackedGroup: (chatJid) => {
+      return chatJid in registeredGroups;
+    },
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
@@ -746,7 +817,31 @@ async function main(): Promise<void> {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
     },
+    statusHeartbeat: () => statusTracker.heartbeatCheck(),
+    recoverPendingMessages,
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (messageId) {
+        if (!channel.sendReaction)
+          throw new Error('Channel does not support sendReaction');
+        const messageKey = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: getMessageFromMe(messageId, jid),
+        };
+        await channel.sendReaction(jid, messageKey, emoji);
+      } else {
+        if (!channel.reactToLatestMessage)
+          throw new Error('Channel does not support reactions');
+        await channel.reactToLatestMessage(jid, emoji);
+      }
+    },
   });
+  // Recover status tracker AFTER channels connect, so recovery reactions
+  // can actually be sent via the WhatsApp channel.
+  await statusTracker.recover();
+
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

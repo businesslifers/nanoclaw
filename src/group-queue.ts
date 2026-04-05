@@ -24,6 +24,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  resetTimeout?: () => void;
   retryCount: number;
 }
 
@@ -134,11 +135,13 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder?: string,
+    resetTimeout?: () => void,
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (resetTimeout) state.resetTimeout = resetTimeout;
   }
 
   /**
@@ -171,6 +174,7 @@ export class GroupQueue {
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
       fs.renameSync(tempPath, filepath);
+      state.resetTimeout?.(); // Reset container timeout on new input
       return true;
     } catch {
       return false;
@@ -342,6 +346,10 @@ export class GroupQueue {
       }
       // If neither pending, skip this group
     }
+  }
+
+  isActive(groupJid: string): boolean {
+    return this.getGroup(groupJid).active;
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {
