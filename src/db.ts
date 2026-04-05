@@ -82,6 +82,21 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS request_queue (
+      id TEXT PRIMARY KEY,
+      requester_folder TEXT NOT NULL,
+      requester_jid TEXT NOT NULL,
+      target_folder TEXT,
+      target_jid TEXT,
+      summary TEXT NOT NULL,
+      detail TEXT,
+      status TEXT DEFAULT 'pending',
+      resolution_reason TEXT,
+      resolved_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_request_queue_status ON request_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_request_queue_requester ON request_queue(requester_folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -749,4 +764,76 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Request queue queries ---
+
+export interface QueuedRequest {
+  id: string;
+  requester_folder: string;
+  requester_jid: string;
+  target_folder: string | null;
+  target_jid: string | null;
+  summary: string;
+  detail: string | null;
+  status: string;
+  resolution_reason: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export function createRequest(
+  req: Omit<QueuedRequest, 'status' | 'resolution_reason' | 'resolved_at'>,
+): void {
+  db.prepare(
+    `INSERT INTO request_queue (id, requester_folder, requester_jid, target_folder, target_jid, summary, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    req.id,
+    req.requester_folder,
+    req.requester_jid,
+    req.target_folder || null,
+    req.target_jid || null,
+    req.summary,
+    req.detail || null,
+    req.created_at,
+  );
+}
+
+export function getRequestById(id: string): QueuedRequest | undefined {
+  return db.prepare('SELECT * FROM request_queue WHERE id = ?').get(id) as
+    | QueuedRequest
+    | undefined;
+}
+
+export function getPendingRequests(): QueuedRequest[] {
+  return db
+    .prepare(
+      "SELECT * FROM request_queue WHERE status = 'pending' ORDER BY created_at ASC",
+    )
+    .all() as QueuedRequest[];
+}
+
+export function getRequestsForGroup(groupFolder: string): QueuedRequest[] {
+  return db
+    .prepare(
+      'SELECT * FROM request_queue WHERE requester_folder = ? ORDER BY created_at DESC',
+    )
+    .all(groupFolder) as QueuedRequest[];
+}
+
+export function getAllRequests(): QueuedRequest[] {
+  return db
+    .prepare('SELECT * FROM request_queue ORDER BY created_at DESC')
+    .all() as QueuedRequest[];
+}
+
+export function resolveRequest(
+  id: string,
+  status: 'approved' | 'denied',
+  reason?: string,
+): void {
+  db.prepare(
+    `UPDATE request_queue SET status = ?, resolution_reason = ?, resolved_at = ? WHERE id = ?`,
+  ).run(status, reason || null, new Date().toISOString(), id);
 }

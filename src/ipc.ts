@@ -5,7 +5,15 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createRequest,
+  createTask,
+  deleteTask,
+  getRequestById,
+  getTaskById,
+  resolveRequest,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -23,6 +31,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onRequestsChanged?: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -173,6 +182,14 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For request queue
+    summary?: string;
+    detail?: string;
+    requestId?: string;
+    targetFolder?: string;
+    resolution?: string;
+    reason?: string;
+    message?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -458,6 +475,117 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'queue_request':
+      if (data.summary) {
+        const requestId =
+          data.requestId ||
+          `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        createRequest({
+          id: requestId,
+          requester_folder: sourceGroup,
+          requester_jid: data.chatJid || '',
+          target_folder: data.targetFolder || null,
+          target_jid: data.targetJid || null,
+          summary: data.summary,
+          detail: data.detail || null,
+          created_at: new Date().toISOString(),
+        });
+        logger.info(
+          { requestId, sourceGroup, summary: data.summary },
+          'Request queued via IPC',
+        );
+        deps.onRequestsChanged?.();
+      } else {
+        logger.warn({ sourceGroup }, 'Invalid queue_request - missing summary');
+      }
+      break;
+
+    case 'resolve_request':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized resolve_request attempt blocked',
+        );
+        break;
+      }
+      if (data.requestId && data.resolution) {
+        const request = getRequestById(data.requestId);
+        if (!request) {
+          logger.warn(
+            { requestId: data.requestId },
+            'Request not found for resolution',
+          );
+          break;
+        }
+        resolveRequest(
+          data.requestId,
+          data.resolution as 'approved' | 'denied',
+          data.reason,
+        );
+        logger.info(
+          {
+            requestId: data.requestId,
+            resolution: data.resolution,
+            sourceGroup,
+          },
+          'Request resolved via IPC',
+        );
+
+        if (data.resolution === 'approved') {
+          const targetJid = request.target_jid || request.requester_jid;
+          const approvalText =
+            data.message ||
+            `Your request was approved.\n\n` +
+              `Request: ${request.summary}\n` +
+              (data.reason ? `Notes: ${data.reason}\n\n` : '\n') +
+              `Detail: ${request.detail || 'None'}`;
+          try {
+            await deps.sendMessage(targetJid, approvalText);
+            logger.info(
+              { requestId: data.requestId, targetJid },
+              'Approved request message sent',
+            );
+          } catch (err) {
+            logger.error(
+              { requestId: data.requestId, targetJid, err },
+              'Failed to send approved request message',
+            );
+          }
+        } else if (data.resolution === 'denied') {
+          const denialText =
+            `Your request was reviewed and denied.\n\n` +
+            `Request: ${request.summary}\n` +
+            `Reason: ${data.reason || 'No reason given'}\n\n` +
+            `You can raise this again with additional context if needed.`;
+          try {
+            await deps.sendMessage(request.requester_jid, denialText);
+            logger.info(
+              {
+                requestId: data.requestId,
+                requesterJid: request.requester_jid,
+              },
+              'Denial notification sent',
+            );
+          } catch (err) {
+            logger.error(
+              {
+                requestId: data.requestId,
+                requesterJid: request.requester_jid,
+                err,
+              },
+              'Failed to send denial notification',
+            );
+          }
+        }
+        deps.onRequestsChanged?.();
+      } else {
+        logger.warn(
+          { sourceGroup },
+          'Invalid resolve_request - missing requestId or resolution',
         );
       }
       break;

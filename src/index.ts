@@ -32,6 +32,7 @@ import {
 import {
   getAllChats,
   getAllRegisteredGroups,
+  getAllRequests,
   getAllSessions,
   deleteSession,
   getAllTasks,
@@ -49,6 +50,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { writeRequestsSnapshot } from './request-queue.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
@@ -361,6 +363,9 @@ async function runAgent(
       next_run: t.next_run,
     })),
   );
+
+  // Update requests snapshot for container to read
+  writeRequestsSnapshot(group.folder, isMain, getAllRequests());
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
@@ -744,6 +749,12 @@ async function main(): Promise<void> {
       }));
       for (const group of Object.values(registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+      }
+    },
+    onRequestsChanged: () => {
+      const requests = getAllRequests();
+      for (const group of Object.values(registeredGroups)) {
+        writeRequestsSnapshot(group.folder, group.isMain === true, requests);
       }
     },
   });
