@@ -151,7 +151,10 @@ function writeOutput(output: ContainerOutput): void {
 }
 
 function log(message: string): void {
-  console.error(`[agent-runner] ${message}`);
+  // Write directly to fd 2 — the SDK captures process.stderr after the
+  // first query result, which causes console.error to throw and crash
+  // the IPC polling timer (pollIpcDuringQuery) before it can reschedule.
+  try { fs.writeSync(2, `[agent-runner] ${message}\n`); } catch { /* ignore */ }
 }
 
 function getSessionSummary(
