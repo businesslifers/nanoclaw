@@ -177,6 +177,7 @@ a:hover { text-decoration: underline; }
 .nav a:hover, .nav a.active { color: var(--fg); text-decoration: none; }
 
 .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+.container.wide { max-width: none; }
 h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; }
 h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--fg2); }
 
@@ -276,7 +277,7 @@ setInterval(function(){
 // Layout
 // ---------------------------------------------------------------------------
 
-function layout(title: string, activePath: string, body: string): string {
+function layout(title: string, activePath: string, body: string, wide = false): string {
   const nav = [
     ['/', 'Overview'],
     ['/wiki', 'Wiki'],
@@ -301,7 +302,7 @@ function layout(title: string, activePath: string, body: string): string {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head><body>
 <nav class="nav"><span class="nav-brand">${escapeHtml(ASSISTANT_NAME)}</span>${navHtml}</nav>
-<div class="container">${body}</div>
+<div class="container${wide ? ' wide' : ''}">${body}</div>
 </body></html>`;
 }
 
@@ -779,6 +780,7 @@ setInterval(function(){
 }, 3000);
 </script>
 `,
+    true,
   );
 }
 
