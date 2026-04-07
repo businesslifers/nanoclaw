@@ -220,10 +220,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // container context (and therefore token costs).
   const ignoreFile = path.join(groupDir, '.claudeignore');
   if (!fs.existsSync(ignoreFile)) {
-    fs.writeFileSync(
-      ignoreFile,
-      'node_modules/\n*.log\nattachments/\n',
-    );
+    fs.writeFileSync(ignoreFile, 'node_modules/\n*.log\nattachments/\n');
     logger.info({ folder: group.folder }, 'Created default .claudeignore');
   }
 

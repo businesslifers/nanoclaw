@@ -1016,10 +1016,16 @@ function pageTasks(query: URLSearchParams): string {
             if (!slotTasks || slotTasks.length === 0) return '<td></td>';
             const density = hourDensity.get(h) || 0;
             const color = density >= 3 ? 'var(--yellow)' : 'var(--green)';
-            const count = slotTasks.length > 1 ? `<span style="position:absolute;top:-2px;right:2px;font-size:0.6rem;color:var(--fg)">${slotTasks.length}</span>` : '';
+            const count =
+              slotTasks.length > 1
+                ? `<span style="position:absolute;top:-2px;right:2px;font-size:0.6rem;color:var(--fg)">${slotTasks.length}</span>`
+                : '';
             const tipItems = slotTasks
               .map((t: TimelineSlotTask) => {
-                const label = t.prompt.length > 50 ? t.prompt.slice(0, 50) + '...' : t.prompt;
+                const label =
+                  t.prompt.length > 50
+                    ? t.prompt.slice(0, 50) + '...'
+                    : t.prompt;
                 return `<div class="tl-tip-task">${escapeHtml(label)}<br><span class="tl-tip-cron">${escapeHtml(t.scheduleValue)}</span></div>`;
               })
               .join('');

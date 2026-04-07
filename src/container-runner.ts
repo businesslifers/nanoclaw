@@ -338,8 +338,11 @@ export async function runContainerAgent(
     // Quick check: does this folder have node_modules or other large dirs?
     try {
       const entries = fs.readdirSync(groupDir, { withFileTypes: true });
-      const suspects = entries
-        .filter((e) => e.isDirectory() && ['node_modules', 'vendor', 'dist', '.next', 'build'].includes(e.name));
+      const suspects = entries.filter(
+        (e) =>
+          e.isDirectory() &&
+          ['node_modules', 'vendor', 'dist', '.next', 'build'].includes(e.name),
+      );
       if (suspects.length > 0) {
         logger.warn(
           { folder: group.folder, dirs: suspects.map((s) => s.name) },
