@@ -18,6 +18,10 @@ groups/*/**
 !groups/*/manifest.json
 !groups/*/*.md
 !groups/*/*.json
+!groups/*/specs/
+!groups/*/specs/**
+!groups/*/sites/
+!groups/*/sites/**
 
 # Secrets
 *.keys.json
