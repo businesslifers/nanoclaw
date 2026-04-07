@@ -1,0 +1,49 @@
+{
+  "date": "2026-04-08",
+  "proposals": [
+    {
+      "id": 1,
+      "title": "Create missing pipeline spec files",
+      "scope": "team",
+      "file": "writing-spec.md, scoring-rubric.md, geo-strategy.md, intents.md",
+      "changeType": "add",
+      "location": "/workspace/group/ (new files)",
+      "oldText": null,
+      "newText": "Create all four files from rules already codified in CLAUDE.md, site specs, and agents.json — so agents that try to read them don't fail silently.",
+      "reason": "All four files are referenced in agents.json prompts (Quill, Mindy, Prism, Scout) but confirmed missing from the workspace — any spawned agent will fail when trying to read them."
+    },
+    {
+      "id": 2,
+      "title": "Fix stale SmartCrawl reference in BB site spec",
+      "scope": "team",
+      "file": "sites/birthday-best.md",
+      "changeType": "edit",
+      "location": "Technical Notes section, redirect map line",
+      "oldText": "- 301 redirect map for 16 pre-pipeline deleted posts in `birthday-best-audit.md` — still requires manual SmartCrawl entry (pre-dates Redirection plugin install)",
+      "newText": "- 301 redirect map for 16 pre-pipeline deleted posts in `birthday-best-audit.md` — these predate the Redirection plugin install and have not yet been created. Use Redirection plugin REST API when ready.",
+      "reason": "SmartCrawl has been replaced by the Redirection plugin — the note still references it as the method, which is incorrect."
+    },
+    {
+      "id": 3,
+      "title": "Add Tier 1 / Tier 2 market tiers explicitly to Scout and Quill prompts",
+      "scope": "team",
+      "file": "agents.json",
+      "changeType": "edit",
+      "location": "Scout and Quill prompt sections",
+      "oldText": null,
+      "newText": "Add a concise 'Geographic Audience' section to both Scout and Quill prompts: Tier 1 = US, UK, Australia, Canada. Tier 2 HV = New Zealand, Germany, Netherlands, Nordics. Do not target beyond these.",
+      "reason": "Currently Scout and Quill inherit market targeting from reading per-site specs — making it explicit in the prompt is more reliable and survives context where site spec isn't read first."
+    },
+    {
+      "id": 4,
+      "title": "Scheduled daily review loses state across context breaks",
+      "scope": "global",
+      "file": "CLAUDE.md (global)",
+      "changeType": "add",
+      "location": "Scheduled task guidance",
+      "oldText": null,
+      "newText": "Note that the daily learning review task should save proposals.json before sending the message — not after. If the session is interrupted, the proposals are preserved and the review can resume from the saved file rather than starting over.",
+      "reason": "Yesterday's Apr 7 learning review identified and drafted proposals but was interrupted before saving proposals.json — when the session resumed it had no record of the proposals and couldn't send them."
+    }
+  ]
+}
