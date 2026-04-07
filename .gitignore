@@ -22,6 +22,8 @@ groups/*/**
 !groups/*/specs/**
 !groups/*/sites/
 !groups/*/sites/**
+!groups/*/wiki/
+!groups/*/wiki/**
 
 # Secrets
 *.keys.json
