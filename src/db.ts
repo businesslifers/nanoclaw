@@ -856,6 +856,39 @@ export function getUsageTotals(): {
   };
 }
 
+export function getUsageDaily(): {
+  day: string;
+  group_folder: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  runs: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT date(logged_at) as day,
+              group_folder,
+              COALESCE(SUM(input_tokens),0) as input_tokens,
+              COALESCE(SUM(output_tokens),0) as output_tokens,
+              COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
+              ROUND(COALESCE(SUM(cost_usd),0), 4) as cost_usd,
+              COUNT(*) as runs
+       FROM usage_logs
+       GROUP BY date(logged_at), group_folder
+       ORDER BY day`,
+    )
+    .all() as {
+    day: string;
+    group_folder: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cost_usd: number;
+    runs: number;
+  }[];
+}
+
 // --- Message activity ---
 
 export function getMessageActivity(sinceTimestamp: string): {

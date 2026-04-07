@@ -19,6 +19,7 @@ import {
   getRecentTaskRunLogs,
   getTaskRunLogs,
   getUsageByGroup,
+  getUsageDaily,
   getUsageRecent,
   getUsageTotals,
 } from './db.js';
@@ -278,12 +279,12 @@ setInterval(function(){
 function layout(title: string, activePath: string, body: string): string {
   const nav = [
     ['/', 'Overview'],
-    ['/groups', 'Groups'],
     ['/wiki', 'Wiki'],
-    ['/tasks', 'Tasks'],
-    ['/containers', 'Containers'],
+    ['/groups', 'Groups'],
     ['/messages', 'Messages'],
     ['/usage', 'Usage'],
+    ['/tasks', 'Tasks'],
+    ['/containers', 'Containers'],
   ];
   const navHtml = nav
     .map(
@@ -297,6 +298,7 @@ function layout(title: string, activePath: string, body: string): string {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)} - ${escapeHtml(ASSISTANT_NAME)}</title>
 <style>${CSS}</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head><body>
 <nav class="nav"><span class="nav-brand">${escapeHtml(ASSISTANT_NAME)}</span>${navHtml}</nav>
 <div class="container">${body}</div>
@@ -918,6 +920,50 @@ function pageUsage(): string {
   const totals = getUsageTotals();
   const byGroup = getUsageByGroup();
   const recent = getUsageRecent(30);
+  const daily = getUsageDaily();
+
+  // Prepare chart data: aggregate daily tokens across all groups
+  const daySet = [...new Set(daily.map((d) => d.day))].sort();
+  const groupSet = [...new Set(daily.map((d) => d.group_folder))].sort();
+
+  // Chart colours per group
+  const CHART_COLORS = [
+    '#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff',
+    '#39d2c0', '#f0883e', '#8b949e',
+  ];
+  const groupColorMap = new Map(
+    groupSet.map((g, i) => [g, CHART_COLORS[i % CHART_COLORS.length]]),
+  );
+
+  // Build stacked bar datasets for daily token usage (output tokens — most meaningful)
+  const tokenDatasets = groupSet.map((group) => {
+    const dataByDay = new Map(
+      daily.filter((d) => d.group_folder === group).map((d) => [d.day, d]),
+    );
+    return {
+      label: group.replace('whatsapp_', ''),
+      data: daySet.map((day) => {
+        const entry = dataByDay.get(day);
+        return entry ? entry.output_tokens : 0;
+      }),
+      backgroundColor: groupColorMap.get(group),
+    };
+  });
+
+  // Build doughnut data for cost by group
+  const costLabels = byGroup.map((g) => g.group_folder.replace('whatsapp_', ''));
+  const costData = byGroup.map((g) => g.total_cost_usd);
+  const costColors = byGroup.map(
+    (g) => groupColorMap.get(g.group_folder) || '#8b949e',
+  );
+
+  const chartDataJson = JSON.stringify({
+    tokenLabels: daySet,
+    tokenDatasets,
+    costLabels,
+    costData,
+    costColors,
+  });
 
   const groupRows =
     byGroup.length === 0
@@ -968,6 +1014,21 @@ function pageUsage(): string {
   <div class="card"><div class="card-label">Cache Tokens Saved</div><div class="card-value">${fmtTokens(totals.total_cache_read)}</div></div>
 </div>
 
+<div class="section" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+  <div>
+    <h2>Output Tokens by Day</h2>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;">
+      <canvas id="tokenChart" height="280"></canvas>
+    </div>
+  </div>
+  <div>
+    <h2>Cost by Group</h2>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;">
+      <canvas id="costChart" height="280"></canvas>
+    </div>
+  </div>
+</div>
+
 <div class="section">
   <h2>By Group</h2>
   <div class="table-wrap"><table>
@@ -983,6 +1044,66 @@ function pageUsage(): string {
     ${recentRows}
   </table></div>
 </div>
+
+<script>
+(function(){
+  var cd = ${chartDataJson};
+  var gridColor = 'rgba(48,54,61,0.6)';
+  var textColor = '#8b949e';
+  Chart.defaults.color = textColor;
+
+  // Stacked bar — daily output tokens
+  new Chart(document.getElementById('tokenChart'), {
+    type: 'bar',
+    data: { labels: cd.tokenLabels, datasets: cd.tokenDatasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12 } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var v = ctx.parsed.y;
+              var s = v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : v;
+              return ctx.dataset.label + ': ' + s + ' tokens';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { color: gridColor } },
+        y: {
+          stacked: true,
+          grid: { color: gridColor },
+          ticks: { callback: function(v) { return v >= 1000000 ? (v/1000000).toFixed(0)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v; } }
+        }
+      }
+    }
+  });
+
+  // Doughnut — cost by group
+  new Chart(document.getElementById('costChart'), {
+    type: 'doughnut',
+    data: {
+      labels: cd.costLabels,
+      datasets: [{ data: cd.costData, backgroundColor: cd.costColors, borderWidth: 0 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12 } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) { return ctx.label + ': $' + ctx.parsed.toFixed(2); }
+          }
+        }
+      }
+    }
+  });
+})();
+</script>
 `,
   );
 }
@@ -1227,6 +1348,8 @@ export function startDashboard(deps: DashboardDeps): http.Server | null {
               recent: getUsageRecent(50),
             }),
           );
+        } else if (pathname === '/api/usage/daily') {
+          res.end(JSON.stringify(getUsageDaily()));
         } else if (pathname === '/api/wiki') {
           res.end(JSON.stringify(apiWiki(deps)));
         } else {
