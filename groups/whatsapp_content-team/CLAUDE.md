@@ -49,6 +49,7 @@ Articles must be approved by **Adam or Raeleen** before publishing.
 
 ## Key Standards
 
+- **Geographic audience focus: US, UK, Australia, Canada (US/UK/AU/CA) only.** Do not plan, write, or optimise content for broad/global audiences — this attracts bot and low-quality traffic. Applies to all active sites (BB, ICT, LPG) and any new sites.
 - No em dashes, "unlock", "elevate" (see memory: feedback_emdashes)
 - External links: `target="_blank" rel="noopener noreferrer"`
 - Internal link anchor text must sound like the author talking
