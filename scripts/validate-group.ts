@@ -391,10 +391,74 @@ function checkCLAUDEMDCredentials(manifest: Manifest, groupDir: string): CheckRe
 
 // --- Main ---
 
+function checkLargeDirectories(groupDir: string): CheckResult {
+  const WARN_THRESHOLD = 500; // files
+  const KNOWN_LARGE = ['node_modules', '.git'];
+  const ignorePath = path.join(groupDir, '.claudeignore');
+  let ignorePatterns: string[] = [];
+  if (fs.existsSync(ignorePath)) {
+    ignorePatterns = fs
+      .readFileSync(ignorePath, 'utf-8')
+      .split('\n')
+      .map((l) => l.trim().replace(/\/$/, ''))
+      .filter((l) => l && !l.startsWith('#'));
+  }
+
+  const problems: string[] = [];
+  try {
+    const entries = fs.readdirSync(groupDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const dirName = entry.name;
+      if (['logs', 'wiki', 'sources', 'conversations', '.git'].includes(dirName)) continue;
+
+      // Check if ignored by .claudeignore
+      const isIgnored = ignorePatterns.some(
+        (p) => p === dirName || p === `${dirName}/` || dirName.match(new RegExp(`^${p.replace('*', '.*')}$`)),
+      );
+      if (isIgnored) continue;
+
+      // Count files in this directory
+      let fileCount = 0;
+      try {
+        const countDir = (dir: string) => {
+          for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (f.isDirectory()) countDir(path.join(dir, f.name));
+            else fileCount++;
+            if (fileCount > WARN_THRESHOLD) return; // early exit
+          }
+        };
+        countDir(path.join(groupDir, dirName));
+      } catch {
+        continue;
+      }
+
+      if (fileCount > WARN_THRESHOLD) {
+        problems.push(
+          `${dirName}/ has ${fileCount}+ files and is NOT in .claudeignore — this inflates container token costs`,
+        );
+      }
+    }
+  } catch {
+    return pass('Container context size', 'Could not scan group directory');
+  }
+
+  if (problems.length > 0) {
+    return fail('Container context size', problems.join('; '));
+  }
+  return pass(
+    'Container context size',
+    fs.existsSync(ignorePath) ? '.claudeignore present' : 'no large directories found',
+  );
+}
+
 function validateGroup(groupFolder: string, agents: OneCLIAgent[], secrets: OneCLISecret[]): CheckResult[] {
   const groupsDir = path.join(process.cwd(), 'groups');
   const groupDir = path.join(groupsDir, groupFolder);
   const results: CheckResult[] = [];
+
+  // 0. Container context size (runs even without manifest)
+  results.push(checkLargeDirectories(groupDir));
 
   // 1. Manifest exists
   const { result: manifestResult, manifest } = checkManifestExists(groupDir);
@@ -464,12 +528,17 @@ function main(): void {
 
   let folders: string[];
   if (args[0] === '--all') {
-    // Find all groups with a manifest.json
+    // Find all group directories (excluding global and symlinks)
     folders = fs
       .readdirSync(groupsDir)
       .filter((f) => {
-        const manifestPath = path.join(groupsDir, f, 'manifest.json');
-        return fs.statSync(path.join(groupsDir, f)).isDirectory() && fs.existsSync(manifestPath);
+        const fullPath = path.join(groupsDir, f);
+        try {
+          const stat = fs.lstatSync(fullPath);
+          return stat.isDirectory() && !stat.isSymbolicLink() && f !== 'global' && f !== 'main';
+        } catch {
+          return false;
+        }
       })
       .sort();
   } else {

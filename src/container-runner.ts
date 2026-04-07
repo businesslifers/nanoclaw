@@ -332,6 +332,25 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
+  // Warn if group folder has no .claudeignore — large dirs inflate token costs
+  const ignoreFile = path.join(groupDir, '.claudeignore');
+  if (!fs.existsSync(ignoreFile)) {
+    // Quick check: does this folder have node_modules or other large dirs?
+    try {
+      const entries = fs.readdirSync(groupDir, { withFileTypes: true });
+      const suspects = entries
+        .filter((e) => e.isDirectory() && ['node_modules', 'vendor', 'dist', '.next', 'build'].includes(e.name));
+      if (suspects.length > 0) {
+        logger.warn(
+          { folder: group.folder, dirs: suspects.map((s) => s.name) },
+          'Group folder has large directories without .claudeignore — this inflates token costs. Add a .claudeignore file.',
+        );
+      }
+    } catch {
+      // non-critical
+    }
+  }
+
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
