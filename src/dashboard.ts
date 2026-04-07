@@ -788,6 +788,69 @@ setInterval(function(){
   );
 }
 
+function buildScheduleTimeline(
+  tasks: ReturnType<typeof apiTasks>,
+): { groups: string[]; hours: number[]; slots: Map<string, Set<number>> } {
+  const now = new Date();
+  const activeCron = tasks.filter(
+    (t) => t.status === 'active' && t.scheduleType === 'cron',
+  );
+
+  const groups = [...new Set(activeCron.map((t) => t.groupFolder))].sort();
+  const hours: number[] = [];
+  for (let i = 0; i < 24; i++) {
+    hours.push((now.getHours() + i) % 24);
+  }
+
+  // Map each group to the set of hour slots (0-23) where tasks fire in the next 24h
+  const slots = new Map<string, Set<number>>();
+  for (const group of groups) {
+    slots.set(group, new Set<number>());
+  }
+
+  for (const t of activeCron) {
+    if (!t.nextRun) continue;
+    // Compute up to 24 firings by walking the cron expression
+    try {
+      const { CronExpressionParser } = require('cron-parser') as typeof import('cron-parser');
+      const interval = CronExpressionParser.parse(t.scheduleValue, {
+        tz: TIMEZONE,
+        currentDate: now,
+      });
+      for (let i = 0; i < 24; i++) {
+        const next = interval.next();
+        const nextDate = next.toDate();
+        if (nextDate.getTime() - now.getTime() > 24 * 60 * 60 * 1000) break;
+        const localHour = parseInt(
+          nextDate.toLocaleString('en-AU', {
+            timeZone: TIMEZONE,
+            hour: '2-digit',
+            hour12: false,
+          }),
+          10,
+        );
+        slots.get(t.groupFolder)?.add(localHour);
+      }
+    } catch {
+      // If cron parse fails, use nextRun as fallback
+      const nextDate = new Date(t.nextRun);
+      if (nextDate.getTime() - now.getTime() <= 24 * 60 * 60 * 1000) {
+        const localHour = parseInt(
+          nextDate.toLocaleString('en-AU', {
+            timeZone: TIMEZONE,
+            hour: '2-digit',
+            hour12: false,
+          }),
+          10,
+        );
+        slots.get(t.groupFolder)?.add(localHour);
+      }
+    }
+  }
+
+  return { groups, hours, slots };
+}
+
 function pageTasks(query: URLSearchParams): string {
   const allTasks = apiTasks();
   const filterGroup = query.get('group') || '';
@@ -879,6 +942,71 @@ function pageTasks(query: URLSearchParams): string {
           })
           .join('');
 
+  // Build 24h timeline
+  const timeline = buildScheduleTimeline(allTasks);
+  const nowHour = new Date().getHours();
+
+  // Count tasks per hour across all groups for density warnings
+  const hourDensity = new Map<number, number>();
+  for (const hourSet of timeline.slots.values()) {
+    for (const h of hourSet) {
+      hourDensity.set(h, (hourDensity.get(h) || 0) + 1);
+    }
+  }
+
+  const timelineHtml =
+    timeline.groups.length === 0
+      ? ''
+      : `<div class="section">
+  <h2>24h Schedule Timeline (${TIMEZONE})</h2>
+  <div class="table-wrap"><table style="table-layout:fixed">
+    <tr>
+      <th style="width:160px">Team</th>
+      ${timeline.hours.map((h) => {
+        const density = hourDensity.get(h) || 0;
+        const isCurrent = h === nowHour;
+        const style = isCurrent
+          ? 'font-weight:600;color:var(--accent)'
+          : density >= 3
+            ? 'color:var(--yellow)'
+            : '';
+        return `<th style="width:32px;text-align:center;font-size:0.7rem;${style}">${String(h).padStart(2, '0')}</th>`;
+      }).join('')}
+    </tr>
+    ${timeline.groups.map((group) => {
+      const groupSlots = timeline.slots.get(group) || new Set();
+      return `<tr>
+        <td class="mono" style="font-size:0.75rem">${escapeHtml(group.replace('whatsapp_', ''))}</td>
+        ${timeline.hours.map((h) => {
+          if (!groupSlots.has(h)) return '<td></td>';
+          const density = hourDensity.get(h) || 0;
+          const color =
+            density >= 3
+              ? 'var(--yellow)'
+              : 'var(--green)';
+          return `<td style="text-align:center"><div style="width:16px;height:16px;border-radius:3px;background:${color};margin:auto;opacity:0.8" title="${group} @ ${h}:00 (${density} teams this hour)"></div></td>`;
+        }).join('')}
+      </tr>`;
+    }).join('')}
+    <tr>
+      <td style="font-size:0.7rem;color:var(--fg2)">Density</td>
+      ${timeline.hours.map((h) => {
+        const d = hourDensity.get(h) || 0;
+        if (d === 0) return '<td></td>';
+        const color = d >= 3 ? 'var(--yellow)' : 'var(--fg2)';
+        return `<td style="text-align:center;font-size:0.7rem;color:${color}">${d}</td>`;
+      }).join('')}
+    </tr>
+  </table></div>
+  <p style="font-size:0.75rem;color:var(--fg2);margin-top:0.5rem">
+    <span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;opacity:0.8"></span> task scheduled
+    &nbsp;&nbsp;
+    <span style="display:inline-block;width:10px;height:10px;background:var(--yellow);border-radius:2px;opacity:0.8"></span> 3+ teams same hour
+    &nbsp;&nbsp;
+    Current hour highlighted in blue
+  </p>
+</div>`;
+
   return layout(
     'Tasks',
     '/tasks',
@@ -890,11 +1018,15 @@ function pageTasks(query: URLSearchParams): string {
   <div class="card"><div class="card-label">Success Rate</div><div class="card-value">${overallSuccessRate !== null ? overallSuccessRate + '%' : '-'}</div></div>
   <div class="card"><div class="card-label">Active Tasks</div><div class="card-value">${allTasks.filter((t) => t.status === 'active').length}</div></div>
 </div>
+${timelineHtml}
 ${filterBar}
-<div class="table-wrap"><table>
-  <tr><th>Prompt</th><th>Group</th><th>Type</th><th>Schedule</th><th>Status</th><th>Next Run</th><th>Success Rate</th><th>Avg Duration</th></tr>
-  ${rows}
-</table></div>
+<div class="section">
+  <h2>All Tasks</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Prompt</th><th>Group</th><th>Type</th><th>Schedule</th><th>Status</th><th>Next Run</th><th>Success Rate</th><th>Avg Duration</th></tr>
+    ${rows}
+  </table></div>
+</div>
 `,
   );
 }
