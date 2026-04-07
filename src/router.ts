@@ -1,5 +1,6 @@
 import { Channel, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { parseTextStyles, ChannelType } from './text-styles.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -35,10 +36,10 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(rawText: string): string {
+export function formatOutbound(rawText: string, channel?: ChannelType): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return channel ? parseTextStyles(text, channel) : text;
 }
 
 export function routeOutbound(
@@ -49,6 +50,17 @@ export function routeOutbound(
   const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
   if (!channel) throw new Error(`No channel for JID: ${jid}`);
   return channel.sendMessage(jid, text);
+}
+
+/**
+ * Format outbound text for a specific channel, applying channel-native styling.
+ * Convenience wrapper that resolves the channel type from Channel.name.
+ */
+export function formatOutboundForChannel(
+  rawText: string,
+  channel: Channel,
+): string {
+  return formatOutbound(rawText, channel.name as ChannelType);
 }
 
 export function findChannel(

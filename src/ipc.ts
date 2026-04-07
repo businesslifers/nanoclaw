@@ -5,13 +5,26 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createRequest,
+  createTask,
+  deleteTask,
+  getRequestById,
+  getTaskById,
+  resolveRequest,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendReaction?: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -23,9 +36,17 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onRequestsChanged?: () => void;
+  statusHeartbeat?: () => void;
+  recoverPendingMessages?: () => void;
 }
 
 let ipcWatcherRunning = false;
+const RECOVERY_INTERVAL_MS = 60_000;
+
+/** Per-group cooldown to suppress rapid-fire send_message calls from sub-agents. */
+const lastSendByGroup = new Map<string, number>();
+const SEND_COOLDOWN_MS = 5000;
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -36,6 +57,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
+  let lastRecoveryTime = Date.now();
 
   const processIpcFiles = async () => {
     // Scan all group IPC directories (identity determined by directory)
@@ -81,15 +103,70 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
+                  // Per-group cooldown: suppress rapid-fire sends (e.g. sub-agents
+                  // each sending their own acknowledgement message).
+                  const cooldownKey = `${sourceGroup}:${data.chatJid}`;
+                  const now = Date.now();
+                  const lastSend = lastSendByGroup.get(cooldownKey);
+                  if (lastSend && now - lastSend < SEND_COOLDOWN_MS) {
+                    logger.info(
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        cooldownMs: SEND_COOLDOWN_MS,
+                      },
+                      'IPC message suppressed (send cooldown)',
+                    );
+                  } else {
+                    lastSendByGroup.set(cooldownKey, now);
+                    await deps.sendMessage(data.chatJid, data.text);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji !== undefined &&
+                deps.sendReaction
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  try {
+                    await deps.sendReaction(
+                      data.chatJid,
+                      data.emoji,
+                      data.messageId,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      'IPC reaction sent',
+                    );
+                  } catch (err) {
+                    logger.error(
+                      {
+                        chatJid: data.chatJid,
+                        emoji: data.emoji,
+                        sourceGroup,
+                        err,
+                      },
+                      'IPC reaction failed',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
                   );
                 }
               }
@@ -147,6 +224,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
       }
     }
 
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    deps.statusHeartbeat?.();
+
+    // Periodic message recovery — catch stuck messages after retry exhaustion or pipeline stalls
+    const now = Date.now();
+    if (now - lastRecoveryTime >= RECOVERY_INTERVAL_MS) {
+      lastRecoveryTime = now;
+      deps.recoverPendingMessages?.();
+    }
+
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
@@ -166,6 +253,14 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For queue_request / resolve_request
+    requestId?: string;
+    summary?: string;
+    detail?: string;
+    resolution?: string;
+    reason?: string;
+    message?: string;
+    targetFolder?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -458,6 +553,117 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'queue_request':
+      if (data.summary) {
+        const requestId =
+          data.requestId ||
+          `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        createRequest({
+          id: requestId,
+          requester_folder: sourceGroup,
+          requester_jid: data.chatJid || '',
+          target_folder: data.targetFolder || null,
+          target_jid: data.targetJid || null,
+          summary: data.summary,
+          detail: data.detail || null,
+          created_at: new Date().toISOString(),
+        });
+        logger.info(
+          { requestId, sourceGroup, summary: data.summary },
+          'Request queued via IPC',
+        );
+        deps.onRequestsChanged?.();
+      } else {
+        logger.warn({ sourceGroup }, 'Invalid queue_request - missing summary');
+      }
+      break;
+
+    case 'resolve_request':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized resolve_request attempt blocked',
+        );
+        break;
+      }
+      if (data.requestId && data.resolution) {
+        const request = getRequestById(data.requestId);
+        if (!request) {
+          logger.warn(
+            { requestId: data.requestId },
+            'Request not found for resolution',
+          );
+          break;
+        }
+        resolveRequest(
+          data.requestId,
+          data.resolution as 'approved' | 'denied',
+          data.reason,
+        );
+        logger.info(
+          {
+            requestId: data.requestId,
+            resolution: data.resolution,
+            sourceGroup,
+          },
+          'Request resolved via IPC',
+        );
+
+        if (data.resolution === 'approved') {
+          const targetJid = request.target_jid || request.requester_jid;
+          const approvalText =
+            data.message ||
+            `Your request was approved.\n\n` +
+              `Request: ${request.summary}\n` +
+              (data.reason ? `Notes: ${data.reason}\n\n` : '\n') +
+              `Detail: ${request.detail || 'None'}`;
+          try {
+            await deps.sendMessage(targetJid, approvalText);
+            logger.info(
+              { requestId: data.requestId, targetJid },
+              'Approved request message sent',
+            );
+          } catch (err) {
+            logger.error(
+              { requestId: data.requestId, targetJid, err },
+              'Failed to send approved request message',
+            );
+          }
+        } else if (data.resolution === 'denied') {
+          const denialText =
+            `Your request was reviewed and denied.\n\n` +
+            `Request: ${request.summary}\n` +
+            `Reason: ${data.reason || 'No reason given'}\n\n` +
+            `You can raise this again with additional context if needed.`;
+          try {
+            await deps.sendMessage(request.requester_jid, denialText);
+            logger.info(
+              {
+                requestId: data.requestId,
+                requesterJid: request.requester_jid,
+              },
+              'Denial notification sent',
+            );
+          } catch (err) {
+            logger.error(
+              {
+                requestId: data.requestId,
+                requesterJid: request.requester_jid,
+                err,
+              },
+              'Failed to send denial notification',
+            );
+          }
+        }
+        deps.onRequestsChanged?.();
+      } else {
+        logger.warn(
+          { sourceGroup },
+          'Invalid resolve_request - missing requestId or resolution',
         );
       }
       break;

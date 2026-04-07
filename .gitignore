@@ -9,14 +9,15 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - only track config files per group
 groups/*
-!groups/main/
-!groups/global/
-groups/main/*
-groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+!groups/*/
+groups/*/**
+!groups/*/CLAUDE.md
+!groups/*/agents.json
+!groups/*/manifest.json
+!groups/*/*.md
+!groups/*/*.json
 
 # Secrets
 *.keys.json
@@ -24,6 +25,11 @@ groups/global/*
 
 # Temp files
 .tmp-*
+
+# Runtime
+nanoclaw.pid
+start-nanoclaw.sh
+backups/
 
 # OS
 .DS_Store

@@ -14,6 +14,15 @@ import {
 
 let db: Database.Database;
 
+export interface Reaction {
+  message_id: string;
+  message_chat_jid: string;
+  reactor_jid: string;
+  reactor_name?: string;
+  emoji: string;
+  timestamp: string;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -80,8 +89,39 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      requires_trigger INTEGER DEFAULT 1,
+      is_main INTEGER DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS request_queue (
+      id TEXT PRIMARY KEY,
+      requester_folder TEXT NOT NULL,
+      requester_jid TEXT NOT NULL,
+      target_folder TEXT,
+      target_jid TEXT,
+      summary TEXT NOT NULL,
+      detail TEXT,
+      status TEXT DEFAULT 'pending',
+      resolution_reason TEXT,
+      resolved_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_request_queue_status ON request_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_request_queue_requester ON request_queue(requester_folder);
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      message_id TEXT NOT NULL,
+      message_chat_jid TEXT NOT NULL,
+      reactor_jid TEXT NOT NULL,
+      reactor_name TEXT,
+      emoji TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      PRIMARY KEY (message_id, message_chat_jid, reactor_jid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, message_chat_jid);
+    CREATE INDEX IF NOT EXISTS idx_reactions_reactor ON reactions(reactor_jid);
+    CREATE INDEX IF NOT EXISTS idx_reactions_emoji ON reactions(emoji);
+    CREATE INDEX IF NOT EXISTS idx_reactions_timestamp ON reactions(timestamp);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -147,6 +187,23 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
+  // Usage tracking table
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS usage_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT,
+      logged_at TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_group ON usage_logs(group_folder);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_time ON usage_logs(logged_at);
+  `);
+
   // Add reply context columns if they don't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
@@ -164,6 +221,8 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
   createSchema(db);
 
   // Migrate from JSON files if they exist
@@ -369,26 +428,161 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
-  limit: number = 200,
+  limit?: number,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
-  // Subquery takes the N most recent, outer query re-sorts chronologically.
+  if (limit && limit > 0) {
+    // Subquery takes the N most recent, outer query re-sorts chronologically.
+    const sql = `
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+               reply_to_message_id, reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE chat_jid = ? AND timestamp > ?
+          AND is_bot_message = 0 AND content NOT LIKE ?
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
+    `;
+    return db
+      .prepare(sql)
+      .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  }
   const sql = `
-    SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             reply_to_message_id, reply_to_message_content, reply_to_sender_name
-      FROM messages
-      WHERE chat_jid = ? AND timestamp > ?
-        AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
-      LIMIT ?
-    ) ORDER BY timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+           reply_to_message_id, reply_to_message_content, reply_to_sender_name
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+export function getMessageFromMe(messageId: string, chatJid: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT is_from_me FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(messageId, chatJid) as { is_from_me: number | null } | undefined;
+  return row?.is_from_me === 1;
+}
+
+export function getLatestMessage(
+  chatJid: string,
+): { id: string; fromMe: boolean } | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as { id: string; is_from_me: number | null } | undefined;
+  if (!row) return undefined;
+  return { id: row.id, fromMe: row.is_from_me === 1 };
+}
+
+export function storeReaction(reaction: Reaction): void {
+  if (!reaction.emoji) {
+    db.prepare(
+      `DELETE FROM reactions WHERE message_id = ? AND message_chat_jid = ? AND reactor_jid = ?`,
+    ).run(reaction.message_id, reaction.message_chat_jid, reaction.reactor_jid);
+    return;
+  }
+  db.prepare(
+    `INSERT OR REPLACE INTO reactions (message_id, message_chat_jid, reactor_jid, reactor_name, emoji, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    reaction.message_id,
+    reaction.message_chat_jid,
+    reaction.reactor_jid,
+    reaction.reactor_name || null,
+    reaction.emoji,
+    reaction.timestamp,
+  );
+}
+
+export function getReactionsForMessage(
+  messageId: string,
+  chatJid: string,
+): Reaction[] {
+  return db
+    .prepare(
+      `SELECT * FROM reactions WHERE message_id = ? AND message_chat_jid = ? ORDER BY timestamp`,
+    )
+    .all(messageId, chatJid) as Reaction[];
+}
+
+export function getMessagesByReaction(
+  reactorJid: string,
+  emoji: string,
+  chatJid?: string,
+): Array<
+  Reaction & { content: string; sender_name: string; message_timestamp: string }
+> {
+  const sql = chatJid
+    ? `
+      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
+      FROM reactions r
+      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
+      WHERE r.reactor_jid = ? AND r.emoji = ? AND r.message_chat_jid = ?
+      ORDER by r.timestamp DESC
+    `
+    : `
+      SELECT r.*, m.content, m.sender_name, m.timestamp as message_timestamp
+      FROM reactions r
+      JOIN messages m ON r.message_id = m.id AND r.message_chat_jid = m.chat_jid
+      WHERE r.reactor_jid = ? AND r.emoji = ?
+      ORDER BY r.timestamp DESC
+    `;
+
+  type Result = Reaction & {
+    content: string;
+    sender_name: string;
+    message_timestamp: string;
+  };
+  return chatJid
+    ? (db.prepare(sql).all(reactorJid, emoji, chatJid) as Result[])
+    : (db.prepare(sql).all(reactorJid, emoji) as Result[]);
+}
+
+export function getReactionsByUser(
+  reactorJid: string,
+  limit: number = 50,
+): Reaction[] {
+  return db
+    .prepare(
+      `SELECT * FROM reactions WHERE reactor_jid = ? ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(reactorJid, limit) as Reaction[];
+}
+
+export function getReactionStats(chatJid?: string): Array<{
+  emoji: string;
+  count: number;
+}> {
+  const sql = chatJid
+    ? `
+      SELECT emoji, COUNT(*) as count
+      FROM reactions
+      WHERE message_chat_jid = ?
+      GROUP BY emoji
+      ORDER BY count DESC
+    `
+    : `
+      SELECT emoji, COUNT(*) as count
+      FROM reactions
+      GROUP BY emoji
+      ORDER BY count DESC
+    `;
+
+  type Result = { emoji: string; count: number };
+  return chatJid
+    ? (db.prepare(sql).all(chatJid) as Result[])
+    : (db.prepare(sql).all() as Result[]);
 }
 
 export function getLastBotMessageTimestamp(
@@ -402,16 +596,6 @@ export function getLastBotMessageTimestamp(
     )
     .get(chatJid, `${botPrefix}:%`) as { ts: string | null } | undefined;
   return row?.ts ?? undefined;
-}
-
-export function getMessageContentById(
-  id: string,
-  chatJid: string,
-): string | undefined {
-  const row = db
-    .prepare(`SELECT content FROM messages WHERE id = ? AND chat_jid = ?`)
-    .get(id, chatJid) as { content: string } | undefined;
-  return row?.content;
 }
 
 export function createTask(
@@ -555,6 +739,146 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export function getTaskRunLogs(taskId: string, limit = 20): TaskRunLog[] {
+  return db
+    .prepare(
+      'SELECT task_id, run_at, duration_ms, status, result, error FROM task_run_logs WHERE task_id = ? ORDER BY run_at DESC LIMIT ?',
+    )
+    .all(taskId, limit) as TaskRunLog[];
+}
+
+export function getRecentTaskRunLogs(limit = 50): TaskRunLog[] {
+  return db
+    .prepare(
+      'SELECT task_id, run_at, duration_ms, status, result, error FROM task_run_logs ORDER BY run_at DESC LIMIT ?',
+    )
+    .all(limit) as TaskRunLog[];
+}
+
+// --- Usage tracking ---
+
+export interface UsageLog {
+  group_folder: string;
+  chat_jid: string | null;
+  logged_at: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number;
+}
+
+export function logUsage(entry: UsageLog): void {
+  db.prepare(
+    `INSERT INTO usage_logs (group_folder, chat_jid, logged_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entry.group_folder,
+    entry.chat_jid,
+    entry.logged_at,
+    entry.input_tokens,
+    entry.output_tokens,
+    entry.cache_read_tokens,
+    entry.cache_creation_tokens,
+    entry.cost_usd,
+  );
+}
+
+export function getUsageByGroup(): {
+  group_folder: string;
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_creation: number;
+  total_cost_usd: number;
+  run_count: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT group_folder,
+              SUM(input_tokens) as total_input,
+              SUM(output_tokens) as total_output,
+              SUM(cache_read_tokens) as total_cache_read,
+              SUM(cache_creation_tokens) as total_cache_creation,
+              ROUND(SUM(cost_usd), 6) as total_cost_usd,
+              COUNT(*) as run_count
+       FROM usage_logs
+       GROUP BY group_folder
+       ORDER BY total_cost_usd DESC`,
+    )
+    .all() as {
+    group_folder: string;
+    total_input: number;
+    total_output: number;
+    total_cache_read: number;
+    total_cache_creation: number;
+    total_cost_usd: number;
+    run_count: number;
+  }[];
+}
+
+export function getUsageRecent(limit = 50): UsageLog[] {
+  return db
+    .prepare(
+      `SELECT group_folder, chat_jid, logged_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd
+       FROM usage_logs ORDER BY logged_at DESC LIMIT ?`,
+    )
+    .all(limit) as UsageLog[];
+}
+
+export function getUsageTotals(): {
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_creation: number;
+  total_cost_usd: number;
+  run_count: number;
+} {
+  return db
+    .prepare(
+      `SELECT COALESCE(SUM(input_tokens),0) as total_input,
+              COALESCE(SUM(output_tokens),0) as total_output,
+              COALESCE(SUM(cache_read_tokens),0) as total_cache_read,
+              COALESCE(SUM(cache_creation_tokens),0) as total_cache_creation,
+              ROUND(COALESCE(SUM(cost_usd),0), 6) as total_cost_usd,
+              COUNT(*) as run_count
+       FROM usage_logs`,
+    )
+    .get() as {
+    total_input: number;
+    total_output: number;
+    total_cache_read: number;
+    total_cache_creation: number;
+    total_cost_usd: number;
+    run_count: number;
+  };
+}
+
+// --- Message activity ---
+
+export function getMessageActivity(sinceTimestamp: string): {
+  chat_jid: string;
+  total_count: number;
+  recent_count: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT m.chat_jid,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN m.timestamp > ? THEN 1 ELSE 0 END) as recent_count
+       FROM messages m
+       INNER JOIN registered_groups rg ON m.chat_jid = rg.jid
+       GROUP BY m.chat_jid
+       ORDER BY recent_count DESC
+       LIMIT 10`,
+    )
+    .all(sinceTimestamp) as {
+    chat_jid: string;
+    total_count: number;
+    recent_count: number;
+  }[];
 }
 
 // --- Router state accessors ---
@@ -759,4 +1083,106 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Request queue queries ---
+
+export interface QueuedRequest {
+  id: string;
+  requester_folder: string;
+  requester_jid: string;
+  target_folder: string | null;
+  target_jid: string | null;
+  summary: string;
+  detail: string | null;
+  status: string;
+  resolution_reason: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export function createRequest(
+  req: Omit<QueuedRequest, 'status' | 'resolution_reason' | 'resolved_at'>,
+): void {
+  db.prepare(
+    `INSERT INTO request_queue (id, requester_folder, requester_jid, target_folder, target_jid, summary, detail, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    req.id,
+    req.requester_folder,
+    req.requester_jid,
+    req.target_folder || null,
+    req.target_jid || null,
+    req.summary,
+    req.detail || null,
+    req.created_at,
+  );
+}
+
+export function getRequestById(id: string): QueuedRequest | undefined {
+  return db.prepare('SELECT * FROM request_queue WHERE id = ?').get(id) as
+    | QueuedRequest
+    | undefined;
+}
+
+export function getPendingRequests(): QueuedRequest[] {
+  return db
+    .prepare(
+      "SELECT * FROM request_queue WHERE status = 'pending' ORDER BY created_at ASC",
+    )
+    .all() as QueuedRequest[];
+}
+
+export function getRequestsForGroup(groupFolder: string): QueuedRequest[] {
+  return db
+    .prepare(
+      'SELECT * FROM request_queue WHERE requester_folder = ? ORDER BY created_at DESC',
+    )
+    .all(groupFolder) as QueuedRequest[];
+}
+
+export function getAllRequests(): QueuedRequest[] {
+  return db
+    .prepare('SELECT * FROM request_queue ORDER BY created_at DESC')
+    .all() as QueuedRequest[];
+}
+
+export function resolveRequest(
+  id: string,
+  status: 'approved' | 'denied',
+  reason?: string,
+): void {
+  db.prepare(
+    `UPDATE request_queue SET status = ?, resolution_reason = ?, resolved_at = ? WHERE id = ?`,
+  ).run(status, reason || null, new Date().toISOString(), id);
+}
+
+// --- Dashboard message history queries ---
+
+export function getMessageContent(
+  messageId: string,
+  chatJid: string,
+): { content: string; sender_name: string; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT content, sender_name, timestamp FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(messageId, chatJid) as
+    | { content: string; sender_name: string; timestamp: string }
+    | undefined;
+}
+
+export function getBotReplyAfter(
+  chatJid: string,
+  afterTimestamp: string,
+): { id: string; content: string; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT id, content, timestamp FROM messages
+       WHERE chat_jid = ? AND is_bot_message = 1 AND timestamp >= ?
+       ORDER BY timestamp ASC LIMIT 1`,
+    )
+    .get(chatJid, afterTimestamp) as
+    | { id: string; content: string; timestamp: string }
+    | undefined;
 }

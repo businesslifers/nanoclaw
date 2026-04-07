@@ -5,9 +5,14 @@ import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
+// Secrets (API keys, tokens) are NOT read here — they live in OneCLI
+// and are injected by the gateway at request time, never exposed to containers.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'COMPACTION_TOKEN_THRESHOLD',
+  'COMPACTION_TURN_THRESHOLD',
+  'OLLAMA_ADMIN_TOOLS',
   'ONECLI_URL',
   'TZ',
 ]);
@@ -17,6 +22,16 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const COMPACTION_TOKEN_THRESHOLD =
+  process.env.COMPACTION_TOKEN_THRESHOLD ||
+  envConfig.COMPACTION_TOKEN_THRESHOLD ||
+  '150000';
+export const COMPACTION_TURN_THRESHOLD =
+  process.env.COMPACTION_TURN_THRESHOLD ||
+  envConfig.COMPACTION_TURN_THRESHOLD ||
+  '6';
+export const OLLAMA_ADMIN_TOOLS =
+  (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -51,7 +66,8 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
-export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
+export const ONECLI_URL =
+  process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
@@ -68,7 +84,7 @@ function escapeRegex(str: string): string {
 }
 
 export function buildTriggerPattern(trigger: string): RegExp {
-  return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
+  return new RegExp(`(?<!\\w)${escapeRegex(trigger.trim())}\\b`, 'i');
 }
 
 export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;

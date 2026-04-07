@@ -8,12 +8,15 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
+  COMPACTION_TOKEN_THRESHOLD: '150000',
+  COMPACTION_TURN_THRESHOLD: '6',
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  OLLAMA_ADMIN_TOOLS: undefined,
   ONECLI_URL: 'http://localhost:10254',
   TIMEZONE: 'America/Los_Angeles',
 }));
@@ -53,7 +56,8 @@ vi.mock('./mount-security.js', () => ({
 
 // Mock container-runtime
 vi.mock('./container-runtime.js', () => ({
-  CONTAINER_RUNTIME_BIN: 'docker',
+  CONTAINER_RUNTIME_BIN: 'container',
+  CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
@@ -62,7 +66,7 @@ vi.mock('./container-runtime.js', () => ({
 // Mock OneCLI SDK
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: class {
-    applyContainerConfig = vi.fn().mockResolvedValue(true);
+    applyContainerConfig = vi.fn(async () => true);
     createAgent = vi.fn().mockResolvedValue({ id: 'test' });
     ensureAgent = vi
       .fn()
@@ -225,5 +229,52 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner spawn args', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes --ulimit core=0 and compaction env vars to spawn', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
+    spawnMock.mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    // Let spawn be called
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const args = spawnMock.mock.calls[0][1] as string[];
+
+    // Verify --ulimit core=0
+    const ulimitIdx = args.indexOf('--ulimit');
+    expect(ulimitIdx).toBeGreaterThan(-1);
+    expect(args[ulimitIdx + 1]).toBe('core=0');
+
+    // Verify compaction env vars
+    expect(args).toContain('-e');
+    expect(args).toContain('COMPACTION_TOKEN_THRESHOLD=150000');
+    expect(args).toContain('COMPACTION_TURN_THRESHOLD=6');
+
+    // Clean up: emit output and close
+    emitOutputMarker(fakeProc, { status: 'success', result: null });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });

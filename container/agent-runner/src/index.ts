@@ -23,6 +23,14 @@ import {
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import {
+  handleContainerSlashCommand,
+  loadAgentDefinitions,
+  loadImageBlocks,
+  type ContentBlock,
+  type ImageContentBlock,
+  type TextContentBlock,
+} from './extensions.js';
 
 interface ContainerInput {
   prompt: string;
@@ -33,24 +41,21 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
-  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string; originalRelativePath: string }>;
 }
-
-interface ImageContentBlock {
-  type: 'image';
-  source: { type: 'base64'; media_type: string; data: string };
-}
-interface TextContentBlock {
-  type: 'text';
-  text: string;
-}
-type ContentBlock = ImageContentBlock | TextContentBlock;
 
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+  };
 }
 
 interface SessionEntry {
@@ -103,6 +108,7 @@ class MessageStream {
     });
     this.waiting?.();
   }
+
 
   end(): void {
     this.done = true;
@@ -403,25 +409,26 @@ async function runQuery(
   newSessionId?: string;
   lastAssistantUuid?: string;
   closedDuringQuery: boolean;
+  rateLimited: boolean;
+  usage: { inputTokens: number; costUsd: number };
 }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
   // Load image attachments and send as multimodal content blocks
-  if (containerInput.imageAttachments?.length) {
-    const blocks: ContentBlock[] = [];
-    for (const img of containerInput.imageAttachments) {
-      const imgPath = path.join('/workspace/group', img.relativePath);
-      try {
-        const data = fs.readFileSync(imgPath).toString('base64');
-        blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data } });
-      } catch (err) {
-        log(`Failed to load image: ${imgPath}`);
-      }
-    }
-    if (blocks.length > 0) {
-      stream.pushMultimodal(blocks);
-    }
+  const imageBlocks = loadImageBlocks(containerInput.imageAttachments, log);
+  if (imageBlocks.length > 0) {
+    stream.pushMultimodal(imageBlocks);
+  }
+  // Inform agent of original high-resolution file paths
+  const originalPaths = (containerInput.imageAttachments || [])
+    .filter((img) => img.originalRelativePath)
+    .map((img) => path.join('/workspace/group', img.originalRelativePath));
+  if (originalPaths.length > 0) {
+    stream.push(
+      `Original high-resolution image${originalPaths.length > 1 ? 's' : ''} available at:\n` +
+        originalPaths.map((p) => `- ${p}`).join('\n'),
+    );
   }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
@@ -450,12 +457,25 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Accumulate usage across all result messages in this query
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let totalCacheCreation = 0;
+  let totalCostUsd = 0;
+  let rateLimited = false;
+
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
+
+  // Load optional per-group agent definitions (model overrides, tool restrictions)
+  const agents = loadAgentDefinitions(log);
+
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -476,6 +496,8 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      betas: ['context-1m-2025-08-07'],
+      includePartialMessages: true,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -487,6 +509,7 @@ async function runQuery(
             append: globalClaudeMd,
           }
         : undefined,
+      model: 'sonnet[1m]',
       allowedTools: [
         'Bash',
         'Read',
@@ -507,6 +530,8 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__parallel-search__*',
+        'mcp__parallel-task__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -522,15 +547,37 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        'parallel-search': {
+          type: 'http',
+          url: 'https://search-mcp.parallel.ai/mcp',
+        },
+        'parallel-task': {
+          type: 'http',
+          url: 'https://task-mcp.parallel.ai/mcp',
+        },
       },
       hooks: {
         PreCompact: [
           { hooks: [createPreCompactHook(containerInput.assistantName)] },
         ],
       },
+      ...(agents ? { agents } : {}),
     },
   })) {
     messageCount++;
+
+    // --- Stream events: surface tool names and text generation activity ---
+    if (message.type === 'stream_event') {
+      const evt = (message as { event: { type: string; content_block?: { type: string; name?: string }; delta?: { type: string; text?: string } } }).event;
+      if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use' && evt.content_block.name) {
+        log(`Using tool: ${evt.content_block.name}`);
+      } else if (evt.type === 'content_block_start' && evt.content_block?.type === 'thinking') {
+        log(`Thinking...`);
+      }
+      continue;
+    }
+
+
     const msgType =
       message.type === 'system'
         ? `system/${(message as { subtype?: string }).subtype}`
@@ -567,10 +614,45 @@ async function runQuery(
       log(
         `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
       );
+
+      // Capture usage from result messages
+      const resultMsg = message as {
+        total_cost_usd?: number;
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        };
+      };
+      if (resultMsg.usage) {
+        totalInputTokens += resultMsg.usage.input_tokens || 0;
+        totalOutputTokens += resultMsg.usage.output_tokens || 0;
+        totalCacheRead += resultMsg.usage.cache_read_input_tokens || 0;
+        totalCacheCreation += resultMsg.usage.cache_creation_input_tokens || 0;
+      }
+      if (resultMsg.total_cost_usd) {
+        totalCostUsd += resultMsg.total_cost_usd;
+      }
+
+      // Detect rate limit errors — suppress from output so main loop can retry
+      if (textResult && /rate limit/i.test(textResult) && totalInputTokens === 0) {
+        rateLimited = true;
+        log('Rate limit detected, suppressing result for retry');
+        continue;
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId,
+        usage: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          cacheReadInputTokens: totalCacheRead,
+          cacheCreationInputTokens: totalCacheCreation,
+          costUsd: totalCostUsd,
+        },
       });
     }
   }
@@ -579,7 +661,13 @@ async function runQuery(
   log(
     `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
   );
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return {
+    newSessionId,
+    lastAssistantUuid,
+    closedDuringQuery,
+    rateLimited,
+    usage: { inputTokens: totalInputTokens, costUsd: totalCostUsd },
+  };
 }
 
 interface ScriptResult {
@@ -663,7 +751,7 @@ async function main(): Promise<void> {
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = {
     ...process.env,
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000',
   };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -690,10 +778,23 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // --- Slash command handling ---
+  const slashResult = await handleContainerSlashCommand({
+    prompt,
+    sessionId,
+    sdkEnv,
+    preCompactHook: createPreCompactHook(containerInput.assistantName),
+    writeOutput,
+    log,
+  });
+  if (slashResult.handled) return;
+  // --- End slash command handling ---
+
   // Script phase: run script before waking agent
   if (containerInput.script && containerInput.isScheduledTask) {
     log('Running task script...');
     const scriptResult = await runScript(containerInput.script);
+
 
     if (!scriptResult || !scriptResult.wakeAgent) {
       const reason = scriptResult
@@ -714,26 +815,65 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  const RATE_LIMIT_MAX_RETRIES = 5;
+  const RATE_LIMIT_BASE_MS = 5000;
+
+  // Auto-compaction: track cumulative token usage across IPC turns
+  const COMPACTION_TOKEN_THRESHOLD = parseInt(process.env.COMPACTION_TOKEN_THRESHOLD || '80000', 10);
+  const COMPACTION_TURN_THRESHOLD = parseInt(process.env.COMPACTION_TURN_THRESHOLD || '6', 10);
+  let cumulativeInputTokens = 0;
+  let ipcTurnCount = 0;
+
+
   try {
     while (true) {
-      log(
-        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
-      );
+      let queryResult: Awaited<ReturnType<typeof runQuery>>;
+      let rateLimitRetries = 0;
 
-      const queryResult = await runQuery(
-        prompt,
-        sessionId,
-        mcpServerPath,
-        containerInput,
-        sdkEnv,
-        resumeAt,
-      );
+      while (true) {
+        log(
+          `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
+        );
+
+        queryResult = await runQuery(
+          prompt,
+          sessionId,
+          mcpServerPath,
+          containerInput,
+          sdkEnv,
+          resumeAt,
+        );
+
+        if (!queryResult.rateLimited || rateLimitRetries >= RATE_LIMIT_MAX_RETRIES) {
+          if (queryResult.rateLimited) {
+            log(`Rate limit retries exhausted (${RATE_LIMIT_MAX_RETRIES}), surfacing error`);
+            writeOutput({ status: 'success', result: 'API Error: Rate limit reached', newSessionId: sessionId });
+          }
+          break;
+        }
+
+        rateLimitRetries++;
+        const delayMs = RATE_LIMIT_BASE_MS * Math.pow(2, rateLimitRetries - 1);
+        log(`Rate limited, retry ${rateLimitRetries}/${RATE_LIMIT_MAX_RETRIES} in ${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
+
+        if (shouldClose()) {
+          log('Close sentinel during rate limit wait, exiting');
+          return;
+        }
+      }
+
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
       }
+
+      // Track usage for auto-compaction
+      cumulativeInputTokens += queryResult.usage.inputTokens;
+      ipcTurnCount++;
+
 
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
@@ -745,6 +885,26 @@ async function main(): Promise<void> {
 
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+
+      // Auto-compact if cumulative input tokens or turn count exceed thresholds
+      if (cumulativeInputTokens > COMPACTION_TOKEN_THRESHOLD || ipcTurnCount >= COMPACTION_TURN_THRESHOLD) {
+        log(`Proactive compaction: ${cumulativeInputTokens} input tokens across ${ipcTurnCount} IPC turns`);
+        writeOutput({ status: 'success', result: 'Organizing my thoughts...', newSessionId: sessionId });
+        const compactResult = await handleContainerSlashCommand({
+          prompt: '/compact',
+          sessionId,
+          sdkEnv,
+          preCompactHook: createPreCompactHook(containerInput.assistantName),
+          writeOutput,
+          log,
+        });
+        if (compactResult.newSessionId) {
+          sessionId = compactResult.newSessionId;
+        }
+        cumulativeInputTokens = 0;
+        ipcTurnCount = 0;
+      }
+
 
       log('Query ended, waiting for next IPC message...');
 

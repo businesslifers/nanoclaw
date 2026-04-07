@@ -1,0 +1,11 @@
+{
+  "allowedRoots": [
+    {
+      "path": "/home/adam/nanoclaw-secrets",
+      "allowReadWrite": false,
+      "description": "NanoClaw shared secrets (read-only)"
+    }
+  ],
+  "blockedPatterns": [],
+  "nonMainReadOnly": true
+}

@@ -71,6 +71,7 @@ export interface SchedulerDependencies {
     proc: ChildProcess,
     containerName: string,
     groupFolder: string,
+    resetTimeout: () => void,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
@@ -182,8 +183,14 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
       },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (proc, containerName, resetTimeout) =>
+        deps.onProcess(
+          task.chat_jid,
+          proc,
+          containerName,
+          task.group_folder,
+          resetTimeout,
+        ),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

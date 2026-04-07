@@ -7,6 +7,7 @@ vi.mock('sharp', () => {
     resize: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue(Buffer.from('resized-image-data')),
+    metadata: vi.fn().mockResolvedValue({ format: 'jpeg' }),
   }));
   return { default: mockSharp };
 });
@@ -50,13 +51,17 @@ describe('image processing', () => {
 
       expect(result).not.toBeNull();
       expect(result!.content).toMatch(
-        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\] Check this out$/,
+        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg original:attachments\/img-\d+-[a-z0-9]+-original\.jpg\] Check this out$/,
       );
       expect(result!.relativePath).toMatch(
         /^attachments\/img-\d+-[a-z0-9]+\.jpg$/,
       );
+      expect(result!.originalRelativePath).toMatch(
+        /^attachments\/img-\d+-[a-z0-9]+-original\.jpg$/,
+      );
       expect(fs.mkdirSync).toHaveBeenCalled();
-      expect(fs.writeFileSync).toHaveBeenCalled();
+      // Should write both original and resized
+      expect(fs.writeFileSync).toHaveBeenCalledTimes(2);
     });
 
     it('returns content without caption when none provided', async () => {
@@ -65,7 +70,7 @@ describe('image processing', () => {
 
       expect(result).not.toBeNull();
       expect(result!.content).toMatch(
-        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\]$/,
+        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg original:attachments\/img-\d+-[a-z0-9]+-original\.jpg\]$/,
       );
     });
 
@@ -83,15 +88,26 @@ describe('image processing', () => {
   describe('parseImageReferences', () => {
     it('extracts image paths from message content', () => {
       const messages = [
-        { content: '[Image: attachments/img-123.jpg] hello' },
+        {
+          content:
+            '[Image: attachments/img-123.jpg original:attachments/img-123-original.png] hello',
+        },
         { content: 'plain text' },
         { content: '[Image: attachments/img-456.jpg]' },
       ];
       const refs = parseImageReferences(messages as any);
 
       expect(refs).toEqual([
-        { relativePath: 'attachments/img-123.jpg', mediaType: 'image/jpeg' },
-        { relativePath: 'attachments/img-456.jpg', mediaType: 'image/jpeg' },
+        {
+          relativePath: 'attachments/img-123.jpg',
+          mediaType: 'image/jpeg',
+          originalRelativePath: 'attachments/img-123-original.png',
+        },
+        {
+          relativePath: 'attachments/img-456.jpg',
+          mediaType: 'image/jpeg',
+          originalRelativePath: 'attachments/img-456.jpg',
+        },
       ]);
     });
 

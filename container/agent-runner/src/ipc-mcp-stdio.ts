@@ -41,7 +41,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. Only the lead agent should call this — sub-agents spawned via TeamCreate must return results to the lead agent instead of calling this tool directly.",
   {
     text: z.string().describe('The message text to send'),
     sender: z
@@ -64,6 +64,40 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z
+      .string()
+      .describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
+    message_id: z
+      .string()
+      .optional()
+      .describe(
+        'The message ID to react to. If omitted, reacts to the latest message in the chat.',
+      ),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [
+        { type: 'text' as const, text: `Reaction ${args.emoji} sent.` },
+      ],
+    };
   },
 );
 
@@ -188,7 +222,6 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
     const data = {
       type: 'schedule_task',
       taskId,
@@ -502,6 +535,206 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     };
   },
 );
+
+server.tool(
+  'queue_request',
+  `Queue a request for the lead's review. Requests are batched and presented during the daily digest.
+Use this when you need something that requires approval or action from another group.
+Do NOT use this for requests you can handle yourself, or for your own group.`,
+  {
+    summary: z
+      .string()
+      .describe(
+        'Short one-line description of what you need (shown in digest)',
+      ),
+    detail: z
+      .string()
+      .optional()
+      .describe('Longer explanation or context for the request'),
+    target_group_jid: z
+      .string()
+      .optional()
+      .describe(
+        'JID of the target group this request is about (if applicable)',
+      ),
+  },
+  async (args) => {
+    // Soft duplicate check
+    const requestsFile = path.join(IPC_DIR, 'current_requests.json');
+    try {
+      if (fs.existsSync(requestsFile)) {
+        const existing = JSON.parse(fs.readFileSync(requestsFile, 'utf-8'));
+        const duplicate = existing.find(
+          (r: { summary: string; status: string; requester_folder: string }) =>
+            r.status === 'pending' &&
+            r.requester_folder === groupFolder &&
+            r.summary === args.summary,
+        );
+        if (duplicate) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `A similar request is already pending (ID: ${duplicate.id}). Use list_requests to check its status.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+    } catch {
+      // Ignore read errors — proceed with queuing
+    }
+
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = {
+      type: 'queue_request',
+      requestId,
+      chatJid,
+      summary: args.summary,
+      detail: args.detail || undefined,
+      targetJid: args.target_group_jid || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Request queued (${requestId}). It will appear in the next digest for review.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'list_requests',
+  "List requests in the queue. Main sees all requests; sub-groups see only their own.",
+  {},
+  async () => {
+    const requestsFile = path.join(IPC_DIR, 'current_requests.json');
+
+    try {
+      if (!fs.existsSync(requestsFile)) {
+        return {
+          content: [
+            { type: 'text' as const, text: 'No requests in queue.' },
+          ],
+        };
+      }
+
+      const allRequests = JSON.parse(fs.readFileSync(requestsFile, 'utf-8'));
+
+      const requests = isMain
+        ? allRequests
+        : allRequests.filter(
+            (r: { requester_folder: string }) =>
+              r.requester_folder === groupFolder,
+          );
+
+      if (requests.length === 0) {
+        return {
+          content: [
+            { type: 'text' as const, text: 'No requests in queue.' },
+          ],
+        };
+      }
+
+      const formatted = requests
+        .map(
+          (r: {
+            id: string;
+            requester_folder: string;
+            summary: string;
+            status: string;
+            resolution_reason: string | null;
+            created_at: string;
+          }) => {
+            let line = `- [${r.id}] ${r.summary} (from: ${r.requester_folder}, status: ${r.status})`;
+            if (r.resolution_reason) line += ` — ${r.resolution_reason}`;
+            return line;
+          },
+        )
+        .join('\n');
+
+      return {
+        content: [
+          { type: 'text' as const, text: `Request queue:\n${formatted}` },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading requests: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+      };
+    }
+  },
+);
+
+server.tool(
+  'resolve_request',
+  `Resolve a pending request from the queue. Main group only.
+Use after the lead approves or denies requests from the digest.`,
+  {
+    request_id: z.string().describe('The request ID to resolve'),
+    resolution: z
+      .enum(['approved', 'denied'])
+      .describe('Whether to approve or deny the request'),
+    reason: z
+      .string()
+      .optional()
+      .describe("The lead's reason or notes for the decision"),
+    message: z
+      .string()
+      .optional()
+      .describe(
+        'Message to send to the target group (for approved requests). Should be a clear instruction or information to forward.',
+      ),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can resolve requests.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'resolve_request',
+      requestId: args.request_id,
+      resolution: args.resolution,
+      reason: args.reason || undefined,
+      message: args.message || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Request ${args.request_id} ${args.resolution}. ${args.resolution === 'denied' ? 'Denial notification will be sent to the requester.' : args.message ? 'Message will be forwarded.' : 'Resolved.'}`,
+        },
+      ],
+    };
+  },
+);
+
 
 // Start the stdio transport
 const transport = new StdioServerTransport();

@@ -481,4 +481,73 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  describe('isActive', () => {
+    it('returns false for unknown groups', () => {
+      expect(queue.isActive('unknown@g.us')).toBe(false);
+    });
+
+    it('returns true when group has active container', async () => {
+      let resolve: () => void;
+      const block = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      queue.setProcessMessagesFn(async () => {
+        await block;
+        return true;
+      });
+      queue.enqueueMessageCheck('group@g.us');
+
+      // Let the microtask start running
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queue.isActive('group@g.us')).toBe(true);
+
+      resolve!();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  });
+
+  describe('resetTimeout callback', () => {
+    it('calls resetTimeout when sendMessage delivers a message', async () => {
+      let resolveProcess: () => void;
+
+      const processMessages = vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          resolveProcess = resolve;
+        });
+        return true;
+      });
+
+      queue.setProcessMessagesFn(processMessages);
+      queue.enqueueMessageCheck('group1@g.us');
+      await vi.advanceTimersByTimeAsync(10);
+
+      const resetTimeout = vi.fn();
+      queue.registerProcess(
+        'group1@g.us',
+        {} as any,
+        'container-1',
+        'test-group',
+        resetTimeout,
+      );
+
+      // Send a message — should trigger resetTimeout
+      const sent = queue.sendMessage('group1@g.us', 'hello');
+      expect(sent).toBe(true);
+      expect(resetTimeout).toHaveBeenCalledTimes(1);
+
+      resolveProcess!();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    it('does not call resetTimeout when sendMessage is rejected', async () => {
+      const resetTimeout = vi.fn();
+
+      // No active container — sendMessage should return false
+      const sent = queue.sendMessage('group1@g.us', 'hello');
+      expect(sent).toBe(false);
+      expect(resetTimeout).not.toHaveBeenCalled();
+    });
+  });
 });

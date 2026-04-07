@@ -7,12 +7,15 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  COMPACTION_TOKEN_THRESHOLD,
+  COMPACTION_TURN_THRESHOLD,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OLLAMA_ADMIN_TOOLS,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
@@ -43,7 +46,11 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
-  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
+  imageAttachments?: Array<{
+    relativePath: string;
+    mediaType: string;
+    originalRelativePath: string;
+  }>;
 }
 
 export interface ContainerOutput {
@@ -51,6 +58,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+  };
 }
 
 interface VolumeMount {
@@ -79,17 +93,6 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
-
     // Main gets writable access to the store (SQLite DB) so it can
     // query and write to the database directly.
     const storeDir = path.join(projectRoot, 'store');
@@ -99,22 +102,24 @@ function buildVolumeMounts(
       readonly: false,
     });
 
+    // Shadow .env so the agent cannot read host secrets.
+    // Docker supports file-level bind mounts; Apple Container does not, so its
+    // entrypoint falls back to `mount --bind /dev/null` at runtime.
+    const envFilePath = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFilePath)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
-
-    // Global memory directory — writable for main so it can update shared context
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: false,
-      });
-    }
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -248,10 +253,27 @@ async function buildContainerArgs(
   containerName: string,
   agentIdentifier?: string,
 ): Promise<string[]> {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = [
+    'run',
+    '-i',
+    '--rm',
+    '--ulimit',
+    'core=0',
+    '--name',
+    containerName,
+  ];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Forward auto-compaction thresholds to container
+  args.push('-e', `COMPACTION_TOKEN_THRESHOLD=${COMPACTION_TOKEN_THRESHOLD}`);
+  args.push('-e', `COMPACTION_TURN_THRESHOLD=${COMPACTION_TURN_THRESHOLD}`);
+
+  // Forward Ollama admin tools flag if enabled
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
+  }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
@@ -297,8 +319,13 @@ async function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    containerName: string,
+    resetTimeout: () => void,
+  ) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onStderr?: (line: string) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -308,6 +335,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined
@@ -349,7 +377,7 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    // onProcess called after resetTimeout is defined (below)
 
     let stdout = '';
     let stderr = '';
@@ -421,6 +449,9 @@ export async function runContainerAgent(
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
+        if (line && onStderr && line.includes('[agent-runner]')) {
+          onStderr(line);
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
@@ -464,11 +495,13 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // Reset the timeout whenever there's activity (streaming output or IPC input)
     const resetTimeout = () => {
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
+
+    onProcess(container, containerName, resetTimeout);
 
     container.on('close', (code) => {
       clearTimeout(timeout);
