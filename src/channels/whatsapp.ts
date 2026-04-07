@@ -30,6 +30,7 @@ import {
 } from '../db.js';
 import { processImage } from '../image.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -319,7 +320,8 @@ export class WhatsAppChannel implements Channel {
             }
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-            if (!content) continue;
+            // but allow voice messages through for transcription
+            if (!content && !isVoiceMessage(msg)) continue;
 
             let sender = msg.key.participant || msg.key.remoteJid || '';
             // Normalize LID senders to phone JID so downstream code
@@ -408,12 +410,35 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
+            // Transcribe voice messages before delivering
+            let finalContent = content;
+            if (isVoiceMessage(msg)) {
+              try {
+                const transcript = await transcribeAudioMessage(
+                  msg,
+                  this.sock,
+                );
+                if (transcript) {
+                  finalContent = `[Voice: ${transcript}]`;
+                  logger.info(
+                    { chatJid, length: transcript.length },
+                    'Transcribed voice message',
+                  );
+                } else {
+                  finalContent = '[Voice Message - transcription unavailable]';
+                }
+              } catch (err) {
+                logger.error({ err }, 'Voice transcription error');
+                finalContent = '[Voice Message - transcription failed]';
+              }
+            }
+
             this.opts.onMessage(chatJid, {
               id: msg.key.id || '',
               chat_jid: chatJid,
               sender,
               sender_name: senderName,
-              content,
+              content: finalContent,
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
