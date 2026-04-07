@@ -788,9 +788,17 @@ setInterval(function(){
   );
 }
 
-function buildScheduleTimeline(
-  tasks: ReturnType<typeof apiTasks>,
-): { groups: string[]; hours: number[]; slots: Map<string, Set<number>> } {
+interface TimelineSlotTask {
+  id: string;
+  prompt: string;
+  scheduleValue: string;
+}
+
+function buildScheduleTimeline(tasks: ReturnType<typeof apiTasks>): {
+  groups: string[];
+  hours: number[];
+  slots: Map<string, Map<number, TimelineSlotTask[]>>;
+} {
   const now = new Date();
   const activeCron = tasks.filter(
     (t) => t.status === 'active' && t.scheduleType === 'cron',
@@ -802,17 +810,29 @@ function buildScheduleTimeline(
     hours.push((now.getHours() + i) % 24);
   }
 
-  // Map each group to the set of hour slots (0-23) where tasks fire in the next 24h
-  const slots = new Map<string, Set<number>>();
+  const slots = new Map<string, Map<number, TimelineSlotTask[]>>();
   for (const group of groups) {
-    slots.set(group, new Set<number>());
+    slots.set(group, new Map());
   }
 
   for (const t of activeCron) {
     if (!t.nextRun) continue;
-    // Compute up to 24 firings by walking the cron expression
+    const taskInfo: TimelineSlotTask = {
+      id: t.id,
+      prompt: t.prompt,
+      scheduleValue: t.scheduleValue,
+    };
+    const addSlot = (hour: number) => {
+      const groupSlots = slots.get(t.groupFolder);
+      if (!groupSlots) return;
+      const existing = groupSlots.get(hour) || [];
+      existing.push(taskInfo);
+      groupSlots.set(hour, existing);
+    };
+
     try {
-      const { CronExpressionParser } = require('cron-parser') as typeof import('cron-parser');
+      const { CronExpressionParser } =
+        require('cron-parser') as typeof import('cron-parser');
       const interval = CronExpressionParser.parse(t.scheduleValue, {
         tz: TIMEZONE,
         currentDate: now,
@@ -829,10 +849,9 @@ function buildScheduleTimeline(
           }),
           10,
         );
-        slots.get(t.groupFolder)?.add(localHour);
+        addSlot(localHour);
       }
     } catch {
-      // If cron parse fails, use nextRun as fallback
       const nextDate = new Date(t.nextRun);
       if (nextDate.getTime() - now.getTime() <= 24 * 60 * 60 * 1000) {
         const localHour = parseInt(
@@ -843,7 +862,7 @@ function buildScheduleTimeline(
           }),
           10,
         );
-        slots.get(t.groupFolder)?.add(localHour);
+        addSlot(localHour);
       }
     }
   }
@@ -946,11 +965,11 @@ function pageTasks(query: URLSearchParams): string {
   const timeline = buildScheduleTimeline(allTasks);
   const nowHour = new Date().getHours();
 
-  // Count tasks per hour across all groups for density warnings
+  // Count total tasks per hour across all groups for density warnings
   const hourDensity = new Map<number, number>();
-  for (const hourSet of timeline.slots.values()) {
-    for (const h of hourSet) {
-      hourDensity.set(h, (hourDensity.get(h) || 0) + 1);
+  for (const groupSlotMap of timeline.slots.values()) {
+    for (const [h, taskList] of groupSlotMap) {
+      hourDensity.set(h, (hourDensity.get(h) || 0) + taskList.length);
     }
   }
 
@@ -959,43 +978,67 @@ function pageTasks(query: URLSearchParams): string {
       ? ''
       : `<div class="section">
   <h2>24h Schedule Timeline (${TIMEZONE})</h2>
+  <style>
+    .tl-cell { position: relative; text-align: center; }
+    .tl-block { width: 16px; height: 16px; border-radius: 3px; margin: auto; opacity: 0.8; cursor: pointer; }
+    .tl-tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+      background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 0.5rem 0.75rem; font-size: 0.75rem; color: var(--fg); white-space: nowrap;
+      z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.4); pointer-events: none; min-width: 200px; text-align: left; }
+    .tl-cell:hover .tl-tip { display: block; }
+    .tl-tip-task { margin-bottom: 0.25rem; }
+    .tl-tip-cron { color: var(--fg2); font-family: monospace; }
+  </style>
   <div class="table-wrap"><table style="table-layout:fixed">
     <tr>
       <th style="width:160px">Team</th>
-      ${timeline.hours.map((h) => {
-        const density = hourDensity.get(h) || 0;
-        const isCurrent = h === nowHour;
-        const style = isCurrent
-          ? 'font-weight:600;color:var(--accent)'
-          : density >= 3
-            ? 'color:var(--yellow)'
-            : '';
-        return `<th style="width:32px;text-align:center;font-size:0.7rem;${style}">${String(h).padStart(2, '0')}</th>`;
-      }).join('')}
-    </tr>
-    ${timeline.groups.map((group) => {
-      const groupSlots = timeline.slots.get(group) || new Set();
-      return `<tr>
-        <td class="mono" style="font-size:0.75rem">${escapeHtml(group.replace('whatsapp_', ''))}</td>
-        ${timeline.hours.map((h) => {
-          if (!groupSlots.has(h)) return '<td></td>';
+      ${timeline.hours
+        .map((h) => {
           const density = hourDensity.get(h) || 0;
-          const color =
-            density >= 3
-              ? 'var(--yellow)'
-              : 'var(--green)';
-          return `<td style="text-align:center"><div style="width:16px;height:16px;border-radius:3px;background:${color};margin:auto;opacity:0.8" title="${group} @ ${h}:00 (${density} teams this hour)"></div></td>`;
-        }).join('')}
+          const isCurrent = h === nowHour;
+          const style = isCurrent
+            ? 'font-weight:600;color:var(--accent)'
+            : density >= 3
+              ? 'color:var(--yellow)'
+              : '';
+          return `<th style="width:32px;text-align:center;font-size:0.7rem;${style}">${String(h).padStart(2, '0')}</th>`;
+        })
+        .join('')}
+    </tr>
+    ${timeline.groups
+      .map((group) => {
+        const groupSlotMap = timeline.slots.get(group) || new Map();
+        return `<tr>
+        <td class="mono" style="font-size:0.75rem">${escapeHtml(group.replace('whatsapp_', ''))}</td>
+        ${timeline.hours
+          .map((h) => {
+            const slotTasks = groupSlotMap.get(h);
+            if (!slotTasks || slotTasks.length === 0) return '<td></td>';
+            const density = hourDensity.get(h) || 0;
+            const color = density >= 3 ? 'var(--yellow)' : 'var(--green)';
+            const count = slotTasks.length > 1 ? `<span style="position:absolute;top:-2px;right:2px;font-size:0.6rem;color:var(--fg)">${slotTasks.length}</span>` : '';
+            const tipItems = slotTasks
+              .map((t: TimelineSlotTask) => {
+                const label = t.prompt.length > 50 ? t.prompt.slice(0, 50) + '...' : t.prompt;
+                return `<div class="tl-tip-task">${escapeHtml(label)}<br><span class="tl-tip-cron">${escapeHtml(t.scheduleValue)}</span></div>`;
+              })
+              .join('');
+            return `<td class="tl-cell"><div class="tl-block" style="background:${color}"></div>${count}<div class="tl-tip">${tipItems}</div></td>`;
+          })
+          .join('')}
       </tr>`;
-    }).join('')}
+      })
+      .join('')}
     <tr>
       <td style="font-size:0.7rem;color:var(--fg2)">Density</td>
-      ${timeline.hours.map((h) => {
-        const d = hourDensity.get(h) || 0;
-        if (d === 0) return '<td></td>';
-        const color = d >= 3 ? 'var(--yellow)' : 'var(--fg2)';
-        return `<td style="text-align:center;font-size:0.7rem;color:${color}">${d}</td>`;
-      }).join('')}
+      ${timeline.hours
+        .map((h) => {
+          const d = hourDensity.get(h) || 0;
+          if (d === 0) return '<td></td>';
+          const color = d >= 3 ? 'var(--yellow)' : 'var(--fg2)';
+          return `<td style="text-align:center;font-size:0.7rem;color:${color}">${d}</td>`;
+        })
+        .join('')}
     </tr>
   </table></div>
   <p style="font-size:0.75rem;color:var(--fg2);margin-top:0.5rem">
