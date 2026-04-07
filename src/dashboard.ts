@@ -279,6 +279,7 @@ function layout(title: string, activePath: string, body: string): string {
   const nav = [
     ['/', 'Overview'],
     ['/groups', 'Groups'],
+    ['/wiki', 'Wiki'],
     ['/tasks', 'Tasks'],
     ['/containers', 'Containers'],
     ['/messages', 'Messages'],
@@ -987,6 +988,167 @@ function pageUsage(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Wiki
+// ---------------------------------------------------------------------------
+
+interface WikiGroupStats {
+  folder: string;
+  name: string;
+  pageCount: number;
+  sourceCount: number;
+  lastIngest: string | null;
+  lastLint: string | null;
+  totalLogEntries: number;
+}
+
+function scanWikiDir(dirPath: string): number {
+  try {
+    return fs
+      .readdirSync(dirPath)
+      .filter((f) => f.endsWith('.md') && f !== 'index.md' && f !== 'log.md')
+      .length;
+  } catch {
+    return 0;
+  }
+}
+
+function scanSourcesDir(dirPath: string): number {
+  try {
+    return fs.readdirSync(dirPath).filter((f) => !f.startsWith('.')).length;
+  } catch {
+    return 0;
+  }
+}
+
+function parseLastLogEntry(
+  logPath: string,
+  type: string,
+): string | null {
+  try {
+    const content = fs.readFileSync(logPath, 'utf-8');
+    const lines = content.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].match(new RegExp(`^## \\[.*\\] ${type}`))) {
+        const match = lines[i].match(/^## \[(\d{4}-\d{2}-\d{2})\]/);
+        return match ? match[1] : null;
+      }
+    }
+  } catch {
+    // no log file
+  }
+  return null;
+}
+
+function countLogEntries(logPath: string): number {
+  try {
+    const content = fs.readFileSync(logPath, 'utf-8');
+    return (content.match(/^## \[/gm) || []).length;
+  } catch {
+    return 0;
+  }
+}
+
+function apiWiki(deps: DashboardDeps): WikiGroupStats[] {
+  const groups = deps.registeredGroups();
+  const results: WikiGroupStats[] = [];
+
+  // Global wiki
+  const globalWikiDir = path.join(GROUPS_DIR, 'global', 'wiki');
+  const globalSourcesDir = path.join(GROUPS_DIR, 'global', 'sources');
+  const globalLogPath = path.join(globalWikiDir, 'log.md');
+  if (fs.existsSync(globalWikiDir)) {
+    results.push({
+      folder: 'global',
+      name: 'Shared Business Wiki',
+      pageCount: scanWikiDir(globalWikiDir),
+      sourceCount: scanSourcesDir(globalSourcesDir),
+      lastIngest: parseLastLogEntry(globalLogPath, 'ingest'),
+      lastLint: parseLastLogEntry(globalLogPath, 'lint'),
+      totalLogEntries: countLogEntries(globalLogPath),
+    });
+  }
+
+  // Per-group wikis
+  for (const [, g] of Object.entries(groups)) {
+    const wikiDir = path.join(GROUPS_DIR, g.folder, 'wiki');
+    if (!fs.existsSync(wikiDir)) continue;
+    const sourcesDir = path.join(GROUPS_DIR, g.folder, 'sources');
+    const logPath = path.join(wikiDir, 'log.md');
+    results.push({
+      folder: g.folder,
+      name: g.name,
+      pageCount: scanWikiDir(wikiDir),
+      sourceCount: scanSourcesDir(sourcesDir),
+      lastIngest: parseLastLogEntry(logPath, 'ingest'),
+      lastLint: parseLastLogEntry(logPath, 'lint'),
+      totalLogEntries: countLogEntries(logPath),
+    });
+  }
+
+  return results;
+}
+
+function pageWiki(deps: DashboardDeps): string {
+  const wikis = apiWiki(deps);
+
+  const totalPages = wikis.reduce((sum, w) => sum + w.pageCount, 0);
+  const totalSources = wikis.reduce((sum, w) => sum + w.sourceCount, 0);
+  const activeWikis = wikis.filter(
+    (w) => w.pageCount > 0 || w.sourceCount > 0,
+  ).length;
+
+  const rows =
+    wikis.length === 0
+      ? emptyRow(6, 'No wikis configured')
+      : wikis
+          .map((w) => {
+            const globalBadge =
+              w.folder === 'global'
+                ? ' <span class="badge badge-blue">shared</span>'
+                : '';
+            const activeBadge =
+              w.pageCount > 0
+                ? ' <span class="dot dot-green"></span>'
+                : '';
+            return `<tr>
+        <td>${escapeHtml(w.name)}${globalBadge}${activeBadge}</td>
+        <td class="mono">${escapeHtml(w.folder)}</td>
+        <td>${w.pageCount}</td>
+        <td>${w.sourceCount}</td>
+        <td>${w.lastIngest || '<span class="empty">never</span>'}</td>
+        <td>${w.lastLint || '<span class="empty">never</span>'}</td>
+      </tr>`;
+          })
+          .join('');
+
+  return layout(
+    'Wiki',
+    '/wiki',
+    `
+<h1>Wiki Knowledge Bases</h1>
+<div class="cards">
+  <div class="card"><div class="card-label">Total Pages</div><div class="card-value">${totalPages}</div></div>
+  <div class="card"><div class="card-label">Total Sources</div><div class="card-value">${totalSources}</div></div>
+  <div class="card"><div class="card-label">Active Wikis</div><div class="card-value">${activeWikis} / ${wikis.length}</div></div>
+</div>
+
+<div class="section">
+  <h2>Per-Group Wikis</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Group</th><th>Folder</th><th>Pages</th><th>Sources</th><th>Last Ingest</th><th>Last Lint</th></tr>
+    ${rows}
+  </table></div>
+</div>
+
+<div class="section">
+  <h2>How It Works</h2>
+  <p>Each group maintains a persistent wiki that compounds knowledge over time. Send sources (URLs, PDFs, images, voice notes) to any group and ask the agent to <strong>ingest</strong> them. <strong>Query</strong> the wiki by asking questions. Weekly <strong>lint</strong> tasks check for contradictions and gaps.</p>
+</div>
+`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -1070,6 +1232,8 @@ export function startDashboard(deps: DashboardDeps): http.Server | null {
               recent: getUsageRecent(50),
             }),
           );
+        } else if (pathname === '/api/wiki') {
+          res.end(JSON.stringify(apiWiki(deps)));
         } else {
           res.writeHead(404).end(JSON.stringify({ error: 'Not found' }));
         }
@@ -1095,6 +1259,8 @@ export function startDashboard(deps: DashboardDeps): http.Server | null {
         res.end(pageMessages(deps));
       } else if (pathname === '/usage') {
         res.end(pageUsage());
+      } else if (pathname === '/wiki') {
+        res.end(pageWiki(deps));
       } else {
         res
           .writeHead(404)
