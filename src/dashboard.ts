@@ -277,7 +277,12 @@ setInterval(function(){
 // Layout
 // ---------------------------------------------------------------------------
 
-function layout(title: string, activePath: string, body: string, wide = false): string {
+function layout(
+  title: string,
+  activePath: string,
+  body: string,
+  wide = false,
+): string {
   const nav = [
     ['/', 'Overview'],
     ['/wiki', 'Wiki'],
@@ -679,12 +684,11 @@ function pageOverview(deps: DashboardDeps): string {
 }
 
 function pageGroups(deps: DashboardDeps): string {
-  const groups = apiGroups(deps);
-  groups.sort((a, b) => {
-    if (a.isMain && !b.isMain) return -1;
-    if (!a.isMain && b.isMain) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Filter to team groups only (exclude personal/main chats like Adam, Raels)
+  const groups = apiGroups(deps).filter(
+    (g) => g.folder.includes('-team') || g.subAgents.length > 0,
+  );
+  groups.sort((a, b) => a.name.localeCompare(b.name));
 
   const teamCards =
     groups.length === 0
