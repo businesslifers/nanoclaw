@@ -47,6 +47,27 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Wiki Knowledge Base
+
+You maintain a persistent wiki — a structured, interlinked knowledge base that compounds over time. This is NOT RAG; knowledge is compiled once and kept current, not re-derived per query.
+
+### Three layers
+- **`sources/`** — Raw source material (articles, PDFs, images). Immutable once added.
+- **`wiki/`** — Your wiki pages (summaries, entities, concepts, cross-references). You own and maintain these.
+- **Container skill** (`container/skills/wiki/SKILL.md`) — Detailed workflow for ingest, query, and lint operations.
+
+### Key files
+- `wiki/index.md` — Content catalog. Read this first when answering questions. Update on every ingest.
+- `wiki/log.md` — Append-only chronological record of all wiki activity.
+
+### How to use
+- **Ingest:** When given a source, save it, read it thoroughly, discuss takeaways, then create/update all wiki pages. One source at a time — never batch.
+- **Query:** Read the index, find relevant pages, synthesize an answer with citations.
+- **Lint:** Periodically check for contradictions, orphans, stale content, missing cross-references.
+
+### Global wiki
+The shared business wiki at `wiki/` in the global group covers cross-cutting topics: strategy, decisions, people, industry intelligence. All groups can read and contribute to it. Group-specific knowledge stays in the group's own `wiki/`.
+
 ## Message Formatting
 
 Format messages based on the channel you're responding to. Check your group folder name:
