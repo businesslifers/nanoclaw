@@ -342,13 +342,38 @@ function apiStatus(deps: DashboardDeps) {
   };
 }
 
-function loadGroupAgents(folder: string): string[] {
+interface AgentDef {
+  name: string;
+  description?: string;
+}
+
+function loadGroupAgents(folder: string): AgentDef[] {
   try {
     const agentsPath = path.join(GROUPS_DIR, folder, 'agents.json');
-    const agents = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
-    return Object.keys(agents);
+    const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+    return Object.entries(raw).map(([name, def]) => ({
+      name,
+      description: (def as { description?: string }).description || undefined,
+    }));
   } catch {
     return [];
+  }
+}
+
+function loadGroupRole(folder: string): string {
+  try {
+    const mdPath = path.join(GROUPS_DIR, folder, 'CLAUDE.md');
+    const content = fs.readFileSync(mdPath, 'utf-8');
+    const roleMatch = content.match(
+      /##\s+(?:Role|Identity)\s*\n+([^\n#]+)/,
+    );
+    if (roleMatch) return roleMatch[1].trim();
+    const lines = content
+      .split('\n')
+      .filter((l) => l.trim() && !l.startsWith('#'));
+    return lines[0]?.trim() || '';
+  } catch {
+    return '';
   }
 }
 
@@ -359,11 +384,11 @@ function apiGroups(deps: DashboardDeps) {
   const sessions = getAllSessions();
 
   return Object.entries(groups).map(([jid, g]) => {
-    // Agent identifier: main group uses default, others use folder-based name
     const agentId = g.isMain
-      ? 'Derek (default)'
+      ? `${ASSISTANT_NAME} (default)`
       : g.folder.toLowerCase().replace(/_/g, '-');
     const subAgents = loadGroupAgents(g.folder);
+    const role = loadGroupRole(g.folder);
 
     return {
       jid,
@@ -378,6 +403,7 @@ function apiGroups(deps: DashboardDeps) {
       containerActive: deps.queue.isActive(jid),
       agentId,
       subAgents,
+      role,
     };
   });
 }
@@ -643,28 +669,54 @@ function pageGroups(deps: DashboardDeps): string {
     return a.name.localeCompare(b.name);
   });
 
-  const rows =
+  const teamCards =
     groups.length === 0
-      ? emptyRow(7, 'No teams registered')
+      ? '<p class="empty">No teams registered</p>'
       : groups
           .map((g) => {
             const mainBadge = g.isMain
               ? ' <span class="badge badge-blue">main</span>'
               : '';
-            const activeBadge = g.containerActive
-              ? ' <span class="dot dot-green pulse"></span>'
+            const statusHtml = g.containerActive
+              ? '<span class="dot dot-green pulse"></span> Running'
+              : '<span class="dot dot-red"></span> Idle';
+            const roleHtml = g.role
+              ? `<p style="color:var(--fg2);font-size:0.8125rem;margin:0.5rem 0">${escapeHtml(g.role)}</p>`
               : '';
-            const agentCell = g.subAgents.length > 0
-              ? `<span class="mono">${escapeHtml(g.agentId)}</span><br><span style="font-size:0.75rem;color:var(--fg2)">+${g.subAgents.length} sub: ${g.subAgents.map(escapeHtml).join(', ')}</span>`
-              : `<span class="mono">${escapeHtml(g.agentId)}</span>`;
-            return `<tr>
-        <td>${escapeHtml(g.name)}${mainBadge}${activeBadge}</td>
-        <td>${agentCell}</td>
-        <td>${escapeHtml(g.trigger || '-')}</td>
-        <td>${escapeHtml(g.channel || '-')}</td>
-        <td>${g.hasSession ? 'yes' : '-'}</td>
-        <td>${g.lastActivity ? ago(Date.now() - new Date(g.lastActivity).getTime()) : '-'}</td>
-      </tr>`;
+
+            let agentsHtml = '';
+            if (g.subAgents.length > 0) {
+              const agentItems = g.subAgents
+                .map((a) => {
+                  const desc = a.description
+                    ? `<span style="color:var(--fg2)"> — ${escapeHtml(a.description)}</span>`
+                    : '';
+                  return `<div style="padding:0.25rem 0"><span class="badge badge-blue">${escapeHtml(a.name)}</span>${desc}</div>`;
+                })
+                .join('');
+              agentsHtml = `<div style="margin-top:0.75rem"><div style="font-size:0.75rem;color:var(--fg2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem">Agents</div>${agentItems}</div>`;
+            }
+
+            const meta = [
+              `Agent: <span class="mono">${escapeHtml(g.agentId)}</span>`,
+              g.trigger ? `Trigger: ${escapeHtml(g.trigger)}` : '',
+              g.channel ? `Channel: ${escapeHtml(g.channel)}` : '',
+              g.lastActivity
+                ? `Last active: ${ago(Date.now() - new Date(g.lastActivity).getTime())}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' <span style="color:var(--border)">|</span> ');
+
+            return `<div class="card" style="padding:1.25rem">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:600;font-size:1rem">${escapeHtml(g.name)}${mainBadge}</div>
+          <div style="font-size:0.8125rem">${statusHtml}</div>
+        </div>
+        ${roleHtml}
+        <div style="font-size:0.75rem;color:var(--fg2);margin-top:0.5rem">${meta}</div>
+        ${agentsHtml}
+      </div>`;
           })
           .join('');
 
@@ -673,10 +725,9 @@ function pageGroups(deps: DashboardDeps): string {
     '/teams',
     `
 <h1>Teams</h1>
-<div class="table-wrap"><table>
-  <tr><th>Name</th><th>Agent</th><th>Trigger</th><th>Channel</th><th>Session</th><th>Last Activity</th></tr>
-  ${rows}
-</table></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:1rem">
+  ${teamCards}
+</div>
 `,
   );
 }
