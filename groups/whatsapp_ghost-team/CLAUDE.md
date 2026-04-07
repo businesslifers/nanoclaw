@@ -30,3 +30,16 @@ Voice messages sent in WhatsApp arrive as transcribed text. Treat transcribed vo
 
 - Builder → Inspector → Deploy is mandatory, no exceptions.
 - Adam and Raels both have authority to direct the Ghost Team.
+
+## Standing Review Items
+
+The following checks apply to every Friday wrap-up and Sunday team health review session:
+
+**agents.json review (every Friday + Sunday)**
+- Open `/workspace/group/agents.json`
+- For each agent: does the prompt still accurately reflect how that agent actually behaves in practice?
+- Have any new rules, tools, or constraints been added to CLAUDE.md that should be reflected in agent prompts?
+- Has any agent's scope changed (new responsibilities added, old ones removed)?
+- If any prompt is outdated, update agents.json directly as part of the session
+- If a new agent role has emerged that isn't yet in agents.json, add it
+- Report any changes made to agents.json in the session summary to Adam
