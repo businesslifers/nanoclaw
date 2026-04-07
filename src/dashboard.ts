@@ -699,30 +699,32 @@ function pageGroups(deps: DashboardDeps): string {
                   const desc = a.description
                     ? `<span style="color:var(--fg2)"> — ${escapeHtml(a.description)}</span>`
                     : '';
-                  return `<div style="padding:0.25rem 0"><span class="badge badge-blue">${escapeHtml(a.name)}</span>${desc}</div>`;
+                  // When team container is active, agents show green (available to be called)
+                  const agentDot = g.containerActive
+                    ? '<span class="dot dot-green pulse" data-agent-dot></span>'
+                    : '<span class="dot dot-red" data-agent-dot></span>';
+                  return `<div style="padding:0.25rem 0">${agentDot}<span class="badge badge-blue">${escapeHtml(a.name)}</span>${desc}</div>`;
                 })
                 .join('');
-              agentsHtml = `<div style="margin-top:0.75rem"><div style="font-size:0.75rem;color:var(--fg2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem">Agents</div>${agentItems}</div>`;
+              agentsHtml = `<div style="margin-top:0.75rem" data-agents><div style="font-size:0.75rem;color:var(--fg2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem">Agents</div>${agentItems}</div>`;
             }
 
             const meta = [
               `Agent: <span class="mono">${escapeHtml(g.agentId)}</span>`,
               g.trigger ? `Trigger: ${escapeHtml(g.trigger)}` : '',
               g.channel ? `Channel: ${escapeHtml(g.channel)}` : '',
-              g.lastActivity
-                ? `Last active: ${ago(Date.now() - new Date(g.lastActivity).getTime())}`
-                : '',
             ]
               .filter(Boolean)
               .join(' <span style="color:var(--border)">|</span> ');
 
-            return `<div class="card" style="padding:1.25rem">
+            return `<div class="card" style="padding:1.25rem" data-team-card="${escapeHtml(g.jid)}">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="font-weight:600;font-size:1rem">${escapeHtml(g.name)}${mainBadge}</div>
-          <div style="font-size:0.8125rem">${statusHtml}</div>
+          <div style="font-size:0.8125rem" data-team-status>${statusHtml}</div>
         </div>
         ${roleHtml}
         <div style="font-size:0.75rem;color:var(--fg2);margin-top:0.5rem">${meta}</div>
+        <div style="font-size:0.75rem;color:var(--fg2);margin-top:0.25rem" data-team-activity>${g.lastActivity ? `Last active: ${ago(Date.now() - new Date(g.lastActivity).getTime())}` : ''}</div>
         ${agentsHtml}
       </div>`;
           })
@@ -733,9 +735,41 @@ function pageGroups(deps: DashboardDeps): string {
     '/teams',
     `
 <h1>Teams</h1>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:1rem">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:1rem" id="teams-grid">
   ${teamCards}
 </div>
+<script>
+${POLL_JS_HELPERS}
+setInterval(function(){
+  fetch('/api/teams').then(function(r){return r.json()}).then(function(teams){
+    teams.forEach(function(t){
+      var card = document.querySelector('[data-team-card="'+t.jid+'"]');
+      if(!card) return;
+      // Update team status dot
+      var statusEl = card.querySelector('[data-team-status]');
+      if(statusEl){
+        statusEl.innerHTML = t.containerActive
+          ? '<span class="dot dot-green pulse"></span> Running'
+          : '<span class="dot dot-red"></span> Idle';
+      }
+      // Update last activity
+      var actEl = card.querySelector('[data-team-activity]');
+      if(actEl){
+        actEl.textContent = t.lastActivity ? 'Last active: '+fmtAgo(Date.now()-new Date(t.lastActivity).getTime()) : '';
+      }
+      // Update agent dots
+      var dots = card.querySelectorAll('[data-agent-dot]');
+      dots.forEach(function(dot){
+        if(t.containerActive){
+          dot.className = 'dot dot-green pulse';
+        } else {
+          dot.className = 'dot dot-red';
+        }
+      });
+    });
+  }).catch(function(){});
+}, 3000);
+</script>
 `,
   );
 }
