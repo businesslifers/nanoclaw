@@ -352,7 +352,15 @@ function loadGroupAgents(folder: string): AgentDef[] {
     const agentsPath = path.join(GROUPS_DIR, folder, 'agents.json');
     const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
 
-    // Format 1: { "agents": [ { name, description, ... }, ... ] }
+    // Format 1: bare array [ { name, description, ... }, ... ]
+    if (Array.isArray(raw)) {
+      return raw.map((a: { name: string; description?: string }) => ({
+        name: a.name,
+        description: a.description,
+      }));
+    }
+
+    // Format 2: { "agents": [ { name, description, ... }, ... ] }
     if (Array.isArray(raw.agents)) {
       return raw.agents.map((a: { name: string; description?: string }) => ({
         name: a.name,
@@ -360,7 +368,7 @@ function loadGroupAgents(folder: string): AgentDef[] {
       }));
     }
 
-    // Format 2: { "AgentName": { description, prompt, ... }, ... }
+    // Format 3 (standard): { "AgentName": { description, prompt, ... }, ... }
     return Object.entries(raw).map(([name, def]) => ({
       name: name.charAt(0).toUpperCase() + name.slice(1),
       description: (def as { description?: string }).description || undefined,
