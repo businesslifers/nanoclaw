@@ -1020,10 +1020,7 @@ function scanSourcesDir(dirPath: string): number {
   }
 }
 
-function parseLastLogEntry(
-  logPath: string,
-  type: string,
-): string | null {
+function parseLastLogEntry(logPath: string, type: string): string | null {
   try {
     const content = fs.readFileSync(logPath, 'utf-8');
     const lines = content.split('\n');
@@ -1107,9 +1104,7 @@ function pageWiki(deps: DashboardDeps): string {
                 ? ' <span class="badge badge-blue">shared</span>'
                 : '';
             const activeBadge =
-              w.pageCount > 0
-                ? ' <span class="dot dot-green"></span>'
-                : '';
+              w.pageCount > 0 ? ' <span class="dot dot-green"></span>' : '';
             return `<tr>
         <td>${escapeHtml(w.name)}${globalBadge}${activeBadge}</td>
         <td class="mono">${escapeHtml(w.folder)}</td>
