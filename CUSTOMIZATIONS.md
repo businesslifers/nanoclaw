@@ -21,6 +21,7 @@ These files don't exist upstream — merges can't overwrite them:
 | `src/request-queue.ts` / `src/request-queue.test.ts` | Inter-group request queue snapshot writer and tests |
 | `container/skills/request-queue/SKILL.md` | Container skill — agent instructions for request queue |
 | `scripts/version-groups.sh` | Auto-commit group config changes |
+| `groups/*/agents.json` | Per-group agent team definitions (Builder, Inspector, Mindy, etc.) — MUST be preserved across updates |
 
 ## Upstream-Shared Files (conflict risk)
 

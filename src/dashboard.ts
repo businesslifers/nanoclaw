@@ -351,8 +351,18 @@ function loadGroupAgents(folder: string): AgentDef[] {
   try {
     const agentsPath = path.join(GROUPS_DIR, folder, 'agents.json');
     const raw = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+
+    // Format 1: { "agents": [ { name, description, ... }, ... ] }
+    if (Array.isArray(raw.agents)) {
+      return raw.agents.map((a: { name: string; description?: string }) => ({
+        name: a.name,
+        description: a.description,
+      }));
+    }
+
+    // Format 2: { "AgentName": { description, prompt, ... }, ... }
     return Object.entries(raw).map(([name, def]) => ({
-      name,
+      name: name.charAt(0).toUpperCase() + name.slice(1),
       description: (def as { description?: string }).description || undefined,
     }));
   } catch {
@@ -364,9 +374,7 @@ function loadGroupRole(folder: string): string {
   try {
     const mdPath = path.join(GROUPS_DIR, folder, 'CLAUDE.md');
     const content = fs.readFileSync(mdPath, 'utf-8');
-    const roleMatch = content.match(
-      /##\s+(?:Role|Identity)\s*\n+([^\n#]+)/,
-    );
+    const roleMatch = content.match(/##\s+(?:Role|Identity)\s*\n+([^\n#]+)/);
     if (roleMatch) return roleMatch[1].trim();
     const lines = content
       .split('\n')
