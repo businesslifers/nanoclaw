@@ -1,0 +1,42 @@
+{
+  "last_reviewed": "2026-04-08",
+  "proposals": [
+    {
+      "id": "expand-daily-metrics",
+      "status": "approved_and_done",
+      "title": "Expand daily data pull with new metrics",
+      "detail": "Completed 2026-04-07. Sheet now has 26 columns including new users, organic sessions, top landing pages, page-level GSC, Ghost new members, geo %, mobile %.",
+      "approved_by": "Adam",
+      "completed_date": "2026-04-07"
+    },
+    {
+      "id": "search-visibility-score",
+      "status": "approved_and_done",
+      "title": "Build Search Visibility Score (Weekly Metrics tab)",
+      "detail": "Completed 2026-04-07. Weekly Metrics tab live with SVS for all 9 sites.",
+      "approved_by": "Raeleen + Adam",
+      "completed_date": "2026-04-07"
+    },
+    {
+      "id": "looker-studio-pages",
+      "status": "pending",
+      "title": "Add Looker Studio pages 2 and 3",
+      "detail": "Page 2: GSC deep dive (top queries, top pages, CTR breakdown). Page 3: Ghost/email performance. Page 3 should wait until Launch Point Golf has members. Page 2 can be built once page-level GSC data is populated.",
+      "approved_by": null
+    },
+    {
+      "id": "tier2-hv-markets",
+      "status": "pending_confirmation",
+      "title": "Expand HV market list to include Tier 2 markets",
+      "detail": "Adam asked about other HV markets on 2026-04-07. Recommendation sent: add New Zealand, Germany, Netherlands, Nordic countries (Sweden, Norway, Denmark, Finland) as Tier 2 HV markets. Awaiting Adam's confirmation to formalise in reporting.",
+      "approved_by": null
+    },
+    {
+      "id": "3am-task-silent-failure",
+      "status": "fixed",
+      "title": "3am daily task failed silently on 2026-04-08",
+      "detail": "The 3am task ran but April 7 data was not written to sheet. Most likely cause: npm packages not installed before script execution. Fixed by adding a pre-install script to the scheduled task. Data manually recovered for April 7.",
+      "fixed_date": "2026-04-08"
+    }
+  ]
+}

@@ -31,6 +31,28 @@ Voice messages sent in WhatsApp arrive as transcribed text. Treat transcribed vo
 - Builder → Inspector → Deploy is mandatory, no exceptions.
 - Adam and Raels both have authority to direct the Ghost Team.
 
+## Design Handoff Rules
+
+When Adam or Raels shares a design image (screenshot, mockup, photo):
+1. Write a full component spec first — layout, hierarchy, field names, spacing intent, colour values
+2. Flag all ambiguous parts explicitly with questions
+3. Get sign-off from Adam or Raels before assigning anything to Builder
+
+Never relay a design image directly to Builder. Spec first, build second.
+
+CodePen links and pasted HTML are preferred over WhatsApp images for design handoff until non-image attachments are supported.
+
+## Improvement Backlog
+
+### Pending Adam Follow-up
+
+- [ ] **WhatsApp non-image attachment support** — Adam to investigate whether NanoClaw can be configured to receive and forward non-image file types (HTML, CSS, etc.) to Derek. Until resolved, use CodePen links or pasted code for design handoff. *(Adam confirmed Apr 7 he would look into this — flag in daily report until closed)*
+- [ ] **Figma MCP reinstall** — Lost during debugging session Apr 8. Required for structured design data extraction (exact hex, typography, spacing from Figma files). Adam to reinstall. *(Confirmed lost Apr 8 — see memory note)*
+
+### In Backlog
+
+- [ ] **Figma workflow setup** — Once MCP is reinstalled: (1) Raeleen picks a community template, (2) import current live theme via html.to.design, (3) adapt palette/type, (4) all future templates start in Figma. Decision made Apr 7 to go Figma-driven.
+
 ## Standing Review Items
 
 The following checks apply to every Friday wrap-up and Sunday team health review session:
