@@ -280,7 +280,7 @@ function layout(title: string, activePath: string, body: string): string {
   const nav = [
     ['/', 'Overview'],
     ['/wiki', 'Wiki'],
-    ['/groups', 'Groups'],
+    ['/teams', 'Teams'],
     ['/messages', 'Messages'],
     ['/usage', 'Usage'],
     ['/tasks', 'Tasks'],
@@ -342,24 +342,44 @@ function apiStatus(deps: DashboardDeps) {
   };
 }
 
+function loadGroupAgents(folder: string): string[] {
+  try {
+    const agentsPath = path.join(GROUPS_DIR, folder, 'agents.json');
+    const agents = JSON.parse(fs.readFileSync(agentsPath, 'utf-8'));
+    return Object.keys(agents);
+  } catch {
+    return [];
+  }
+}
+
 function apiGroups(deps: DashboardDeps) {
   const groups = deps.registeredGroups();
   const chats = getAllChats();
   const chatMap = new Map(chats.map((c) => [c.jid, c]));
   const sessions = getAllSessions();
 
-  return Object.entries(groups).map(([jid, g]) => ({
-    jid,
-    name: g.name,
-    folder: g.folder,
-    trigger: g.trigger,
-    isMain: g.isMain || false,
-    requiresTrigger: g.requiresTrigger ?? true,
-    lastActivity: chatMap.get(jid)?.last_message_time || null,
-    channel: chatMap.get(jid)?.channel || null,
-    hasSession: !!sessions[g.folder],
-    containerActive: deps.queue.isActive(jid),
-  }));
+  return Object.entries(groups).map(([jid, g]) => {
+    // Agent identifier: main group uses default, others use folder-based name
+    const agentId = g.isMain
+      ? 'Derek (default)'
+      : g.folder.toLowerCase().replace(/_/g, '-');
+    const subAgents = loadGroupAgents(g.folder);
+
+    return {
+      jid,
+      name: g.name,
+      folder: g.folder,
+      trigger: g.trigger,
+      isMain: g.isMain || false,
+      requiresTrigger: g.requiresTrigger ?? true,
+      lastActivity: chatMap.get(jid)?.last_message_time || null,
+      channel: chatMap.get(jid)?.channel || null,
+      hasSession: !!sessions[g.folder],
+      containerActive: deps.queue.isActive(jid),
+      agentId,
+      subAgents,
+    };
+  });
 }
 
 function apiTasks() {
@@ -625,7 +645,7 @@ function pageGroups(deps: DashboardDeps): string {
 
   const rows =
     groups.length === 0
-      ? emptyRow(6, 'No groups registered')
+      ? emptyRow(7, 'No teams registered')
       : groups
           .map((g) => {
             const mainBadge = g.isMain
@@ -634,9 +654,12 @@ function pageGroups(deps: DashboardDeps): string {
             const activeBadge = g.containerActive
               ? ' <span class="dot dot-green pulse"></span>'
               : '';
+            const agentCell = g.subAgents.length > 0
+              ? `<span class="mono">${escapeHtml(g.agentId)}</span><br><span style="font-size:0.75rem;color:var(--fg2)">+${g.subAgents.length} sub: ${g.subAgents.map(escapeHtml).join(', ')}</span>`
+              : `<span class="mono">${escapeHtml(g.agentId)}</span>`;
             return `<tr>
         <td>${escapeHtml(g.name)}${mainBadge}${activeBadge}</td>
-        <td class="mono">${escapeHtml(g.folder)}</td>
+        <td>${agentCell}</td>
         <td>${escapeHtml(g.trigger || '-')}</td>
         <td>${escapeHtml(g.channel || '-')}</td>
         <td>${g.hasSession ? 'yes' : '-'}</td>
@@ -646,12 +669,12 @@ function pageGroups(deps: DashboardDeps): string {
           .join('');
 
   return layout(
-    'Groups',
-    '/groups',
+    'Teams',
+    '/teams',
     `
-<h1>Groups</h1>
+<h1>Teams</h1>
 <div class="table-wrap"><table>
-  <tr><th>Name</th><th>Folder</th><th>Trigger</th><th>Channel</th><th>Session</th><th>Last Activity</th></tr>
+  <tr><th>Name</th><th>Agent</th><th>Trigger</th><th>Channel</th><th>Session</th><th>Last Activity</th></tr>
   ${rows}
 </table></div>
 `,
@@ -928,8 +951,14 @@ function pageUsage(): string {
 
   // Chart colours per group
   const CHART_COLORS = [
-    '#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff',
-    '#39d2c0', '#f0883e', '#8b949e',
+    '#58a6ff',
+    '#3fb950',
+    '#d29922',
+    '#f85149',
+    '#bc8cff',
+    '#39d2c0',
+    '#f0883e',
+    '#8b949e',
   ];
   const groupColorMap = new Map(
     groupSet.map((g, i) => [g, CHART_COLORS[i % CHART_COLORS.length]]),
@@ -951,7 +980,9 @@ function pageUsage(): string {
   });
 
   // Build doughnut data for cost by group
-  const costLabels = byGroup.map((g) => g.group_folder.replace('whatsapp_', ''));
+  const costLabels = byGroup.map((g) =>
+    g.group_folder.replace('whatsapp_', ''),
+  );
   const costData = byGroup.map((g) => g.total_cost_usd);
   const costColors = byGroup.map(
     (g) => groupColorMap.get(g.group_folder) || '#8b949e',
@@ -1315,7 +1346,7 @@ export function startDashboard(deps: DashboardDeps): http.Server | null {
       try {
         if (pathname === '/api/status') {
           res.end(JSON.stringify(apiStatus(deps)));
-        } else if (pathname === '/api/groups') {
+        } else if (pathname === '/api/groups' || pathname === '/api/teams') {
           res.end(JSON.stringify(apiGroups(deps)));
         } else if (pathname === '/api/tasks') {
           res.end(JSON.stringify(apiTasks()));
@@ -1367,7 +1398,7 @@ export function startDashboard(deps: DashboardDeps): http.Server | null {
     try {
       if (pathname === '/' || pathname === '/overview') {
         res.end(pageOverview(deps));
-      } else if (pathname === '/groups') {
+      } else if (pathname === '/teams' || pathname === '/groups') {
         res.end(pageGroups(deps));
       } else if (pathname === '/tasks') {
         res.end(pageTasks(url.searchParams));
