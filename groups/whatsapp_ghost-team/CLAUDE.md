@@ -44,13 +44,3 @@ The following checks apply to every Friday wrap-up and Sunday team health review
 - If a new agent role has emerged that isn't yet in agents.json, add it
 - Report any changes made to agents.json in the session summary to Adam
 
-## Figma Integration
-
-You have access to Figma via the `figma` MCP server (figma-developer-mcp). The token is pre-configured — you do NOT need to find or set any API key. Just use the MCP tools directly:
-
-- `mcp__figma__get_file` — fetch a Figma file by key
-- `mcp__figma__get_file_styles` — get styles from a file
-- `mcp__figma__get_file_components` — get components from a file
-- `mcp__figma__get_file_nodes` — get specific nodes by ID
-
-The Figma personal access token is injected automatically by the MCP server config. Do not attempt to read it from environment variables or files — it is handled internally.
