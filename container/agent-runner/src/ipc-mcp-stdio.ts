@@ -1069,6 +1069,328 @@ server.tool(
   },
 );
 
+server.tool(
+  'admin_delete_secret',
+  'Delete a secret from the OneCLI vault. Main group only.',
+  {
+    secret_id: z.string().describe('ID of the secret to delete'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_delete_secret',
+      requestId,
+      secretId: args.secret_id,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? `Secret "${args.secret_id}" deleted.\n${JSON.stringify(response.result, null, 2)}`
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_update_secret',
+  'Update an existing secret in the OneCLI vault. Main group only.',
+  {
+    secret_id: z.string().describe('ID of the secret to update'),
+    value: z.string().optional().describe('New secret value'),
+    host_pattern: z.string().optional().describe('New host pattern'),
+    path_pattern: z.string().optional().describe('New path pattern'),
+    header_name: z.string().optional().describe('New header name for injection'),
+    value_format: z
+      .string()
+      .optional()
+      .describe('New value format template (e.g., "Bearer {value}")'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_update_secret',
+      requestId,
+      secretId: args.secret_id,
+      value: args.value,
+      hostPattern: args.host_pattern,
+      pathPattern: args.path_pattern,
+      headerName: args.header_name,
+      valueFormat: args.value_format,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? `Secret "${args.secret_id}" updated.\n${JSON.stringify(response.result, null, 2)}`
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_get_container_config',
+  'Get the current container configuration (mounts, timeout) for a registered group. Main group only.',
+  {
+    jid: z.string().describe('The JID of the group to query'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_get_container_config',
+      requestId,
+      jid: args.jid,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? JSON.stringify(response.result, null, 2)
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_list_groups',
+  'List all registered groups with their configurations. Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_list_groups',
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? JSON.stringify(response.result, null, 2)
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_delete_group',
+  'Unregister a group and clean up its session, IPC directory, and OneCLI agent. Cannot delete the main group. Main group only.',
+  {
+    jid: z.string().describe('The JID of the group to delete'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_delete_group',
+      requestId,
+      jid: args.jid,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? `Group deleted.\n${JSON.stringify(response.result, null, 2)}`
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_reset_session',
+  "Clear a group's conversation session so the next message starts fresh. Main group only.",
+  {
+    jid: z.string().describe('The JID of the group whose session to reset'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_reset_session',
+      requestId,
+      jid: args.jid,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? JSON.stringify(response.result, null, 2)
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

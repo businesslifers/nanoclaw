@@ -19,7 +19,10 @@ describe('philosophy guardrails', () => {
     const files = execSync(
       `find src -name '*.ts' ! -name '*.test.ts' ! -name '*.spec.ts'`,
       { cwd: root, encoding: 'utf-8' },
-    ).trim().split('\n').filter(Boolean);
+    )
+      .trim()
+      .split('\n')
+      .filter(Boolean);
 
     expect(files.length).toBeLessThanOrEqual(35);
   });
@@ -34,9 +37,7 @@ describe('philosophy guardrails', () => {
   });
 
   it('production dependency count stays small', () => {
-    const pkg = JSON.parse(
-      readFileSync(join(root, 'package.json'), 'utf-8'),
-    );
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
     const deps = Object.keys(pkg.dependencies || {});
 
     expect(deps.length).toBeLessThanOrEqual(15);

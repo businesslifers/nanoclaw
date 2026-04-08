@@ -3,10 +3,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteSession,
+  getAllRegisteredGroups,
   getAllTasks,
   getRegisteredGroup,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
@@ -789,5 +793,186 @@ describe('admin OneCLI commands authorization', () => {
       false,
       deps,
     );
+  });
+
+  it('non-main group cannot delete secrets', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_onecli_delete_secret',
+        requestId: 'req-5',
+        secretId: 'sec-1',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+
+  it('non-main group cannot update secrets', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_onecli_update_secret',
+        requestId: 'req-6',
+        secretId: 'sec-1',
+        value: 'new-value',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+});
+
+// --- admin_get_container_config authorization ---
+
+describe('admin_get_container_config authorization', () => {
+  it('non-main group cannot get container config', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_get_container_config',
+        requestId: 'req-1',
+        jid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+    // Should be silently blocked (no crash, no response written)
+  });
+});
+
+// --- admin_list_groups authorization ---
+
+describe('admin_list_groups authorization', () => {
+  it('non-main group cannot list groups', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_list_groups',
+        requestId: 'req-1',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+});
+
+// --- admin_delete_group ---
+
+describe('admin_delete_group', () => {
+  it('non-main group cannot delete a group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_delete_group',
+        requestId: 'req-1',
+        jid: 'third@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    // Group should still exist
+    expect(getRegisteredGroup('third@g.us')).toBeDefined();
+  });
+
+  it('main group can delete a non-main group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_delete_group',
+        requestId: 'req-1',
+        jid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getRegisteredGroup('other@g.us')).toBeUndefined();
+  });
+
+  it('refuses to delete the main group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_delete_group',
+        requestId: 'req-1',
+        jid: 'main@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Main group should still exist
+    expect(getRegisteredGroup('main@g.us')).toBeDefined();
+  });
+
+  it('returns error for nonexistent group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_delete_group',
+        requestId: 'req-1',
+        jid: 'unknown@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    // Should not crash — all existing groups untouched
+    expect(Object.keys(getAllRegisteredGroups()).length).toBe(3);
+  });
+});
+
+// --- admin_reset_session ---
+
+describe('admin_reset_session', () => {
+  it('non-main group cannot reset sessions', async () => {
+    setSession('other-group', 'session-123');
+
+    await processTaskIpc(
+      {
+        type: 'admin_reset_session',
+        requestId: 'req-1',
+        jid: 'other@g.us',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    // Session should still exist
+    expect(getSession('other-group')).toBe('session-123');
+  });
+
+  it('main group can reset a session', async () => {
+    setSession('other-group', 'session-456');
+
+    await processTaskIpc(
+      {
+        type: 'admin_reset_session',
+        requestId: 'req-1',
+        jid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getSession('other-group')).toBeUndefined();
+  });
+
+  it('returns error for nonexistent group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_reset_session',
+        requestId: 'req-1',
+        jid: 'unknown@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    // Should not crash
   });
 });

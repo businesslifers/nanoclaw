@@ -1484,7 +1484,11 @@ function countFiles(dirPath: string, filter: (f: string) => boolean): number {
   }
 }
 
-function scanWikiLog(logPath: string): { lastIngest: string | null; lastLint: string | null; total: number } {
+function scanWikiLog(logPath: string): {
+  lastIngest: string | null;
+  lastLint: string | null;
+  total: number;
+} {
   try {
     const lines = fs.readFileSync(logPath, 'utf-8').split('\n');
     let lastIngest: string | null = null;
@@ -1508,10 +1512,16 @@ function buildWikiStats(folder: string, name: string): WikiGroupStats {
   const sourcesDir = path.join(GROUPS_DIR, folder, 'sources');
   const log = scanWikiLog(path.join(wikiDir, 'log.md'));
   return {
-    folder, name,
-    pageCount: countFiles(wikiDir, (f) => f.endsWith('.md') && f !== 'index.md' && f !== 'log.md'),
+    folder,
+    name,
+    pageCount: countFiles(
+      wikiDir,
+      (f) => f.endsWith('.md') && f !== 'index.md' && f !== 'log.md',
+    ),
     sourceCount: countFiles(sourcesDir, (f) => !f.startsWith('.')),
-    lastIngest: log.lastIngest, lastLint: log.lastLint, totalLogEntries: log.total,
+    lastIngest: log.lastIngest,
+    lastLint: log.lastLint,
+    totalLogEntries: log.total,
   };
 }
 
