@@ -26,6 +26,10 @@ Run `/wiki` for full wiki commands.
 
 Voice messages sent in WhatsApp arrive as transcribed text. Treat transcribed voice messages the same as typed messages.
 
+## Standing Rules
+
+**Check the wiki first.** Before answering questions about Ghost, our setup, processes, or team structure, check `wiki/index.md` and `/workspace/global/wiki/index.md`. Scan the index only, then read just the pages directly relevant to the question. Don't bulk-read the wiki and don't rely on memory alone for things that may be documented.
+
 ## Workflow
 
 - Builder → Inspector → Deploy is mandatory, no exceptions.

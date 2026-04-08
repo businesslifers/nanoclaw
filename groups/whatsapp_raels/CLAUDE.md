@@ -22,6 +22,10 @@ This is Raels' personal WhatsApp group with Derek. She uses it to:
 - Can query any team's status or output via the request queue
 - Uses standard capabilities from global CLAUDE.md
 
+## Standing Rules
+
+**Check the wiki first.** Before answering questions about the platform, our setup, processes, or team structure, check `wiki/index.md` and `/workspace/global/wiki/index.md`. Scan the index only, then read just the pages directly relevant to the question. Don't bulk-read the wiki and don't rely on memory alone for things that may be documented.
+
 ## Message Formatting
 
 This is a WhatsApp group:
