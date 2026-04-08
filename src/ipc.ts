@@ -1154,10 +1154,7 @@ export async function processTaskIpc(
 
     case 'admin_list_groups': {
       if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized admin_list_groups blocked',
-        );
+        logger.warn({ sourceGroup }, 'Unauthorized admin_list_groups blocked');
         break;
       }
       if (!data.requestId) break;
@@ -1181,10 +1178,7 @@ export async function processTaskIpc(
 
     case 'admin_delete_group': {
       if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized admin_delete_group blocked',
-        );
+        logger.warn({ sourceGroup }, 'Unauthorized admin_delete_group blocked');
         break;
       }
       if (!data.requestId || !data.jid) {
@@ -1282,7 +1276,8 @@ export async function processTaskIpc(
         result: {
           jid: data.jid,
           folder: sessionGroup.folder,
-          message: 'Session cleared — next message will start a fresh conversation',
+          message:
+            'Session cleared — next message will start a fresh conversation',
         },
       });
       logger.info(
