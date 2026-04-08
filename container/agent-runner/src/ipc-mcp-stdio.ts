@@ -735,6 +735,339 @@ Use after the lead approves or denies requests from the digest.`,
   },
 );
 
+// --- Admin IPC tools (main-only, with host responses) ---
+
+const INPUT_DIR = path.join(IPC_DIR, 'input');
+
+function generateRequestId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function waitForIpcResponse(
+  requestId: string,
+  timeoutMs = 10_000,
+): Promise<{ requestId: string; status: string; result?: unknown; error?: string }> {
+  const filePath = path.join(INPUT_DIR, `${requestId}.json`);
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const poll = setInterval(() => {
+      try {
+        if (fs.existsSync(filePath)) {
+          clearInterval(poll);
+          const result = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          fs.unlinkSync(filePath);
+          resolve(result);
+        } else if (Date.now() - start > timeoutMs) {
+          clearInterval(poll);
+          reject(new Error('IPC response timeout — host may not support admin commands'));
+        }
+      } catch (err) {
+        clearInterval(poll);
+        reject(err);
+      }
+    }, 500);
+  });
+}
+
+server.tool(
+  'admin_update_container_config',
+  'Update container configuration (mounts, timeout) for a registered group. Main group only.',
+  {
+    jid: z.string().describe('The JID of the group to update'),
+    container_config: z
+      .object({
+        additionalMounts: z
+          .array(
+            z.object({
+              hostPath: z.string().describe('Absolute path or ~/... on host'),
+              containerPath: z
+                .string()
+                .optional()
+                .describe('Container mount name (defaults to basename)'),
+              readonly: z
+                .boolean()
+                .optional()
+                .describe('Mount as read-only (default: true)'),
+            }),
+          )
+          .optional()
+          .describe('Additional directories to mount into the container'),
+        timeout: z
+          .number()
+          .optional()
+          .describe('Container timeout in milliseconds (default: 300000)'),
+      })
+      .describe('The new container configuration'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_update_container_config',
+      jid: args.jid,
+      containerConfig: args.container_config,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Container config update requested for ${args.jid}. Takes effect on next container spawn.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'admin_list_secrets',
+  'List secrets registered in the OneCLI vault. Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_list_secrets',
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? JSON.stringify(response.result, null, 2)
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_create_secret',
+  'Register a new secret in the OneCLI vault. Main group only.',
+  {
+    name: z.string().describe('Display name for the secret'),
+    secret_type: z
+      .enum(['anthropic', 'generic'])
+      .describe('Secret type: "anthropic" for Anthropic API keys, "generic" for other APIs'),
+    value: z.string().describe('The secret value (API key, token, etc.)'),
+    host_pattern: z
+      .string()
+      .describe('Host pattern to match (e.g., "api.example.com")'),
+    header_name: z
+      .string()
+      .optional()
+      .describe('Header to inject the secret into (required for generic type, e.g., "Authorization")'),
+    path_pattern: z
+      .string()
+      .optional()
+      .describe('Path pattern to match (e.g., "/api/v2/*")'),
+    value_format: z
+      .string()
+      .optional()
+      .describe('Format template for the value (default: "{value}", e.g., "Bearer {value}")'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_create_secret',
+      requestId,
+      name: args.name,
+      secretType: args.secret_type,
+      value: args.value,
+      hostPattern: args.host_pattern,
+      headerName: args.header_name,
+      pathPattern: args.path_pattern,
+      valueFormat: args.value_format,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? `Secret "${args.name}" created.\n${JSON.stringify(response.result, null, 2)}`
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_agent_secrets',
+  'Check which secrets are assigned to an agent. Main group only.',
+  {
+    agent_identifier: z
+      .string()
+      .describe(
+        'Agent identifier (group folder name, lowercase with hyphens, e.g., "slack-raels-dm")',
+      ),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_agent_secrets',
+      requestId,
+      agentIdentifier: args.agent_identifier,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? JSON.stringify(response.result, null, 2)
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'admin_assign_secrets',
+  'Assign secrets to an agent so its containers can use them. Main group only.',
+  {
+    agent_identifier: z
+      .string()
+      .describe(
+        'Agent identifier (group folder name, lowercase with hyphens, e.g., "slack-raels-dm")',
+      ),
+    secret_ids: z
+      .array(z.string())
+      .describe('Array of secret IDs to assign to the agent'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Error: main group only.' },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = generateRequestId();
+    writeIpcFile(TASKS_DIR, {
+      type: 'admin_onecli_assign_secrets',
+      requestId,
+      agentIdentifier: args.agent_identifier,
+      secretIds: args.secret_ids,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const response = await waitForIpcResponse(requestId);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              response.status === 'success'
+                ? `Secrets assigned to ${args.agent_identifier}.\n${JSON.stringify(response.result, null, 2)}`
+                : `Error: ${response.error}`,
+          },
+        ],
+        isError: response.status !== 'success',
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
 
 // Start the stdio transport
 const transport = new StdioServerTransport();

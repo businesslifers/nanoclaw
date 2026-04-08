@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -241,6 +242,30 @@ export function startIpcWatcher(deps: IpcDeps): void {
   logger.info('IPC watcher started (per-group namespaces)');
 }
 
+function writeIpcResponse(
+  sourceGroup: string,
+  requestId: string,
+  response: object,
+): void {
+  const inputDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'input');
+  fs.mkdirSync(inputDir, { recursive: true });
+  const filePath = path.join(inputDir, `${requestId}.json`);
+  const tempPath = `${filePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(response, null, 2));
+  fs.renameSync(tempPath, filePath);
+}
+
+function execOneCLI(
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile('onecli', args, { timeout: 15_000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`${err.message}\n${stderr}`));
+      else resolve({ stdout, stderr });
+    });
+  });
+}
+
 export async function processTaskIpc(
   data: {
     type: string;
@@ -268,6 +293,15 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For admin commands
+    agentIdentifier?: string;
+    secretType?: string;
+    value?: string;
+    hostPattern?: string;
+    headerName?: string;
+    valueFormat?: string;
+    pathPattern?: string;
+    secretIds?: string[];
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -667,6 +701,255 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    // --- Admin commands (main-only) ---
+
+    case 'admin_update_container_config': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_update_container_config blocked',
+        );
+        break;
+      }
+      if (!data.jid || !data.containerConfig) {
+        logger.warn(
+          { sourceGroup },
+          'admin_update_container_config missing jid or containerConfig',
+        );
+        break;
+      }
+      const targetGroup = registeredGroups[data.jid];
+      if (!targetGroup) {
+        logger.warn(
+          { jid: data.jid },
+          'admin_update_container_config: group not found',
+        );
+        break;
+      }
+      const updatedGroup: RegisteredGroup = {
+        ...targetGroup,
+        containerConfig: data.containerConfig,
+      };
+      deps.registerGroup(data.jid, updatedGroup);
+      logger.info(
+        { jid: data.jid, sourceGroup },
+        'Container config updated via admin IPC',
+      );
+      break;
+    }
+
+    case 'admin_onecli_list_secrets': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_list_secrets blocked',
+        );
+        break;
+      }
+      if (!data.requestId) break;
+      try {
+        const { stdout } = await execOneCLI([
+          'secrets',
+          'list',
+          '--quiet',
+          '--fields',
+          'id,name,hostPattern,typeLabel',
+        ]);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+      }
+      logger.info({ sourceGroup }, 'OneCLI secrets listed via admin IPC');
+      break;
+    }
+
+    case 'admin_onecli_create_secret': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_create_secret blocked',
+        );
+        break;
+      }
+      if (
+        !data.requestId ||
+        !data.name ||
+        !data.secretType ||
+        !data.value ||
+        !data.hostPattern
+      ) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error:
+              'Missing required fields: name, secretType, value, hostPattern',
+          });
+        }
+        break;
+      }
+      try {
+        const args = [
+          'secrets',
+          'create',
+          '--name',
+          data.name,
+          '--type',
+          data.secretType,
+          '--value',
+          data.value,
+          '--host-pattern',
+          data.hostPattern,
+        ];
+        if (data.headerName) args.push('--header-name', data.headerName);
+        if (data.pathPattern) args.push('--path-pattern', data.pathPattern);
+        if (data.valueFormat) args.push('--value-format', data.valueFormat);
+
+        const { stdout } = await execOneCLI(args);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+        logger.info(
+          { name: data.name, sourceGroup },
+          'OneCLI secret created via admin IPC',
+        );
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+        logger.error(
+          { name: data.name, sourceGroup, err },
+          'OneCLI secret creation failed',
+        );
+      }
+      break;
+    }
+
+    case 'admin_onecli_agent_secrets': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_agent_secrets blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.agentIdentifier) break;
+      try {
+        const { stdout } = await execOneCLI([
+          'agents',
+          'secrets',
+          '--id',
+          data.agentIdentifier,
+        ]);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+      }
+      logger.info(
+        { agentIdentifier: data.agentIdentifier, sourceGroup },
+        'OneCLI agent secrets queried via admin IPC',
+      );
+      break;
+    }
+
+    case 'admin_onecli_assign_secrets': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_assign_secrets blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.agentIdentifier || !data.secretIds?.length) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required fields: agentIdentifier, secretIds',
+          });
+        }
+        break;
+      }
+      try {
+        const { stdout } = await execOneCLI([
+          'agents',
+          'set-secrets',
+          '--id',
+          data.agentIdentifier,
+          '--secret-ids',
+          data.secretIds.join(','),
+        ]);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+        logger.info(
+          {
+            agentIdentifier: data.agentIdentifier,
+            secretIds: data.secretIds,
+            sourceGroup,
+          },
+          'OneCLI secrets assigned via admin IPC',
+        );
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+        logger.error(
+          { agentIdentifier: data.agentIdentifier, sourceGroup, err },
+          'OneCLI secret assignment failed',
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
