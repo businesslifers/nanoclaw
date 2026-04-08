@@ -285,3 +285,95 @@ describe('Request queue: MCP tools exist in source', () => {
     expect(mcpSource).toContain("'resolve_request'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Group CLAUDE.md files — every group directory must have one
+// ---------------------------------------------------------------------------
+
+describe('Group CLAUDE.md files must exist', () => {
+  it('every group directory has a CLAUDE.md tracked in git', async () => {
+    const fs = await import('fs');
+    const pathMod = await import('path');
+    const { execSync } = await import('child_process');
+
+    const groupsDir = pathMod.resolve(
+      new URL('.', import.meta.url).pathname,
+      '../groups',
+    );
+
+    const entries = fs.readdirSync(groupsDir, { withFileTypes: true });
+    const groupDirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+
+    expect(groupDirs.length).toBeGreaterThan(0);
+
+    const missing: string[] = [];
+    for (const dir of groupDirs) {
+      const claudePath = pathMod.join(groupsDir, dir, 'CLAUDE.md');
+      if (!fs.existsSync(claudePath)) {
+        missing.push(dir);
+      }
+    }
+
+    expect(missing).toEqual(
+      [],
+      // @ts-ignore vitest custom message
+    );
+    if (missing.length > 0) {
+      throw new Error(
+        `Group directories missing CLAUDE.md: ${missing.join(', ')}. ` +
+          'Every group MUST have a CLAUDE.md — it is the agent\'s memory.',
+      );
+    }
+  });
+
+  it('all group CLAUDE.md files are tracked in git', async () => {
+    const { execSync } = await import('child_process');
+    const fs = await import('fs');
+    const pathMod = await import('path');
+
+    const groupsDir = pathMod.resolve(
+      new URL('.', import.meta.url).pathname,
+      '../groups',
+    );
+
+    const entries = fs.readdirSync(groupsDir, { withFileTypes: true });
+    const groupDirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+
+    const trackedFiles = execSync('git ls-files groups/*/CLAUDE.md', {
+      encoding: 'utf-8',
+      cwd: pathMod.resolve(groupsDir, '..'),
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+
+    const trackedGroups = trackedFiles.map(
+      (f) => f.split('/')[1],
+    );
+
+    const untracked: string[] = [];
+    for (const dir of groupDirs) {
+      const claudePath = pathMod.join(groupsDir, dir, 'CLAUDE.md');
+      if (
+        fs.existsSync(claudePath) &&
+        !trackedGroups.includes(dir)
+      ) {
+        untracked.push(dir);
+      }
+    }
+
+    expect(untracked).toEqual(
+      [],
+    );
+    if (untracked.length > 0) {
+      throw new Error(
+        `Group CLAUDE.md files exist but are NOT tracked in git: ${untracked.join(', ')}. ` +
+          'Run: git add groups/<name>/CLAUDE.md',
+      );
+    }
+  });
+});
