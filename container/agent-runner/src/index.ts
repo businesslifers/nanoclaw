@@ -561,11 +561,8 @@ async function runQuery(
         },
         ...(process.env.FIGMA_API_KEY ? {
           figma: {
-            command: 'npx',
-            args: ['figma-developer-mcp', '--stdio'],
-            env: {
-              FIGMA_API_KEY: process.env.FIGMA_API_KEY,
-            },
+            command: 'node',
+            args: ['/app/node_modules/figma-developer-mcp/dist/cli.js', `--figma-api-key=${process.env.FIGMA_API_KEY}`, '--stdio'],
           },
         } : {}),
       },
