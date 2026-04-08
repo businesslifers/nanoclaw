@@ -2,6 +2,14 @@
 
 Chronological record of wiki activity.
 
+## 2026-04-08 | create | Operational Runbooks
+
+Created two runbooks at Adam's request for Raels:
+- `runbook-new-team.md` — 9-step process for standing up a new team; checklist + gap analysis
+- `runbook-new-agents.md` — 5-step process for adding agents to an existing team; common agent patterns
+
+Both also copied to global wiki. Key gaps identified: sender allowlist persistence, DB edit friction for Raels.
+
 ## 2026-04-08 | ingest | NanoClaw Official Documentation
 
 Source: https://docs.nanoclaw.dev (v1.2.52)

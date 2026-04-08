@@ -16,6 +16,13 @@ The platform we run on. Source: https://docs.nanoclaw.dev (ingested 2026-04-08).
 - [Agent Swarms](nanoclaw-agent-swarms.md) — Multi-agent orchestration, coordination patterns, memory sharing
 - [Changelog](nanoclaw-changelog.md) — Recent releases v1.2.35–v1.2.52; breaking changes noted
 
+### Runbooks
+
+Step-by-step operational guides.
+
+- [New Team Setup](runbook-new-team.md) — Full process for standing up a new agent team from scratch; includes checklist and gap analysis
+- [New Agents in Existing Team](runbook-new-agents.md) — Adding/defining new agents in an existing team; includes common agent patterns
+
 ### Notes & Reference
 _No pages yet._
 
