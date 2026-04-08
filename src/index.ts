@@ -1048,7 +1048,7 @@ async function main(): Promise<void> {
   // Start dashboard (if DASHBOARD_PORT is configured)
   dashboardServer = startDashboard({
     queue,
-    statusTracker,
+    statusTracker: statusTracker ?? null,
     channels,
     registeredGroups: () => registeredGroups,
     startedAt: Date.now(),

@@ -564,25 +564,30 @@ export function getReactionStats(chatJid?: string): Array<{
   emoji: string;
   count: number;
 }> {
-  const sql = chatJid
-    ? `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      WHERE message_chat_jid = ?
-      GROUP BY emoji
-      ORDER BY count DESC
-    `
-    : `
-      SELECT emoji, COUNT(*) as count
-      FROM reactions
-      GROUP BY emoji
-      ORDER BY count DESC
-    `;
+  try {
+    const sql = chatJid
+      ? `
+        SELECT emoji, COUNT(*) as count
+        FROM reactions
+        WHERE message_chat_jid = ?
+        GROUP BY emoji
+        ORDER BY count DESC
+      `
+      : `
+        SELECT emoji, COUNT(*) as count
+        FROM reactions
+        GROUP BY emoji
+        ORDER BY count DESC
+      `;
 
-  type Result = { emoji: string; count: number };
-  return chatJid
-    ? (db.prepare(sql).all(chatJid) as Result[])
-    : (db.prepare(sql).all() as Result[]);
+    type Result = { emoji: string; count: number };
+    return chatJid
+      ? (db.prepare(sql).all(chatJid) as Result[])
+      : (db.prepare(sql).all() as Result[]);
+  } catch {
+    // reactions table may not exist if add-reactions skill is not installed
+    return [];
+  }
 }
 
 export function getLastBotMessageTimestamp(

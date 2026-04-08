@@ -1,21 +1,20 @@
 ---
 name: add-dashboard
-description: Add HTTP dashboard with usage tracking. Monitor live container state, message activity, token usage/costs, task history, and reaction stats. Prereq — skill/status-tracker must be applied first.
+description: Add HTTP dashboard with usage tracking. Monitor live container state, message activity, token usage/costs, task history, and reaction stats.
 ---
 
 # Add Dashboard
 
 This skill adds an HTTP dashboard for monitoring NanoClaw and a usage tracking pipeline for token/cost metrics.
 
-## Prerequisites
+## Recommended Skills
 
-Status tracker must be applied first:
+These optional skills enhance the dashboard with additional features:
 
-```bash
-test -f src/status-tracker.ts && echo "Status tracker: OK" || echo "Status tracker: MISSING — run /add-status-tracker first"
-```
+- **`/add-status-tracker`** — Enables live message flow tracking on Overview and Messages pages. Without it, those sections show a "not installed" notice.
+- **`/add-reactions`** — Enables reaction stats on the Overview page. Without it, the reactions section is hidden.
 
-If missing, run `/add-status-tracker` before proceeding.
+Both can be installed before or after the dashboard — order does not matter.
 
 ## Phase 1: Pre-flight
 
@@ -44,8 +43,8 @@ git remote add skills https://github.com/businesslifers/nanoclaw.git
 ### Merge the skill branch
 
 ```bash
-git fetch skills skill/dashboard
-git merge skills/skill/dashboard
+git fetch skills skill/dashboard-v3
+git merge skills/skill/dashboard-v3
 ```
 
 If there are merge conflicts on `package-lock.json`:
@@ -60,19 +59,35 @@ For any other conflict, read the conflicted file and reconcile both sides manual
 
 This adds:
 - `src/dashboard.ts` — HTTP dashboard server (port 3200 by default)
-- Usage tracking schema in `src/db.ts` (usage_logs table, logUsage, getUsageByGroup, getUsageRecent, getUsageTotals)
+- Usage tracking schema in `src/db.ts` (usage_logs table, logUsage, getUsageByGroup, getUsageRecent, getUsageTotals, getUsageDaily)
 - Dashboard query functions in `src/db.ts` (getMessageContent, getBotReplyAfter, getMessageActivity, getReactionStats, getRecentTaskRunLogs, getTaskRunLogs)
 - Usage fields on `ContainerOutput` in `src/container-runner.ts`
 - Usage accumulation in `container/agent-runner/src/index.ts`
 - Dashboard startup/shutdown and logUsage wiring in `src/index.ts`
 - `getSnapshot()` and `isActive()` on GroupQueue in `src/group-queue.ts`
 
+### Wire up status-tracker (if installed)
+
+If `/add-status-tracker` has been applied, update the `startDashboard()` call in `src/index.ts` to pass the real tracker:
+
+```typescript
+dashboardServer = startDashboard({
+  queue,
+  statusTracker: statusTracker,  // was: null
+  channels,
+  registeredGroups: () => registeredGroups,
+  startedAt: Date.now(),
+});
+```
+
+If status-tracker is not installed, leave `statusTracker: null` — the dashboard handles this gracefully.
+
 ### Configure (optional)
 
 Add to `.env` only if you need non-defaults:
 
 ```bash
-DASHBOARD_PORT=3200          # default
+DASHBOARD_PORT=3200          # default; dashboard disabled if not set
 DASHBOARD_AUTH_TOKEN=<random> # optional — locks the endpoint
 ```
 
@@ -126,5 +141,6 @@ curl -s -H "Authorization: Bearer <token>" http://localhost:3200/
 6. Remove usage accumulation from `container/agent-runner/src/index.ts`
 7. Remove `usage_logs` table, `UsageLog` interface, and usage query functions from `src/db.ts`
 8. Remove dashboard-only query functions from `src/db.ts` (getMessageContent, getBotReplyAfter, etc.)
-9. Remove `DASHBOARD_PORT` and `DASHBOARD_AUTH_TOKEN` from `.env`
-10. Rebuild: `npm run build && systemctl --user restart nanoclaw`
+9. Remove `getSnapshot()` and `isActive()` from `src/group-queue.ts`
+10. Remove `DASHBOARD_PORT` and `DASHBOARD_AUTH_TOKEN` from `.env`
+11. Rebuild: `npm run build && systemctl --user restart nanoclaw`

@@ -26,16 +26,41 @@ import {
 import { readEnvFile } from './env.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
-import { StatusState, StatusTracker } from './status-tracker.js';
 import { Channel, RegisteredGroup } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+// Local status constants matching status-tracker's enum (avoids compile-time
+// dependency on the status-tracker skill which may not be installed).
+const STATUS_RECEIVED = 0;
+const STATUS_THINKING = 1;
+const STATUS_WORKING = 2;
+
+/** Minimal interface that StatusTracker satisfies when installed. */
+interface StatusTrackerLike {
+  getSnapshot(): Array<{
+    messageId: string;
+    chatJid: string;
+    state: number;
+    terminal: 'done' | 'failed' | null;
+    trackedAt: number;
+    activity?: string;
+  }>;
+  getHistory(): Array<{
+    messageId: string;
+    chatJid: string;
+    terminal: 'done' | 'failed';
+    receivedAt: number;
+    completedAt: number;
+    durationMs: number;
+  }>;
+}
+
 export interface DashboardDeps {
   queue: GroupQueue;
-  statusTracker: StatusTracker;
+  statusTracker?: StatusTrackerLike | null;
   channels: Channel[];
   registeredGroups: () => Record<string, RegisteredGroup>;
   startedAt: number;
@@ -105,18 +130,18 @@ function elapsedStr(ms: number): string {
 function stateLabel(state: number, terminal: string | null): string {
   if (terminal === 'done') return 'done';
   if (terminal === 'failed') return 'failed';
-  if (state === StatusState.RECEIVED) return 'received';
-  if (state === StatusState.THINKING) return 'thinking';
-  if (state === StatusState.WORKING) return 'working';
+  if (state === STATUS_RECEIVED) return 'received';
+  if (state === STATUS_THINKING) return 'thinking';
+  if (state === STATUS_WORKING) return 'working';
   return 'unknown';
 }
 
 function stateEmoji(state: number, terminal: string | null): string {
   if (terminal === 'done') return '\u2705';
   if (terminal === 'failed') return '\u274C';
-  if (state === StatusState.RECEIVED) return '\uD83D\uDC40';
-  if (state === StatusState.THINKING) return '\uD83D\uDCAD';
-  if (state === StatusState.WORKING) return '\uD83D\uDD04';
+  if (state === STATUS_RECEIVED) return '\uD83D\uDC40';
+  if (state === STATUS_THINKING) return '\uD83D\uDCAD';
+  if (state === STATUS_WORKING) return '\uD83D\uDD04';
   return '\u2753';
 }
 
@@ -472,6 +497,7 @@ function apiTasks() {
 }
 
 function apiActivity(deps: DashboardDeps) {
+  if (!deps.statusTracker) return [];
   const groups = deps.registeredGroups();
   const nameByJid = new Map(
     Object.entries(groups).map(([jid, g]) => [jid, g.name]),
@@ -489,6 +515,7 @@ function apiActivity(deps: DashboardDeps) {
 }
 
 function apiHistory(deps: DashboardDeps) {
+  if (!deps.statusTracker) return [];
   const groups = deps.registeredGroups();
   const nameByJid = new Map(
     Object.entries(groups).map(([jid, g]) => [jid, g.name]),
@@ -599,8 +626,13 @@ function pageOverview(deps: DashboardDeps): string {
           )
           .join('');
 
-  // Reactions
-  const reactions = getReactionStats();
+  // Reactions (table may not exist if add-reactions skill is not installed)
+  let reactions: Array<{ emoji: string; count: number }> = [];
+  try {
+    reactions = getReactionStats();
+  } catch {
+    // reactions table doesn't exist
+  }
   const reactionHtml =
     reactions.length > 0
       ? reactions
@@ -613,9 +645,14 @@ function pageOverview(deps: DashboardDeps): string {
       : '<span class="empty">No reactions recorded</span>';
 
   const activityRows =
-    activity.length === 0
-      ? emptyRow(4, 'No tracked messages')
-      : activity
+    !deps.statusTracker
+      ? emptyRow(
+          4,
+          'Status tracking not installed — run /add-status-tracker for live message flow',
+        )
+      : activity.length === 0
+        ? emptyRow(4, 'No tracked messages')
+        : activity
           .map(
             (m) => `<tr>
         <td>${m.emoji}</td>
@@ -1170,9 +1207,14 @@ function pageMessages(deps: DashboardDeps): string {
   const activity = apiActivity(deps);
 
   const activeRows =
-    activity.length === 0
-      ? emptyRow(5, 'No tracked messages right now')
-      : activity
+    !deps.statusTracker
+      ? emptyRow(
+          5,
+          'Status tracking not installed — run /add-status-tracker for live message flow',
+        )
+      : activity.length === 0
+        ? emptyRow(5, 'No tracked messages right now')
+        : activity
           .map(
             (m) => `<tr>
         <td>${m.emoji}</td>
@@ -1186,9 +1228,14 @@ function pageMessages(deps: DashboardDeps): string {
 
   const history = apiHistory(deps);
   const historyRows =
-    history.length === 0
-      ? emptyRow(6, 'No completed messages yet')
-      : history
+    !deps.statusTracker
+      ? emptyRow(
+          6,
+          'Status tracking not installed — run /add-status-tracker for message history',
+        )
+      : history.length === 0
+        ? emptyRow(6, 'No completed messages yet')
+        : history
           .map(
             (m) => `<tr>
         <td>${m.terminal === 'done' ? '\u2705' : '\u274C'}</td>
