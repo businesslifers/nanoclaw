@@ -677,3 +677,117 @@ describe('register_group success', () => {
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
   });
 });
+
+// --- admin_update_container_config authorization ---
+
+describe('admin_update_container_config authorization', () => {
+  it('main group can update container config', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_update_container_config',
+        jid: 'other@g.us',
+        containerConfig: {
+          additionalMounts: [{ hostPath: '~/projects', readonly: true }],
+          timeout: 600000,
+        },
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const group = getRegisteredGroup('other@g.us');
+    expect(group).toBeDefined();
+    expect(group!.containerConfig).toEqual({
+      additionalMounts: [{ hostPath: '~/projects', readonly: true }],
+      timeout: 600000,
+    });
+  });
+
+  it('non-main group cannot update container config', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_update_container_config',
+        jid: 'other@g.us',
+        containerConfig: { timeout: 600000 },
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    const group = getRegisteredGroup('other@g.us');
+    expect(group!.containerConfig).toBeUndefined();
+  });
+
+  it('rejects update for unregistered group', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_update_container_config',
+        jid: 'unknown@g.us',
+        containerConfig: { timeout: 600000 },
+      },
+      'main',
+      true,
+      deps,
+    );
+    // Should not throw — just log warning and skip
+  });
+});
+
+// --- admin OneCLI commands authorization ---
+
+describe('admin OneCLI commands authorization', () => {
+  it('non-main group cannot list secrets', async () => {
+    // Should be silently blocked (no crash)
+    await processTaskIpc(
+      { type: 'admin_onecli_list_secrets', requestId: 'req-1' },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+
+  it('non-main group cannot create secrets', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_onecli_create_secret',
+        requestId: 'req-2',
+        name: 'Test',
+        secretType: 'generic',
+        value: 'secret',
+        hostPattern: 'api.example.com',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+
+  it('non-main group cannot query agent secrets', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_onecli_agent_secrets',
+        requestId: 'req-3',
+        agentIdentifier: 'slack-raels-dm',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+
+  it('non-main group cannot assign secrets', async () => {
+    await processTaskIpc(
+      {
+        type: 'admin_onecli_assign_secrets',
+        requestId: 'req-4',
+        agentIdentifier: 'slack-raels-dm',
+        secretIds: ['sec-1'],
+      },
+      'other-group',
+      false,
+      deps,
+    );
+  });
+});
