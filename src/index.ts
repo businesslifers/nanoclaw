@@ -39,6 +39,7 @@ import {
 import {
   getAllChats,
   getAllRegisteredGroups,
+  getAllRequests,
   getAllSessions,
   deleteSession,
   getAllTasks,
