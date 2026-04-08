@@ -4,24 +4,61 @@ This documents every modification to upstream-shared files. After any merge from
 
 ## Files We Own (no conflict risk)
 
-These files don't exist upstream — merges can't overwrite them:
+These files don't exist on upstream `main` or any skill branch — merges can't overwrite them:
 
 | File | Purpose |
 |------|---------|
 | `src/session-commands.ts` | `/compact` session command handling + `createCanSenderInteract` factory |
 | `src/session-commands.test.ts` | Tests for session commands |
-| `src/channels/whatsapp.ts` | WhatsApp channel (from `whatsapp` skill remote) |
-| `src/channels/whatsapp.test.ts` | WhatsApp tests |
-| `src/channels/telegram.ts` | Telegram channel (from `telegram` skill remote) |
-| `src/image.ts` / `src/image.test.ts` | Image vision (from `whatsapp` skill) |
+| `src/image.ts` / `src/image.test.ts` | Image vision processing |
 | `src/text-styles.ts` | Channel-specific text formatting |
-| `src/whatsapp-auth.ts` | WhatsApp QR/pairing auth |
+| `src/transcription.ts` | Voice message transcription via Whisper |
 | `src/status-tracker.ts` / `src/status-tracker.test.ts` | Emoji status reactions |
-| `container/agent-runner/src/extensions.ts` | Slash commands, agent defs, image loading (extracted from upstream index.ts) |
 | `src/request-queue.ts` / `src/request-queue.test.ts` | Inter-group request queue snapshot writer and tests |
+| `src/dashboard.ts` | HTTP dashboard with usage tracking |
+| `container/agent-runner/src/extensions.ts` | Slash commands, agent defs, image loading (extracted from upstream index.ts) |
 | `container/skills/request-queue/SKILL.md` | Container skill — agent instructions for request queue |
 | `scripts/version-groups.sh` | Auto-commit group config changes |
 | `groups/*/agents.json` | Per-group agent team definitions (Builder, Inspector, Mindy, etc.) — MUST be preserved across updates |
+
+## Skill-Shared Files (conflict risk on skill updates)
+
+These files originate from skill branches (`whatsapp`, `telegram`) but have local customizations. Pulling skill updates can clobber them — review diffs carefully.
+
+### `src/channels/whatsapp.ts` (from `whatsapp` remote)
+
+| Customization | What to check after skill update |
+|---------------|----------------------------------|
+| Image vision integration | `processImage` import from `../image.js`, image download+processing block in `messages.upsert` handler |
+| Voice transcription | `transcribeAudioMessage` import from `../transcription.js`, `isVoiceMessage` check, voice message passthrough |
+| Reaction storage | `storeReaction` import from `../db.js`, reaction event handler storing to DB |
+| LID normalization rework | `setLidMapping` helper, pre-seed from `state.creds` before connection, normalize LID senders in message handler |
+| Reconnection logic | `scheduleReconnect()` method replaces inline retry logic |
+| Outbound deduplication | `recentSentHashes` map, `DEDUP_WINDOW_MS`, hash check in `flushOutgoingQueue` |
+| Participant cache | `participantCache` map, `PARTICIPANT_CACHE_TTL_MS`, used for mention resolution in outbound |
+| Baileys import style | Default + named imports (not all-named with `createRequire` workaround) |
+| Logger wrapping | `Object.assign` approach with `trace`/`child` instead of separate `pino({ level: 'silent' })` |
+| getMessage simplified | Removed DB fallback, returns `undefined` instead of empty `proto.Message` |
+
+### `src/channels/whatsapp.test.ts` (from `whatsapp` remote)
+
+| Customization | What to check after skill update |
+|---------------|----------------------------------|
+| Tests for image/voice/reaction handling | Test cases covering image processing, voice transcription, reaction storage |
+| Tests for LID normalization | Test cases for `setLidMapping` and sender normalization |
+| Tests for deduplication | Test cases for outbound dedup logic |
+
+### `src/whatsapp-auth.ts` (from `whatsapp` remote)
+
+| Customization | What to check after skill update |
+|---------------|----------------------------------|
+| Minor auth flow tweaks | ~21 lines of drift — review diff on update |
+
+### `src/channels/telegram.ts` (from `telegram` remote)
+
+| Customization | What to check after skill update |
+|---------------|----------------------------------|
+| None currently | File matches skill branch — but verify after updates |
 
 ## Upstream-Shared Files (conflict risk)
 

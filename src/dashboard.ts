@@ -118,15 +118,6 @@ function ago(ms: number): string {
   return `${days}d ${hrs % 24}h ago`;
 }
 
-function elapsedStr(ms: number): string {
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
-}
-
 function stateLabel(state: number, terminal: string | null): string {
   if (terminal === 'done') return 'done';
   if (terminal === 'failed') return 'failed';
@@ -644,15 +635,14 @@ function pageOverview(deps: DashboardDeps): string {
           .join('')
       : '<span class="empty">No reactions recorded</span>';
 
-  const activityRows =
-    !deps.statusTracker
-      ? emptyRow(
-          4,
-          'Status tracking not installed — run /add-status-tracker for live message flow',
-        )
-      : activity.length === 0
-        ? emptyRow(4, 'No tracked messages')
-        : activity
+  const activityRows = !deps.statusTracker
+    ? emptyRow(
+        4,
+        'Status tracking not installed — run /add-status-tracker for live message flow',
+      )
+    : activity.length === 0
+      ? emptyRow(4, 'No tracked messages')
+      : activity
           .map(
             (m) => `<tr>
         <td>${m.emoji}</td>
@@ -679,7 +669,7 @@ function pageOverview(deps: DashboardDeps): string {
     `
 <h1>Overview</h1>
 <div class="cards" id="status-cards">
-  <div class="card"><div class="card-label">Uptime</div><div class="card-value">${elapsedStr(status.uptime)}</div></div>
+  <div class="card"><div class="card-label">Uptime</div><div class="card-value">${fmtDuration(status.uptime)}</div></div>
   <div class="card"><div class="card-label">Containers</div><div class="card-value">${status.containers.active} / ${status.containers.max}</div>${containerSubText}</div>
   <div class="card"><div class="card-label">Channels</div><div class="card-value">${channelDots}</div></div>
   <div class="card"><div class="card-label">Scheduled Tasks</div><div class="card-value">${status.tasks.active} active</div></div>
@@ -977,7 +967,7 @@ function pageTasks(query: URLSearchParams): string {
                 result.length > 60 ? result.slice(0, 60) + '...' : result;
               return `<tr>
             <td>${fmtTime(r.run_at)}</td>
-            <td>${elapsedStr(r.duration_ms)}</td>
+            <td>${fmtDuration(r.duration_ms)}</td>
             <td><span class="badge ${rb}">${r.status}</span></td>
             <td class="truncate">${escapeHtml(excerpt)}</td>
           </tr>`;
@@ -993,7 +983,7 @@ function pageTasks(query: URLSearchParams): string {
         <td><span class="badge ${statusBadge}">${t.status}</span></td>
         <td>${t.nextRun ? 'in ' + nextRun : '-'}</td>
         <td>${t.stats.successRate !== null ? t.stats.successRate + '%' : '-'}</td>
-        <td>${t.stats.avgDuration !== null ? elapsedStr(t.stats.avgDuration) : '-'}</td>
+        <td>${t.stats.avgDuration !== null ? fmtDuration(t.stats.avgDuration) : '-'}</td>
       </tr>${runHistoryHtml}`;
           })
           .join('');
@@ -1100,7 +1090,7 @@ function pageTasks(query: URLSearchParams): string {
 <h1>Scheduled Tasks</h1>
 <div class="cards">
   <div class="card"><div class="card-label">Total Runs</div><div class="card-value">${totalRuns}</div></div>
-  <div class="card"><div class="card-label">Avg Duration</div><div class="card-value">${totalRuns > 0 ? elapsedStr(avgDuration) : '-'}</div></div>
+  <div class="card"><div class="card-label">Avg Duration</div><div class="card-value">${totalRuns > 0 ? fmtDuration(avgDuration) : '-'}</div></div>
   <div class="card"><div class="card-label">Success Rate</div><div class="card-value">${overallSuccessRate !== null ? overallSuccessRate + '%' : '-'}</div></div>
   <div class="card"><div class="card-label">Active Tasks</div><div class="card-value">${allTasks.filter((t) => t.status === 'active').length}</div></div>
 </div>
@@ -1206,15 +1196,14 @@ function pageContainers(deps: DashboardDeps, query: URLSearchParams): string {
 function pageMessages(deps: DashboardDeps): string {
   const activity = apiActivity(deps);
 
-  const activeRows =
-    !deps.statusTracker
-      ? emptyRow(
-          5,
-          'Status tracking not installed — run /add-status-tracker for live message flow',
-        )
-      : activity.length === 0
-        ? emptyRow(5, 'No tracked messages right now')
-        : activity
+  const activeRows = !deps.statusTracker
+    ? emptyRow(
+        5,
+        'Status tracking not installed — run /add-status-tracker for live message flow',
+      )
+    : activity.length === 0
+      ? emptyRow(5, 'No tracked messages right now')
+      : activity
           .map(
             (m) => `<tr>
         <td>${m.emoji}</td>
@@ -1227,15 +1216,14 @@ function pageMessages(deps: DashboardDeps): string {
           .join('');
 
   const history = apiHistory(deps);
-  const historyRows =
-    !deps.statusTracker
-      ? emptyRow(
-          6,
-          'Status tracking not installed — run /add-status-tracker for message history',
-        )
-      : history.length === 0
-        ? emptyRow(6, 'No completed messages yet')
-        : history
+  const historyRows = !deps.statusTracker
+    ? emptyRow(
+        6,
+        'Status tracking not installed — run /add-status-tracker for message history',
+      )
+    : history.length === 0
+      ? emptyRow(6, 'No completed messages yet')
+      : history
           .map(
             (m) => `<tr>
         <td>${m.terminal === 'done' ? '\u2705' : '\u274C'}</td>
@@ -1488,87 +1476,55 @@ interface WikiGroupStats {
   totalLogEntries: number;
 }
 
-function scanWikiDir(dirPath: string): number {
+function countFiles(dirPath: string, filter: (f: string) => boolean): number {
   try {
-    return fs
-      .readdirSync(dirPath)
-      .filter((f) => f.endsWith('.md') && f !== 'index.md' && f !== 'log.md')
-      .length;
+    return fs.readdirSync(dirPath).filter(filter).length;
   } catch {
     return 0;
   }
 }
 
-function scanSourcesDir(dirPath: string): number {
+function scanWikiLog(logPath: string): { lastIngest: string | null; lastLint: string | null; total: number } {
   try {
-    return fs.readdirSync(dirPath).filter((f) => !f.startsWith('.')).length;
-  } catch {
-    return 0;
-  }
-}
-
-function parseLastLogEntry(logPath: string, type: string): string | null {
-  try {
-    const content = fs.readFileSync(logPath, 'utf-8');
-    const lines = content.split('\n');
+    const lines = fs.readFileSync(logPath, 'utf-8').split('\n');
+    let lastIngest: string | null = null;
+    let lastLint: string | null = null;
+    let total = 0;
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].match(new RegExp(`^## \\[.*\\] ${type}`))) {
-        const match = lines[i].match(/^## \[(\d{4}-\d{2}-\d{2})\]/);
-        return match ? match[1] : null;
-      }
+      const dateMatch = lines[i].match(/^## \[(\d{4}-\d{2}-\d{2})\]\s*(\w+)/);
+      if (!dateMatch) continue;
+      total++;
+      if (!lastIngest && dateMatch[2] === 'ingest') lastIngest = dateMatch[1];
+      if (!lastLint && dateMatch[2] === 'lint') lastLint = dateMatch[1];
     }
+    return { lastIngest, lastLint, total };
   } catch {
-    // no log file
+    return { lastIngest: null, lastLint: null, total: 0 };
   }
-  return null;
 }
 
-function countLogEntries(logPath: string): number {
-  try {
-    const content = fs.readFileSync(logPath, 'utf-8');
-    return (content.match(/^## \[/gm) || []).length;
-  } catch {
-    return 0;
-  }
+function buildWikiStats(folder: string, name: string): WikiGroupStats {
+  const wikiDir = path.join(GROUPS_DIR, folder, 'wiki');
+  const sourcesDir = path.join(GROUPS_DIR, folder, 'sources');
+  const log = scanWikiLog(path.join(wikiDir, 'log.md'));
+  return {
+    folder, name,
+    pageCount: countFiles(wikiDir, (f) => f.endsWith('.md') && f !== 'index.md' && f !== 'log.md'),
+    sourceCount: countFiles(sourcesDir, (f) => !f.startsWith('.')),
+    lastIngest: log.lastIngest, lastLint: log.lastLint, totalLogEntries: log.total,
+  };
 }
 
 function apiWiki(deps: DashboardDeps): WikiGroupStats[] {
-  const groups = deps.registeredGroups();
   const results: WikiGroupStats[] = [];
-
-  // Global wiki
-  const globalWikiDir = path.join(GROUPS_DIR, 'global', 'wiki');
-  const globalSourcesDir = path.join(GROUPS_DIR, 'global', 'sources');
-  const globalLogPath = path.join(globalWikiDir, 'log.md');
-  if (fs.existsSync(globalWikiDir)) {
-    results.push({
-      folder: 'global',
-      name: 'Shared Business Wiki',
-      pageCount: scanWikiDir(globalWikiDir),
-      sourceCount: scanSourcesDir(globalSourcesDir),
-      lastIngest: parseLastLogEntry(globalLogPath, 'ingest'),
-      lastLint: parseLastLogEntry(globalLogPath, 'lint'),
-      totalLogEntries: countLogEntries(globalLogPath),
-    });
+  if (fs.existsSync(path.join(GROUPS_DIR, 'global', 'wiki'))) {
+    results.push(buildWikiStats('global', 'Shared Business Wiki'));
   }
-
-  // Per-group wikis
-  for (const [, g] of Object.entries(groups)) {
-    const wikiDir = path.join(GROUPS_DIR, g.folder, 'wiki');
-    if (!fs.existsSync(wikiDir)) continue;
-    const sourcesDir = path.join(GROUPS_DIR, g.folder, 'sources');
-    const logPath = path.join(wikiDir, 'log.md');
-    results.push({
-      folder: g.folder,
-      name: g.name,
-      pageCount: scanWikiDir(wikiDir),
-      sourceCount: scanSourcesDir(sourcesDir),
-      lastIngest: parseLastLogEntry(logPath, 'ingest'),
-      lastLint: parseLastLogEntry(logPath, 'lint'),
-      totalLogEntries: countLogEntries(logPath),
-    });
+  for (const [, g] of Object.entries(deps.registeredGroups())) {
+    if (fs.existsSync(path.join(GROUPS_DIR, g.folder, 'wiki'))) {
+      results.push(buildWikiStats(g.folder, g.name));
+    }
   }
-
   return results;
 }
 
