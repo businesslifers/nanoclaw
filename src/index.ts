@@ -84,6 +84,7 @@ import {
   isSessionCommandAllowed,
 } from './session-commands.js';
 import { startSessionCleanup } from './session-cleanup.js';
+import { StatusTracker } from './status-tracker.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { parseImageReferences } from './image.js';
@@ -1045,6 +1046,24 @@ async function main(): Promise<void> {
     },
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
     recoverPendingMessages,
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (messageId) {
+        if (!channel.sendReaction)
+          throw new Error('Channel does not support sendReaction');
+        const messageKey = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: getMessageFromMe(messageId, jid),
+        };
+        await channel.sendReaction(jid, messageKey, emoji);
+      } else {
+        if (!channel.reactToLatestMessage)
+          throw new Error('Channel does not support reactions');
+        await channel.reactToLatestMessage(jid, emoji);
+      }
+    },
   });
   // Start dashboard (if DASHBOARD_PORT is configured)
   dashboardServer = startDashboard({
@@ -1058,6 +1077,7 @@ async function main(): Promise<void> {
   // Recover status tracker AFTER channels connect, so recovery reactions
   // can actually be sent via the WhatsApp channel.
   await statusTracker.recover();
+
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

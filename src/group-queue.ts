@@ -24,6 +24,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  resetTimeout?: () => void;
   retryCount: number;
   resetTimeout?: () => void;
 }

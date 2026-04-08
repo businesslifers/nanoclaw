@@ -44,6 +44,11 @@ export interface IpcDeps {
   onRequestsChanged?: () => void;
   statusHeartbeat?: () => void;
   recoverPendingMessages?: () => void;
+  sendReaction?: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
