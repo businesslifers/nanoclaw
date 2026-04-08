@@ -40,13 +40,11 @@ Message main Derek in the main channel:
 
 > "Derek, please register the new WhatsApp group [Group Name] as a new team. The JID is [JID if known, otherwise Derek can discover it]. Set requiresTrigger to true."
 
-Derek will:
-- Call `register_group` via IPC
-- Create the group folder under `groups/whatsapp_[team-name]/`
-- Add to the SQLite `registered_groups` table
-- Create `CLAUDE.md` and log dirs
+Derek will call `mcp__nanoclaw__register_group` directly — no server access needed. This creates the group folder, adds to the SQLite `registered_groups` table, and sets up `CLAUDE.md` and log dirs.
 
 **To find the JID:** Derek can query the `chats` table in the DB for recently active groups. Alternatively, send a message in the new group mentioning @Derek — it will appear in the DB even before registration.
+
+> ✅ As of 2026-04-08, group registration is fully self-service via MCP — no server-side DB work required.
 
 ---
 
@@ -63,7 +61,7 @@ Then assign to the group's OneCLI agent identity.
 ### If the team needs file-based credentials (e.g. Google service account JSON):
 
 1. Place the file at `~/nanoclaw-secrets/[team-name]/`
-2. Update the `container_config` column in `registered_groups`:
+2. Update the `container_config` column in `registered_groups` via server-side DB edit:
 
 ```python
 import sqlite3, json
@@ -83,6 +81,8 @@ conn.commit()
 ```
 
 3. Restart the NanoClaw container to pick up the new mount.
+
+> ⚠️ **Known gap:** `mcp__nanoclaw__register_group` does not yet support a `containerConfig` parameter. Until it does, additional mounts for credential files require the manual DB edit above. Tracked for resolution — see Claude Code prompt below.
 
 **Security rule:** No credentials go in workspace files or git. Always use OneCLI vault or host-mounted secrets.
 
