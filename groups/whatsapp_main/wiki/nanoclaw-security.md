@@ -47,7 +47,7 @@ IPC operations validated by host before execution:
 
 `~/.config/nanoclaw/sender-allowlist.json` controls which senders can trigger agent responses per group. Per-group configuration. Only listed senders can activate the agent.
 
-**Note:** This file lives outside the container — changes take effect on next message check but do not persist across container host reboots unless the file is on the host filesystem (not inside the container).
+**Note:** This file is read directly by the NanoClaw orchestrator process on the host (`src/sender-allowlist.ts`, resolves via `SENDER_ALLOWLIST_PATH` in `src/config.ts`). It persists across container restarts — the orchestrator runs on the host, not inside a container.
 
 Our allowlist includes Adam's WhatsApp sender (`61413403033@s.whatsapp.net`) for all teams.
 

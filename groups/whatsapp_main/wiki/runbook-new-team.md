@@ -100,7 +100,7 @@ Add the group to `~/.config/nanoclaw/sender-allowlist.json`:
 }
 ```
 
-> ⚠️ **Known issue:** This file currently lives inside the container and does not persist across reboots. Adam needs to re-apply this after every restart until a permanent fix is in place (e.g. host-mount this file).
+> ✅ This file lives on the host filesystem and is read by the NanoClaw orchestrator process directly (`src/sender-allowlist.ts` via `loadSenderAllowlist()`). It persists across container restarts — no action needed after reboots.
 
 ---
 
