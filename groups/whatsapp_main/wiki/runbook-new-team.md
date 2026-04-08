@@ -5,7 +5,7 @@ updated: 2026-04-08
 
 # Runbook: Setting Up a New Team
 
-This runbook covers everything needed to stand up a new AI agent team from scratch. Some steps require server access (Adam); others can be handled by Raels via the main Derek channel.
+This runbook covers everything needed to stand up a new AI agent team from scratch. As of 2026-04-08, the entire process can be handled by Raels via the main Derek channel — no server access required.
 
 ---
 
@@ -15,8 +15,8 @@ This runbook covers everything needed to stand up a new AI agent team from scrat
 |---|---|---|
 | 1. Create the WhatsApp group | Adam / Raels | WhatsApp |
 | 2. Register the group | Main Derek (on request) | Main channel |
-| 3. Configure credentials | Adam | Server / OneCLI |
-| 4. Update sender allowlist | Adam | Server |
+| 3. Configure credentials | Main Derek (on request) | Main channel |
+| 4. Update sender allowlist | Adam | Server (host file) |
 | 5. Set up CLAUDE.md | Main Derek → task | Automated |
 | 6. Create agents.json | Main Derek → task | Automated |
 | 7. Set up schedules | Main Derek → task | Automated |
@@ -48,41 +48,22 @@ Derek will call `mcp__nanoclaw__register_group` directly — no server access ne
 
 ---
 
-## Step 3 — Configure Credentials (Server-side, Adam only)
+## Step 3 — Configure Credentials (via Main Derek)
+
+> ✅ As of 2026-04-08, all credential management is fully self-service via MCP admin tools — no server access required.
 
 ### If the team needs API keys (e.g. Ghost Admin API, third-party services):
 
-```bash
-onecli secrets create --name TEAM_API_KEY --value "the-key" --host-pattern "api.example.com"
-```
+Message main Derek:
+> "Derek, create a new secret for [Team Name]: name=[SECRET_NAME], value=[key], host-pattern=[api.example.com], header=Authorization, format=Bearer {value}"
 
-Then assign to the group's OneCLI agent identity.
+Derek uses `admin_create_secret` then `admin_assign_secrets` to wire it to the group's agent identity.
 
 ### If the team needs file-based credentials (e.g. Google service account JSON):
 
-1. Place the file at `~/nanoclaw-secrets/[team-name]/`
-2. Update the `container_config` column in `registered_groups` via server-side DB edit:
-
-```python
-import sqlite3, json
-conn = sqlite3.connect('/path/to/store/messages.db')
-config = {
-  "additionalMounts": [{
-    "hostPath": "~/nanoclaw-secrets/[team-name]",
-    "containerPath": "[team-name]-creds",
-    "readonly": True
-  }]
-}
-conn.execute(
-  "UPDATE registered_groups SET container_config=? WHERE folder=?",
-  (json.dumps(config), 'whatsapp_[team-name]')
-)
-conn.commit()
-```
-
-3. Restart the NanoClaw container to pick up the new mount.
-
-> ⚠️ **Known gap:** `mcp__nanoclaw__register_group` does not yet support a `containerConfig` parameter. Until it does, additional mounts for credential files require the manual DB edit above. Tracked for resolution — see Claude Code prompt below.
+1. Adam places the file at `~/nanoclaw-secrets/[team-name]/` on the host (one-time manual step)
+2. Message main Derek: "Derek, add a mount for [Team Name] at ~/nanoclaw-secrets/[team-name] → [team-name]-creds (readonly)"
+3. Derek uses `admin_update_container_config` to add the mount — no DB edit needed
 
 **Security rule:** No credentials go in workspace files or git. Always use OneCLI vault or host-mounted secrets.
 

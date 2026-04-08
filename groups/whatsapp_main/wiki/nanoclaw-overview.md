@@ -83,3 +83,21 @@ All credential access is via OneCLI Agent Vault. No credentials in git or worksp
 The global wiki is accessible at **`/workspace/global/wiki/`** (writable). This is the canonical write path for the shared business wiki — do NOT use `/workspace/project/groups/global/wiki/` which is read-only from this container. Both paths point to the same underlying directory, but writes must go via `/workspace/global/wiki/`.
 
 This write access was confirmed and granted on 2026-04-08.
+
+## Admin MCP Tools (added 2026-04-08)
+
+Full group and credential management now available via MCP — no server access needed:
+
+| Tool | Purpose |
+|---|---|
+| `admin_list_groups` | List all registered groups with config |
+| `admin_get_container_config` | Get mounts/timeout for a group |
+| `admin_update_container_config` | Add/update mounts for a group |
+| `admin_delete_group` | Unregister a group (cleans session, IPC, OneCLI) |
+| `admin_reset_session` | Clear a group's conversation session |
+| `admin_create_secret` | Register a new secret in OneCLI vault |
+| `admin_list_secrets` | List all secrets in vault |
+| `admin_update_secret` | Update an existing secret |
+| `admin_delete_secret` | Delete a secret |
+| `admin_assign_secrets` | Assign secrets to a group's agent |
+| `admin_agent_secrets` | Check what secrets a group has assigned |
