@@ -302,9 +302,7 @@ describe('Group CLAUDE.md files must exist', () => {
     );
 
     const entries = fs.readdirSync(groupsDir, { withFileTypes: true });
-    const groupDirs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+    const groupDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
     expect(groupDirs.length).toBeGreaterThan(0);
 
@@ -323,7 +321,7 @@ describe('Group CLAUDE.md files must exist', () => {
     if (missing.length > 0) {
       throw new Error(
         `Group directories missing CLAUDE.md: ${missing.join(', ')}. ` +
-          'Every group MUST have a CLAUDE.md — it is the agent\'s memory.',
+          "Every group MUST have a CLAUDE.md — it is the agent's memory.",
       );
     }
   });
@@ -339,9 +337,7 @@ describe('Group CLAUDE.md files must exist', () => {
     );
 
     const entries = fs.readdirSync(groupsDir, { withFileTypes: true });
-    const groupDirs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+    const groupDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
     const trackedFiles = execSync('git ls-files groups/*/CLAUDE.md', {
       encoding: 'utf-8',
@@ -351,24 +347,17 @@ describe('Group CLAUDE.md files must exist', () => {
       .split('\n')
       .filter(Boolean);
 
-    const trackedGroups = trackedFiles.map(
-      (f) => f.split('/')[1],
-    );
+    const trackedGroups = trackedFiles.map((f) => f.split('/')[1]);
 
     const untracked: string[] = [];
     for (const dir of groupDirs) {
       const claudePath = pathMod.join(groupsDir, dir, 'CLAUDE.md');
-      if (
-        fs.existsSync(claudePath) &&
-        !trackedGroups.includes(dir)
-      ) {
+      if (fs.existsSync(claudePath) && !trackedGroups.includes(dir)) {
         untracked.push(dir);
       }
     }
 
-    expect(untracked).toEqual(
-      [],
-    );
+    expect(untracked).toEqual([]);
     if (untracked.length > 0) {
       throw new Error(
         `Group CLAUDE.md files exist but are NOT tracked in git: ${untracked.join(', ')}. ` +
