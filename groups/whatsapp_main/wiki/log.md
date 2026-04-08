@@ -2,6 +2,13 @@
 
 Chronological record of wiki activity.
 
+## 2026-04-08 | note | Global Wiki Write Access
+
+Global wiki canonical write path confirmed: `/workspace/global/wiki/` (writable).
+Do NOT use `/workspace/project/groups/global/wiki/` — read-only from this container.
+Both paths are the same underlying host directory; writes must go via `/workspace/global/wiki/`.
+Access granted/confirmed by Adam on 2026-04-08.
+
 ## 2026-04-08 | create | Operational Runbooks
 
 Created two runbooks at Adam's request for Raels:

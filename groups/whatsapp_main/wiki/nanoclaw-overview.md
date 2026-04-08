@@ -77,3 +77,9 @@ All credential access is via OneCLI Agent Vault. No credentials in git or worksp
 - [Scheduled tasks](nanoclaw-tasks.md)
 - [Agent Swarms](nanoclaw-agent-swarms.md)
 - [Changelog](nanoclaw-changelog.md)
+
+## Global Wiki Access
+
+The global wiki is accessible at **`/workspace/global/wiki/`** (writable). This is the canonical write path for the shared business wiki — do NOT use `/workspace/project/groups/global/wiki/` which is read-only from this container. Both paths point to the same underlying directory, but writes must go via `/workspace/global/wiki/`.
+
+This write access was confirmed and granted on 2026-04-08.
