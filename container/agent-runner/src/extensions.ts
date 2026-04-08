@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { validateAgentDefinitions, type AgentDefinition } from './validate-agents.js';
 
 // --- Content block types (used by image loader and index.ts) ---
 
@@ -136,11 +137,25 @@ export async function handleContainerSlashCommand(opts: {
 
 export function loadAgentDefinitions(
   log: (msg: string) => void,
-): Record<string, { description: string; prompt: string; tools?: string[]; model?: 'sonnet' | 'opus' | 'haiku' | 'inherit' }> | undefined {
+): Record<string, AgentDefinition> | undefined {
   try {
-    const agents = JSON.parse(fs.readFileSync('/workspace/group/agents.json', 'utf-8'));
-    log(`Loaded agent definitions: ${Object.keys(agents).join(', ')}`);
-    return agents;
+    const raw = JSON.parse(fs.readFileSync('/workspace/group/agents.json', 'utf-8'));
+    const result = validateAgentDefinitions(raw);
+
+    for (const w of result.warnings) {
+      log(`agents.json warning: ${w.agent ? `[${w.agent}] ` : ''}${w.message}`);
+    }
+
+    if (!result.valid) {
+      for (const e of result.errors) {
+        log(`agents.json error: ${e.agent ? `[${e.agent}] ` : ''}${e.message}`);
+      }
+      log('agents.json validation failed — agent definitions will not be loaded');
+      return undefined;
+    }
+
+    log(`Loaded agent definitions: ${Object.keys(raw).join(', ')}`);
+    return raw as Record<string, AgentDefinition>;
   } catch (err: any) {
     if (err.code !== 'ENOENT') log(`Failed to parse agents.json: ${err}`);
     return undefined;
