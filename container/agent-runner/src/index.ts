@@ -535,6 +535,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__parallel-search__*',
         'mcp__parallel-task__*',
+        ...(process.env.FIGMA_API_KEY ? ['mcp__figma__*'] : []),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -558,6 +559,15 @@ async function runQuery(
           type: 'http',
           url: 'https://task-mcp.parallel.ai/mcp',
         },
+        ...(process.env.FIGMA_API_KEY ? {
+          figma: {
+            command: 'npx',
+            args: ['figma-developer-mcp', '--stdio'],
+            env: {
+              FIGMA_API_KEY: process.env.FIGMA_API_KEY,
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [

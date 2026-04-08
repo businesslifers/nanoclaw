@@ -12,6 +12,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'COMPACTION_TOKEN_THRESHOLD',
   'COMPACTION_TURN_THRESHOLD',
+  'FIGMA_API_KEY',
   'OLLAMA_ADMIN_TOOLS',
   'ONECLI_URL',
   'TZ',
@@ -30,6 +31,8 @@ export const COMPACTION_TURN_THRESHOLD =
   process.env.COMPACTION_TURN_THRESHOLD ||
   envConfig.COMPACTION_TURN_THRESHOLD ||
   '6';
+export const FIGMA_API_KEY =
+  process.env.FIGMA_API_KEY || envConfig.FIGMA_API_KEY || '';
 export const OLLAMA_ADMIN_TOOLS =
   (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 export const POLL_INTERVAL = 2000;

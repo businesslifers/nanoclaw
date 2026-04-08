@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  FIGMA_API_KEY,
   OLLAMA_ADMIN_TOOLS,
   ONECLI_URL,
   TIMEZONE,
@@ -291,6 +292,11 @@ async function buildContainerArgs(
   // Forward auto-compaction thresholds to container
   args.push('-e', `COMPACTION_TOKEN_THRESHOLD=${COMPACTION_TOKEN_THRESHOLD}`);
   args.push('-e', `COMPACTION_TURN_THRESHOLD=${COMPACTION_TURN_THRESHOLD}`);
+
+  // Forward Figma API key if configured
+  if (FIGMA_API_KEY) {
+    args.push('-e', `FIGMA_API_KEY=${FIGMA_API_KEY}`);
+  }
 
   // Forward Ollama admin tools flag if enabled
   if (OLLAMA_ADMIN_TOOLS) {
