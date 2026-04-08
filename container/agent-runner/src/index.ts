@@ -563,6 +563,12 @@ async function runQuery(
           figma: {
             command: 'node',
             args: ['/app/node_modules/figma-developer-mcp/dist/cli.js', `--figma-api-key=${process.env.FIGMA_API_KEY}`, '--stdio'],
+            env: {
+              HTTPS_PROXY: '',
+              HTTP_PROXY: '',
+              https_proxy: '',
+              http_proxy: '',
+            },
           },
         } : {}),
       },

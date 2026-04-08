@@ -48,3 +48,4 @@ backups/
 .nanoclaw/
 
 agents-sdk-docs
+.env.backup
