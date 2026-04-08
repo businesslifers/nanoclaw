@@ -293,9 +293,12 @@ async function buildContainerArgs(
   args.push('-e', `COMPACTION_TOKEN_THRESHOLD=${COMPACTION_TOKEN_THRESHOLD}`);
   args.push('-e', `COMPACTION_TURN_THRESHOLD=${COMPACTION_TURN_THRESHOLD}`);
 
-  // Forward Figma API key if configured
+  // Forward Figma API key if configured.
+  // NO_PROXY is required because the OneCLI proxy intercepts all HTTPS traffic
+  // and can interfere with the X-Figma-Token header that figma-developer-mcp sets.
   if (FIGMA_API_KEY) {
     args.push('-e', `FIGMA_API_KEY=${FIGMA_API_KEY}`);
+    args.push('-e', 'NO_PROXY=api.figma.com,www.figma.com');
   }
 
   // Forward Ollama admin tools flag if enabled
