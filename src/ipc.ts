@@ -44,11 +44,6 @@ export interface IpcDeps {
   onRequestsChanged?: () => void;
   statusHeartbeat?: () => void;
   recoverPendingMessages?: () => void;
-  sendReaction?: (
-    jid: string,
-    emoji: string,
-    messageId?: string,
-  ) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -336,14 +331,6 @@ export async function processTaskIpc(
     valueFormat?: string;
     pathPattern?: string;
     secretIds?: string[];
-    // For request queue
-    summary?: string;
-    detail?: string;
-    requestId?: string;
-    targetFolder?: string;
-    resolution?: string;
-    reason?: string;
-    message?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path

@@ -55,7 +55,6 @@ import {
   storeChatMetadata,
   storeMessage,
   logUsage,
-  getAllRequests,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -88,7 +87,6 @@ import { StatusTracker } from './status-tracker.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { parseImageReferences } from './image.js';
-import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -1046,24 +1044,6 @@ async function main(): Promise<void> {
     },
     statusHeartbeat: () => statusTracker.heartbeatCheck(),
     recoverPendingMessages,
-    sendReaction: async (jid, emoji, messageId) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      if (messageId) {
-        if (!channel.sendReaction)
-          throw new Error('Channel does not support sendReaction');
-        const messageKey = {
-          id: messageId,
-          remoteJid: jid,
-          fromMe: getMessageFromMe(messageId, jid),
-        };
-        await channel.sendReaction(jid, messageKey, emoji);
-      } else {
-        if (!channel.reactToLatestMessage)
-          throw new Error('Channel does not support reactions');
-        await channel.reactToLatestMessage(jid, emoji);
-      }
-    },
   });
   // Start dashboard (if DASHBOARD_PORT is configured)
   dashboardServer = startDashboard({

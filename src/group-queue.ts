@@ -26,7 +26,6 @@ interface GroupState {
   groupFolder: string | null;
   resetTimeout?: () => void;
   retryCount: number;
-  resetTimeout?: () => void;
 }
 
 export class GroupQueue {
