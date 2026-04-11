@@ -513,7 +513,7 @@ function generateRequestId(): string {
 
 function waitForIpcResponse(
   requestId: string,
-  timeoutMs = 10_000,
+  timeoutMs = 30_000,
 ): Promise<{ requestId: string; status: string; result?: unknown; error?: string }> {
   const filePath = path.join(INPUT_DIR, `${requestId}.json`);
   const start = Date.now();

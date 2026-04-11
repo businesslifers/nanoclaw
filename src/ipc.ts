@@ -191,11 +191,22 @@ function execOneCLI(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile('onecli', args, { timeout: 15_000 }, (err, stdout, stderr) => {
+    const onecli = path.join(process.env.HOME || '/home/admin', '.local/bin/onecli');
+    execFile(onecli, args, { timeout: 15_000 }, (err, stdout, stderr) => {
       if (err) reject(new Error(`${err.message}\n${stderr}`));
       else resolve({ stdout, stderr });
     });
   });
+}
+
+async function resolveAgentId(identifier: string): Promise<string> {
+  const { stdout } = await execOneCLI(['agents', 'list']);
+  const agents = JSON.parse(stdout) as Array<{ id: string; identifier: string }>;
+  const match = agents.find(
+    (a) => a.id === identifier || a.identifier === identifier,
+  );
+  if (!match) throw new Error(`Agent not found: ${identifier}`);
+  return match.id;
 }
 
 export async function processTaskIpc(
@@ -567,7 +578,6 @@ export async function processTaskIpc(
         const { stdout } = await execOneCLI([
           'secrets',
           'list',
-          '--quiet',
           '--fields',
           'id,name,hostPattern,typeLabel',
         ]);
@@ -683,11 +693,12 @@ export async function processTaskIpc(
         break;
       }
       try {
+        const agentId = await resolveAgentId(data.agentIdentifier);
         const { stdout } = await execOneCLI([
           'agents',
           'secrets',
           '--id',
-          data.agentIdentifier,
+          agentId,
         ]);
         let result: unknown;
         try {
@@ -744,11 +755,12 @@ export async function processTaskIpc(
         break;
       }
       try {
+        const agentId = await resolveAgentId(data.agentIdentifier);
         const { stdout } = await execOneCLI([
           'agents',
           'set-secrets',
           '--id',
-          data.agentIdentifier,
+          agentId,
           '--secret-ids',
           data.secretIds.join(','),
         ]);
