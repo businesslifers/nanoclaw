@@ -7,16 +7,13 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
-  createRequest,
   createTask,
   deleteRegisteredGroup,
   deleteSession,
   deleteTask,
   getAllRegisteredGroups,
   getRegisteredGroup,
-  getRequestById,
   getTaskById,
-  resolveRequest,
   updateTask,
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -191,7 +188,10 @@ function execOneCLI(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const onecli = path.join(process.env.HOME || '/home/admin', '.local/bin/onecli');
+    const onecli = path.join(
+      process.env.HOME || '/home/admin',
+      '.local/bin/onecli',
+    );
     execFile(onecli, args, { timeout: 15_000 }, (err, stdout, stderr) => {
       if (err) reject(new Error(`${err.message}\n${stderr}`));
       else resolve({ stdout, stderr });
@@ -201,7 +201,10 @@ function execOneCLI(
 
 async function resolveAgentId(identifier: string): Promise<string> {
   const { stdout } = await execOneCLI(['agents', 'list']);
-  const agents = JSON.parse(stdout) as Array<{ id: string; identifier: string }>;
+  const agents = JSON.parse(stdout) as Array<{
+    id: string;
+    identifier: string;
+  }>;
   const match = agents.find(
     (a) => a.id === identifier || a.identifier === identifier,
   );
@@ -969,10 +972,7 @@ export async function processTaskIpc(
 
     case 'admin_list_groups': {
       if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized admin_list_groups blocked',
-        );
+        logger.warn({ sourceGroup }, 'Unauthorized admin_list_groups blocked');
         break;
       }
       if (!data.requestId) break;
@@ -996,10 +996,7 @@ export async function processTaskIpc(
 
     case 'admin_delete_group': {
       if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized admin_delete_group blocked',
-        );
+        logger.warn({ sourceGroup }, 'Unauthorized admin_delete_group blocked');
         break;
       }
       if (!data.requestId || !data.jid) {
@@ -1097,7 +1094,8 @@ export async function processTaskIpc(
         result: {
           jid: data.jid,
           folder: sessionGroup.folder,
-          message: 'Session cleared — next message will start a fresh conversation',
+          message:
+            'Session cleared — next message will start a fresh conversation',
         },
       });
       logger.info(
