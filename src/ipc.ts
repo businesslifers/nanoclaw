@@ -6,7 +6,19 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createRequest,
+  createTask,
+  deleteRegisteredGroup,
+  deleteSession,
+  deleteTask,
+  getAllRegisteredGroups,
+  getRegisteredGroup,
+  getRequestById,
+  getTaskById,
+  resolveRequest,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -155,11 +167,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
   logger.info('IPC watcher started (per-group namespaces)');
 }
 
+/** Alphanumeric, hyphens, underscores, dots — no path traversal characters. */
+const SAFE_ID_RE = /^[\w.-]+$/;
+
 function writeIpcResponse(
   sourceGroup: string,
   requestId: string,
   response: object,
 ): void {
+  if (!SAFE_ID_RE.test(requestId)) {
+    logger.warn({ requestId, sourceGroup }, 'Invalid requestId rejected');
+    return;
+  }
   const inputDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'input');
   fs.mkdirSync(inputDir, { recursive: true });
   const filePath = path.join(inputDir, `${requestId}.json`);
@@ -201,6 +220,7 @@ export async function processTaskIpc(
     // For admin commands
     requestId?: string;
     agentIdentifier?: string;
+    secretId?: string;
     secretType?: string;
     value?: string;
     hostPattern?: string;
@@ -654,6 +674,14 @@ export async function processTaskIpc(
         break;
       }
       if (!data.requestId || !data.agentIdentifier) break;
+      if (!SAFE_ID_RE.test(data.agentIdentifier)) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Invalid agentIdentifier format',
+        });
+        break;
+      }
       try {
         const { stdout } = await execOneCLI([
           'agents',
@@ -704,6 +732,17 @@ export async function processTaskIpc(
         }
         break;
       }
+      if (
+        !SAFE_ID_RE.test(data.agentIdentifier) ||
+        !data.secretIds.every((id: string) => SAFE_ID_RE.test(id))
+      ) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Invalid agentIdentifier or secretId format',
+        });
+        break;
+      }
       try {
         const { stdout } = await execOneCLI([
           'agents',
@@ -743,6 +782,316 @@ export async function processTaskIpc(
           'OneCLI secret assignment failed',
         );
       }
+      break;
+    }
+
+    case 'admin_onecli_delete_secret': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_delete_secret blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.secretId) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required field: secretId',
+          });
+        }
+        break;
+      }
+      if (!SAFE_ID_RE.test(data.secretId)) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Invalid secretId format',
+        });
+        break;
+      }
+      try {
+        const { stdout } = await execOneCLI([
+          'secrets',
+          'delete',
+          '--id',
+          data.secretId,
+        ]);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+        logger.info(
+          { secretId: data.secretId, sourceGroup },
+          'OneCLI secret deleted via admin IPC',
+        );
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+        logger.error(
+          { secretId: data.secretId, sourceGroup, err },
+          'OneCLI secret deletion failed',
+        );
+      }
+      break;
+    }
+
+    case 'admin_onecli_update_secret': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_onecli_update_secret blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.secretId) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required field: secretId',
+          });
+        }
+        break;
+      }
+      if (!SAFE_ID_RE.test(data.secretId)) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Invalid secretId format',
+        });
+        break;
+      }
+      try {
+        const args = ['secrets', 'update', '--id', data.secretId];
+        if (data.value) args.push('--value', data.value);
+        if (data.hostPattern) args.push('--host-pattern', data.hostPattern);
+        if (data.pathPattern) args.push('--path-pattern', data.pathPattern);
+        if (data.headerName) args.push('--header-name', data.headerName);
+        if (data.valueFormat) args.push('--value-format', data.valueFormat);
+
+        const { stdout } = await execOneCLI(args);
+        let result: unknown;
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = stdout.trim();
+        }
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+        logger.info(
+          { secretId: data.secretId, sourceGroup },
+          'OneCLI secret updated via admin IPC',
+        );
+      } catch (err) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: String(err),
+        });
+        logger.error(
+          { secretId: data.secretId, sourceGroup, err },
+          'OneCLI secret update failed',
+        );
+      }
+      break;
+    }
+
+    case 'admin_get_container_config': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_get_container_config blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.jid) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required field: jid',
+          });
+        }
+        break;
+      }
+      const targetGroup = getRegisteredGroup(data.jid);
+      if (!targetGroup) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: `Group not found: ${data.jid}`,
+        });
+        break;
+      }
+      writeIpcResponse(sourceGroup, data.requestId, {
+        requestId: data.requestId,
+        status: 'success',
+        result: {
+          jid: data.jid,
+          name: targetGroup.name,
+          folder: targetGroup.folder,
+          containerConfig: targetGroup.containerConfig ?? null,
+        },
+      });
+      logger.info(
+        { jid: data.jid, sourceGroup },
+        'Container config queried via admin IPC',
+      );
+      break;
+    }
+
+    case 'admin_list_groups': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_list_groups blocked',
+        );
+        break;
+      }
+      if (!data.requestId) break;
+      const allGroups = getAllRegisteredGroups();
+      const groupList = Object.entries(allGroups).map(([jid, g]) => ({
+        jid,
+        name: g.name,
+        folder: g.folder,
+        trigger: g.trigger,
+        isMain: g.isMain ?? false,
+        containerConfig: g.containerConfig ?? null,
+      }));
+      writeIpcResponse(sourceGroup, data.requestId, {
+        requestId: data.requestId,
+        status: 'success',
+        result: groupList,
+      });
+      logger.info({ sourceGroup }, 'Groups listed via admin IPC');
+      break;
+    }
+
+    case 'admin_delete_group': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_delete_group blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.jid) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required field: jid',
+          });
+        }
+        break;
+      }
+      const groupToDelete = getRegisteredGroup(data.jid);
+      if (!groupToDelete) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: `Group not found: ${data.jid}`,
+        });
+        break;
+      }
+      if (groupToDelete.isMain) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Cannot delete the main group',
+        });
+        break;
+      }
+      // Remove from database
+      deleteRegisteredGroup(data.jid);
+      // Clean up session
+      deleteSession(groupToDelete.folder);
+      // Clean up IPC directory (best-effort)
+      const ipcDir = path.join(DATA_DIR, 'ipc', groupToDelete.folder);
+      try {
+        fs.rmSync(ipcDir, { recursive: true, force: true });
+      } catch {
+        // Non-critical — log and continue
+      }
+      // Clean up OneCLI agent entry (best-effort)
+      const agentId = groupToDelete.folder.toLowerCase().replace(/_/g, '-');
+      try {
+        await execOneCLI(['agents', 'delete', '--id', agentId]);
+      } catch {
+        // Agent may not exist — that's fine
+      }
+      writeIpcResponse(sourceGroup, data.requestId, {
+        requestId: data.requestId,
+        status: 'success',
+        result: {
+          deleted: data.jid,
+          name: groupToDelete.name,
+          folder: groupToDelete.folder,
+        },
+      });
+      logger.info(
+        { jid: data.jid, folder: groupToDelete.folder, sourceGroup },
+        'Group deleted via admin IPC',
+      );
+      break;
+    }
+
+    case 'admin_reset_session': {
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized admin_reset_session blocked',
+        );
+        break;
+      }
+      if (!data.requestId || !data.jid) {
+        if (data.requestId) {
+          writeIpcResponse(sourceGroup, data.requestId, {
+            requestId: data.requestId,
+            status: 'error',
+            error: 'Missing required field: jid',
+          });
+        }
+        break;
+      }
+      const sessionGroup = getRegisteredGroup(data.jid);
+      if (!sessionGroup) {
+        writeIpcResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: `Group not found: ${data.jid}`,
+        });
+        break;
+      }
+      deleteSession(sessionGroup.folder);
+      writeIpcResponse(sourceGroup, data.requestId, {
+        requestId: data.requestId,
+        status: 'success',
+        result: {
+          jid: data.jid,
+          folder: sessionGroup.folder,
+          message: 'Session cleared — next message will start a fresh conversation',
+        },
+      });
+      logger.info(
+        { jid: data.jid, folder: sessionGroup.folder, sourceGroup },
+        'Session reset via admin IPC',
+      );
       break;
     }
 
