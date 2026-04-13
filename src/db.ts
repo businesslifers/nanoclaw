@@ -82,6 +82,16 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS dispatches (
+      id TEXT PRIMARY KEY,
+      target_group_folder TEXT NOT NULL,
+      source_chat_jid TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'active',
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dispatches_status ON dispatches(status);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -687,6 +697,57 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Dispatch accessors ---
+
+export interface Dispatch {
+  id: string;
+  target_group_folder: string;
+  source_chat_jid: string;
+  created_at: string;
+  status: string;
+  expires_at: string;
+}
+
+export function createDispatch(
+  dispatch: Omit<Dispatch, 'created_at' | 'status'>,
+): void {
+  db.prepare(
+    `INSERT INTO dispatches (id, target_group_folder, source_chat_jid, expires_at)
+     VALUES (?, ?, ?, ?)`,
+  ).run(
+    dispatch.id,
+    dispatch.target_group_folder,
+    dispatch.source_chat_jid,
+    dispatch.expires_at,
+  );
+}
+
+export function getDispatchById(id: string): Dispatch | undefined {
+  return db.prepare('SELECT * FROM dispatches WHERE id = ?').get(id) as
+    | Dispatch
+    | undefined;
+}
+
+export function completeDispatch(id: string): void {
+  db.prepare(`UPDATE dispatches SET status = 'completed' WHERE id = ?`).run(id);
+}
+
+export function expireDispatches(): void {
+  db.prepare(
+    `UPDATE dispatches SET status = 'expired' WHERE status = 'active' AND expires_at < datetime('now')`,
+  ).run();
+}
+
+export function getActiveDispatchesForGroup(
+  targetGroupFolder: string,
+): Dispatch[] {
+  return db
+    .prepare(
+      `SELECT * FROM dispatches WHERE target_group_folder = ? AND status = 'active' ORDER BY created_at DESC`,
+    )
+    .all(targetGroupFolder) as Dispatch[];
 }
 
 // --- JSON migration ---

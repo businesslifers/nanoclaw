@@ -45,6 +45,10 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  createDispatch,
+  getDispatchById,
+  expireDispatches,
+  getActiveDispatchesForGroup,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -382,6 +386,11 @@ async function runAgent(
       }
     : undefined;
 
+  // Check if there's an active dispatch targeting this group
+  const activeDispatches = getActiveDispatchesForGroup(group.folder);
+  const dispatch =
+    activeDispatches.length > 0 ? activeDispatches[0] : undefined;
+
   try {
     const output = await runContainerAgent(
       group,
@@ -392,6 +401,12 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        ...(dispatch
+          ? {
+              dispatchId: dispatch.id,
+              replyToJid: dispatch.source_chat_jid,
+            }
+          : {}),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -449,6 +464,9 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
+      // Expire stale dispatches (cheap SQL — runs every poll cycle)
+      expireDispatches();
+
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -745,6 +763,165 @@ async function main(): Promise<void> {
       for (const group of Object.values(registeredGroups)) {
         writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
       }
+    },
+    onDispatch: async (dispatch) => {
+      // Find the target group by name or folder
+      const targetEntry = Object.entries(registeredGroups).find(
+        ([_jid, g]) =>
+          g.folder === dispatch.targetGroup ||
+          g.folder === `whatsapp_${dispatch.targetGroup}` ||
+          g.folder === `telegram_${dispatch.targetGroup}` ||
+          g.name === dispatch.targetGroup,
+      );
+
+      if (!targetEntry) {
+        logger.warn(
+          { targetGroup: dispatch.targetGroup },
+          'ask_group target group not found',
+        );
+        return;
+      }
+
+      const [targetJid, targetGroup] = targetEntry;
+
+      // Store dispatch in database
+      createDispatch({
+        id: dispatch.id,
+        target_group_folder: targetGroup.folder,
+        source_chat_jid: dispatch.sourceChatJid,
+        expires_at: new Date(Date.now() + 3600_000).toISOString(), // 1 hour
+      });
+
+      // Send message to target group's chat for visibility/context
+      const ch = findChannel(channels, targetJid);
+      if (ch) {
+        await ch.sendMessage(targetJid, dispatch.message);
+      }
+
+      // Directly run the sub-group's agent with the dispatch message.
+      // We can't rely on the message loop because bot-sent messages are
+      // filtered out by getNewMessages (is_bot_message = 0).
+      // Run the sub-group's agent directly via the task queue.
+      // Provide an onOutput callback so the agent's final response is
+      // delivered back to main — even if the agent doesn't explicitly
+      // call reply_to_lead.
+      const dispatchId = dispatch.id;
+      const sourceChatJid = dispatch.sourceChatJid;
+      queue.enqueueTask(targetJid, dispatchId, async () => {
+        const result = await runAgent(
+          targetGroup,
+          dispatch.message,
+          targetJid,
+          async (output) => {
+            logger.info(
+              {
+                dispatchId,
+                hasResult: !!output.result,
+                status: output.status,
+              },
+              'Dispatch onOutput fired',
+            );
+            if (output.result) {
+              const groupLabel = targetGroup.name || targetGroup.folder;
+              const formattedReply = `[Reply from ${groupLabel}] ${output.result}`;
+              // Try to pipe into main's active container
+              if (queue.sendMessage(sourceChatJid, formattedReply)) {
+                logger.info(
+                  { dispatchId, sourceChatJid },
+                  'Dispatch reply piped to main container',
+                );
+              } else {
+                // Fallback: send as channel message
+                const mainCh = findChannel(channels, sourceChatJid);
+                if (mainCh) {
+                  const text = formatOutbound(formattedReply);
+                  if (text) await mainCh.sendMessage(sourceChatJid, text);
+                  logger.info(
+                    { dispatchId, sourceChatJid },
+                    'Dispatch reply sent to main chat (fallback)',
+                  );
+                } else {
+                  logger.warn(
+                    { dispatchId, sourceChatJid },
+                    'No channel for dispatch reply fallback',
+                  );
+                }
+              }
+              // Close the dispatch container so the group queue can
+              // process subsequent dispatches or pending messages.
+              queue.closeStdin(targetJid);
+            }
+          },
+        );
+      });
+
+      logger.info(
+        {
+          dispatchId: dispatch.id,
+          targetGroup: targetGroup.folder,
+          targetJid,
+        },
+        'Dispatch sent and agent enqueued for sub-group',
+      );
+    },
+    onDispatchReply: async (reply) => {
+      // Validate dispatch exists and is active
+      const dispatch = getDispatchById(reply.dispatchId);
+      if (!dispatch || dispatch.status !== 'active') {
+        logger.warn(
+          { dispatchId: reply.dispatchId, status: dispatch?.status },
+          'dispatch_reply for invalid or inactive dispatch',
+        );
+        return;
+      }
+
+      // Validate reply came from the dispatched group
+      if (dispatch.target_group_folder !== reply.sourceGroupFolder) {
+        logger.warn(
+          {
+            dispatchId: reply.dispatchId,
+            expected: dispatch.target_group_folder,
+            actual: reply.sourceGroupFolder,
+          },
+          'dispatch_reply from wrong group — blocked',
+        );
+        return;
+      }
+
+      // Find the group name for the reply prefix
+      const sourceGroupEntry = Object.values(registeredGroups).find(
+        (g) => g.folder === reply.sourceGroupFolder,
+      );
+      const groupLabel = sourceGroupEntry?.name || reply.sourceGroupFolder;
+      const formattedReply = `[Reply from ${groupLabel}] ${reply.message}`;
+
+      // Try to pipe into main's active container
+      const mainJid = dispatch.source_chat_jid;
+      if (queue.sendMessage(mainJid, formattedReply)) {
+        logger.info(
+          { dispatchId: reply.dispatchId, mainJid },
+          'Dispatch reply piped to main container',
+        );
+      } else {
+        // Fallback: send as channel message to main's chat
+        const ch = findChannel(channels, mainJid);
+        if (!ch) {
+          logger.warn(
+            { mainJid },
+            'No channel owns main JID for dispatch reply fallback',
+          );
+          return;
+        }
+        const text = formatOutbound(formattedReply);
+        if (text) await ch.sendMessage(mainJid, text);
+        logger.info(
+          { dispatchId: reply.dispatchId, mainJid },
+          'Dispatch reply sent to main chat (no active container)',
+        );
+      }
+
+      // Dispatch stays active for subsequent replies (progress updates).
+      // It will expire naturally via expireDispatches() after 1 hour.
     },
   });
   startSessionCleanup();

@@ -23,6 +23,19 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onDispatch?: (dispatch: {
+    id: string;
+    targetGroup: string;
+    message: string;
+    sourceChatJid: string;
+    sourceGroupFolder: string;
+  }) => Promise<void>;
+  onDispatchReply?: (reply: {
+    dispatchId: string;
+    message: string;
+    sourceGroupFolder: string;
+    replyToJid: string;
+  }) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -173,6 +186,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For ask_group / dispatch_reply
+    dispatchId?: string;
+    targetGroup?: string;
+    message?: string;
+    replyToJid?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -458,6 +476,47 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'ask_group':
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized ask_group attempt blocked');
+        break;
+      }
+      if (data.dispatchId && data.targetGroup && data.message) {
+        if (deps.onDispatch) {
+          await deps.onDispatch({
+            id: data.dispatchId,
+            targetGroup: data.targetGroup,
+            message: data.message,
+            sourceChatJid: data.chatJid || '',
+            sourceGroupFolder: sourceGroup,
+          });
+        }
+      } else {
+        logger.warn(
+          { sourceGroup },
+          'Invalid ask_group — missing dispatchId, targetGroup, or message',
+        );
+      }
+      break;
+
+    case 'dispatch_reply':
+      if (data.dispatchId && data.message && data.replyToJid) {
+        if (deps.onDispatchReply) {
+          await deps.onDispatchReply({
+            dispatchId: data.dispatchId,
+            message: data.message,
+            sourceGroupFolder: sourceGroup,
+            replyToJid: data.replyToJid,
+          });
+        }
+      } else {
+        logger.warn(
+          { sourceGroup },
+          'Invalid dispatch_reply — missing dispatchId, message, or replyToJid',
         );
       }
       break;

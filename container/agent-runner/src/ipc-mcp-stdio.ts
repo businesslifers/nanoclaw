@@ -19,6 +19,8 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const dispatchId = process.env.NANOCLAW_DISPATCH_ID;
+const replyToJid = process.env.NANOCLAW_REPLY_TO_JID;
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -502,6 +504,86 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     };
   },
 );
+
+// --- Dispatch tools ---
+
+if (isMain) {
+  server.tool(
+    'ask_group',
+    `Ask a sub-group a question and get their reply piped back into your session. Use this to delegate work to specialist groups. The reply arrives as a "[Reply from ...]" message in your conversation.
+
+Usage: provide the group name or folder (e.g., "dev-team" or "whatsapp_dev-team") and your question.`,
+    {
+      target_group: z
+        .string()
+        .describe(
+          'Name or folder of the sub-group to ask (e.g., "dev-team", "whatsapp_dev-team")',
+        ),
+      message: z
+        .string()
+        .describe('The question or instruction to send to the sub-group'),
+    },
+    async (args) => {
+      const id = `dispatch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const data = {
+        type: 'ask_group',
+        dispatchId: id,
+        targetGroup: args.target_group,
+        message: args.message,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      };
+
+      writeIpcFile(TASKS_DIR, data);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Dispatch ${id} sent to "${args.target_group}". Their reply will appear as a "[Reply from ...]" message in your conversation. Continue with other work while waiting.`,
+          },
+        ],
+      };
+    },
+  );
+}
+
+if (dispatchId) {
+  server.tool(
+    'reply_to_lead',
+    `Reply to the lead agent who dispatched a question to your group. Your reply is piped directly into their active session. You can call this multiple times for progress updates.`,
+    {
+      message: z
+        .string()
+        .describe(
+          'Your reply. Include all relevant information — the lead needs a self-contained answer.',
+        ),
+    },
+    async (args) => {
+      const data = {
+        type: 'dispatch_reply',
+        dispatchId,
+        message: args.message,
+        replyToJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      };
+
+      writeIpcFile(TASKS_DIR, data);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Reply sent to lead agent.',
+          },
+        ],
+      };
+    },
+  );
+}
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
