@@ -27,6 +27,7 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { SavedAttachment } from './attachments.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -43,6 +44,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  attachments?: SavedAttachment[];
 }
 
 export interface ContainerOutput {
