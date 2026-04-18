@@ -199,12 +199,18 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 
   return chats
     .filter((c) => c.jid !== '__group_sync__' && c.is_group)
-    .map((c) => ({
-      jid: c.jid,
-      name: c.name,
-      lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid),
-    }));
+    .map((c) => {
+      const registered = registeredGroups[c.jid];
+      return {
+        jid: c.jid,
+        name: c.name,
+        lastActivity: c.last_message_time,
+        isRegistered: registeredJids.has(c.jid),
+        folder: registered?.folder,
+        isMain: registered?.isMain,
+        isHub: registered?.isHub,
+      };
+    });
 }
 
 /** @internal - exported for testing */
@@ -362,11 +368,12 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Update available groups snapshot (visibility depends on main/hub/team)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
     isMain,
+    group.isHub === true,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
@@ -728,8 +735,8 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ih, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ih, ag, rj),
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({

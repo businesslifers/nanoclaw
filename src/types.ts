@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  isHub?: boolean; // True for coordination hubs (e.g. a COO group). Hubs can send files to any team; teams can send files to hubs. Main is an implicit hub.
 }
 
 export interface NewMessage {

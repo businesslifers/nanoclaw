@@ -307,3 +307,18 @@ If a user wants tasks running more than ~2x daily and a script can't reduce agen
 - Suggest restructuring with a script that checks the condition first
 - If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
 - Help the user find the minimum viable frequency
+
+---
+
+## Sending Files (hub-and-spoke)
+
+The `send_file(file_path, caption?)` MCP tool delivers a file to a chat. Authorization follows a hub-and-spoke rule enforced at the IPC layer:
+
+- **Own chat**: always allowed — any group can deliver files to its own humans.
+- **Main / hub** → any registered group: allowed. Main is an implicit hub; additional coordinator groups are flagged with `is_hub = 1` on `registered_groups`.
+- **Team → hub**: allowed. Teams deliver up to the coordinator.
+- **Team → team direct**: blocked. Cross-team file sharing must route via a hub.
+
+Cross-group captions are auto-prefixed `[File from <source_group>]` so recipients see who sent it. Photos (`.jpg/.jpeg/.png/.webp`) are delivered inline; other types as documents.
+
+Sub-groups only see their own chat + hubs in `/workspace/ipc/available_groups.json`, so peer-team JIDs aren't exposed.

@@ -722,24 +722,45 @@ export interface AvailableGroup {
   name: string;
   lastActivity: string;
   isRegistered: boolean;
+  folder?: string; // Only populated for registered groups
+  isMain?: boolean; // Only populated for registered groups
+  isHub?: boolean; // Only populated for registered groups
 }
 
 /**
  * Write available groups snapshot for the container to read.
- * Only main group can see all available groups (for activation).
- * Non-main groups only see their own registration status.
+ *
+ * Visibility under the hub-and-spoke rule:
+ *   - Main / hubs see all groups (registered + candidates for activation /
+ *     cross-group targeting).
+ *   - Teams see their own chat + hubs + main. Peer teams are hidden because
+ *     team→team `send_file` is blocked at the IPC layer anyway, so leaking
+ *     peer JIDs only invites misuse.
+ *   - Unregistered candidate chats are visible only to main (for activation).
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
+  isHub: boolean,
   groups: AvailableGroup[],
   _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
+  let visibleGroups: AvailableGroup[];
+  if (isMain) {
+    visibleGroups = groups;
+  } else if (isHub) {
+    visibleGroups = groups.filter((g) => g.isRegistered);
+  } else {
+    // Team: own chat + hubs (including main)
+    visibleGroups = groups.filter(
+      (g) =>
+        g.isRegistered &&
+        (g.folder === groupFolder || g.isMain === true || g.isHub === true),
+    );
+  }
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

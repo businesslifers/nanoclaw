@@ -19,6 +19,7 @@ export interface IpcDeps {
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
+    isHub: boolean,
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
@@ -104,13 +105,41 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 data.chatJid &&
                 data.filePath
               ) {
+                // Hub-and-spoke authorization:
+                //   - main: send anywhere (implicit hub)
+                //   - any group → own chat: always allowed
+                //   - hub → any registered group: allowed
+                //   - team → hub: allowed (delivers up to coordinator)
+                //   - team → team: blocked (must route via a hub)
+                // sourceGroup is derived from the mount-isolated IPC directory.
                 const targetGroup = registeredGroups[data.chatJid];
+                const sourceEntry = Object.values(registeredGroups).find(
+                  (g) => g.folder === sourceGroup,
+                );
+                const sourceIsHub =
+                  isMain ||
+                  sourceEntry?.isMain === true ||
+                  sourceEntry?.isHub === true;
+                const targetIsOwnChat =
+                  targetGroup !== undefined && targetGroup.folder === sourceGroup;
+                const targetIsHub =
+                  targetGroup !== undefined &&
+                  (targetGroup.isMain === true || targetGroup.isHub === true);
                 const authorized =
-                  isMain || (targetGroup && targetGroup.folder === sourceGroup);
+                  isMain ||
+                  targetIsOwnChat ||
+                  (sourceIsHub && targetGroup !== undefined) ||
+                  (targetIsHub && sourceGroup.length > 0);
                 if (!authorized) {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC send_file attempt blocked',
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      targetFolder: targetGroup?.folder,
+                      sourceIsHub,
+                      targetIsHub,
+                    },
+                    'Unauthorized IPC send_file attempt blocked (hub-and-spoke rule)',
                   );
                 } else if (!deps.sendFile) {
                   logger.warn(
@@ -135,13 +164,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       'IPC send_file — file not found on host',
                     );
                   } else {
-                    await deps.sendFile(
-                      data.chatJid,
-                      hostPath,
-                      data.caption || undefined,
-                    );
+                    // Auto-attribute cross-group sends so humans see who sent.
+                    const crossGroup =
+                      targetGroup !== undefined &&
+                      targetGroup.folder !== sourceGroup;
+                    const attribution = crossGroup
+                      ? `[File from ${sourceGroup}]`
+                      : '';
+                    const finalCaption = crossGroup
+                      ? data.caption
+                        ? `${attribution} ${data.caption}`
+                        : attribution
+                      : data.caption || undefined;
+                    await deps.sendFile(data.chatJid, hostPath, finalCaption);
                     logger.info(
-                      { chatJid: data.chatJid, sourceGroup, filePath: hostPath },
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        filePath: hostPath,
+                        crossGroup,
+                      },
                       'IPC file sent',
                     );
                   }
@@ -466,7 +508,8 @@ export async function processTaskIpc(
         const availableGroups = deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
           sourceGroup,
-          true,
+          true, // isMain
+          true, // isHub (main is an implicit hub)
           availableGroups,
           new Set(Object.keys(registeredGroups)),
         );
