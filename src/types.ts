@@ -99,11 +99,7 @@ export interface Channel {
   // Optional: send a file (photo, document) to a chat. Used by the
   // `send_file` MCP tool so the agent can deliver downloaded images,
   // analysis results, etc. The filePath is an absolute host path.
-  sendFile?(
-    jid: string,
-    filePath: string,
-    caption?: string,
-  ): Promise<void>;
+  sendFile?(jid: string, filePath: string, caption?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

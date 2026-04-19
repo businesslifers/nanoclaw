@@ -26,11 +26,7 @@ export interface IpcDeps {
   onTasksChanged: () => void;
   // Optional: send a file (photo, document) to a chat. Only populated when
   // a connected channel implements Channel.sendFile.
-  sendFile?: (
-    jid: string,
-    filePath: string,
-    caption?: string,
-  ) => Promise<void>;
+  sendFile?: (jid: string, filePath: string, caption?: string) => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -121,7 +117,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   sourceEntry?.isMain === true ||
                   sourceEntry?.isHub === true;
                 const targetIsOwnChat =
-                  targetGroup !== undefined && targetGroup.folder === sourceGroup;
+                  targetGroup !== undefined &&
+                  targetGroup.folder === sourceGroup;
                 const targetIsHub =
                   targetGroup !== undefined &&
                   (targetGroup.isMain === true || targetGroup.isHub === true);
@@ -152,7 +149,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   const containerPrefix = '/workspace/group/';
                   let hostPath = data.filePath;
                   if (data.filePath.startsWith(containerPrefix)) {
-                    const relativePath = data.filePath.slice(containerPrefix.length);
+                    const relativePath = data.filePath.slice(
+                      containerPrefix.length,
+                    );
                     hostPath = path.join(
                       resolveGroupFolderPath(sourceGroup),
                       relativePath,
@@ -160,7 +159,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   }
                   if (!fs.existsSync(hostPath)) {
                     logger.warn(
-                      { chatJid: data.chatJid, hostPath, originalPath: data.filePath },
+                      {
+                        chatJid: data.chatJid,
+                        hostPath,
+                        originalPath: data.filePath,
+                      },
                       'IPC send_file — file not found on host',
                     );
                   } else {
