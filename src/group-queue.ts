@@ -344,6 +344,67 @@ export class GroupQueue {
     }
   }
 
+  isActive(groupJid: string): boolean {
+    return this.getGroup(groupJid).active;
+  }
+
+  /** Read-only snapshot of all container state for the dashboard. */
+  getSnapshot(): {
+    active: {
+      groupJid: string;
+      containerName: string | null;
+      groupFolder: string | null;
+      isTask: boolean;
+      runningTaskId: string | null;
+      pendingMessages: boolean;
+      pendingTaskCount: number;
+      retryCount: number;
+      idleWaiting: boolean;
+    }[];
+    activeCount: number;
+    waitingGroups: string[];
+    totalPendingTasks: number;
+    totalRetrying: number;
+  } {
+    const active: {
+      groupJid: string;
+      containerName: string | null;
+      groupFolder: string | null;
+      isTask: boolean;
+      runningTaskId: string | null;
+      pendingMessages: boolean;
+      pendingTaskCount: number;
+      retryCount: number;
+      idleWaiting: boolean;
+    }[] = [];
+    let totalPendingTasks = 0;
+    let totalRetrying = 0;
+    for (const [jid, state] of this.groups) {
+      totalPendingTasks += state.pendingTasks.length;
+      if (state.retryCount > 0) totalRetrying++;
+      if (state.active) {
+        active.push({
+          groupJid: jid,
+          containerName: state.containerName,
+          groupFolder: state.groupFolder,
+          isTask: state.isTaskContainer,
+          runningTaskId: state.runningTaskId,
+          pendingMessages: state.pendingMessages,
+          pendingTaskCount: state.pendingTasks.length,
+          retryCount: state.retryCount,
+          idleWaiting: state.idleWaiting,
+        });
+      }
+    }
+    return {
+      active,
+      activeCount: this.activeCount,
+      waitingGroups: [...this.waitingGroups],
+      totalPendingTasks,
+      totalRetrying,
+    };
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

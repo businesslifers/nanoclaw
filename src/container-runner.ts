@@ -51,6 +51,17 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+    modelUsage?: Record<
+      string,
+      { costUSD: number; inputTokens: number; outputTokens: number }
+    >;
+  };
 }
 
 interface VolumeMount {

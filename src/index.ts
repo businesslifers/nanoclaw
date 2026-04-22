@@ -25,6 +25,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { startDashboard } from './dashboard.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -40,11 +41,13 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  logUsage,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateUsage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -371,12 +374,40 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Track usage row ID so we can UPDATE it on subsequent results instead of
+  // inserting duplicate rows. The agent-runner sends cumulative usage on every
+  // result; we upsert so only one row exists per container run.
+  let usageRowId: number | undefined;
+
+  // Wrap onOutput to track session ID and log usage from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (
+          output.usage &&
+          (output.usage.inputTokens > 0 || output.usage.outputTokens > 0)
+        ) {
+          const entry = {
+            group_folder: group.folder,
+            chat_jid: chatJid,
+            logged_at: new Date().toISOString(),
+            input_tokens: output.usage.inputTokens,
+            output_tokens: output.usage.outputTokens,
+            cache_read_tokens: output.usage.cacheReadInputTokens,
+            cache_creation_tokens: output.usage.cacheCreationInputTokens,
+            cost_usd: output.usage.costUsd,
+            model_usage: output.usage.modelUsage
+              ? JSON.stringify(output.usage.modelUsage)
+              : null,
+          };
+          if (usageRowId) {
+            updateUsage(usageRowId, entry);
+          } else {
+            usageRowId = logUsage(entry);
+          }
         }
         await onOutput(output);
       }
@@ -582,9 +613,11 @@ async function main(): Promise<void> {
 
   restoreRemoteControl();
 
-  // Graceful shutdown handlers
+  // Graceful shutdown handlers (dashboardServer captured in closure after start)
+  let dashboardServer: ReturnType<typeof startDashboard> = null;
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    dashboardServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -747,6 +780,17 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Start dashboard (if DASHBOARD_PORT is configured).
+  // statusTracker is null here; /add-status-tracker replaces this call with
+  // a real tracker instance so the dashboard shows per-message status.
+  dashboardServer = startDashboard({
+    queue,
+    statusTracker: null,
+    channels,
+    registeredGroups: () => registeredGroups,
+    startedAt: Date.now(),
+  });
+
   startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

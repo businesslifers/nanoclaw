@@ -40,6 +40,17 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+    modelUsage?: Record<
+      string,
+      { costUSD: number; inputTokens: number; outputTokens: number }
+    >;
+  };
 }
 
 interface SessionEntry {
@@ -412,6 +423,17 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Accumulate usage across all result messages in this query (dashboard)
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let totalCacheCreation = 0;
+  let totalCostUsd = 0;
+  const modelUsageMap: Record<
+    string,
+    { costUSD: number; inputTokens: number; outputTokens: number }
+  > = {};
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -529,10 +551,69 @@ async function runQuery(
       log(
         `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
       );
+
+      // Capture usage from result messages (dashboard)
+      const resultMsg = message as {
+        total_cost_usd?: number;
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        };
+        modelUsage?: Record<
+          string,
+          {
+            costUSD: number;
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadInputTokens?: number;
+            cacheCreationInputTokens?: number;
+            webSearchRequests?: number;
+            contextWindow?: number;
+            maxOutputTokens?: number;
+          }
+        >;
+      };
+      if (resultMsg.usage) {
+        totalInputTokens += resultMsg.usage.input_tokens || 0;
+        totalOutputTokens += resultMsg.usage.output_tokens || 0;
+        totalCacheRead += resultMsg.usage.cache_read_input_tokens || 0;
+        totalCacheCreation += resultMsg.usage.cache_creation_input_tokens || 0;
+      }
+      if (resultMsg.total_cost_usd) {
+        totalCostUsd += resultMsg.total_cost_usd;
+      }
+      if (resultMsg.modelUsage) {
+        for (const [model, usage] of Object.entries(resultMsg.modelUsage)) {
+          const cur = modelUsageMap[model] || {
+            costUSD: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+          };
+          cur.costUSD += usage.costUSD;
+          cur.inputTokens += usage.inputTokens;
+          cur.outputTokens += usage.outputTokens;
+          modelUsageMap[model] = cur;
+        }
+      }
+
+      // Stream result with cumulative usage back to host.
+      // The HOST is responsible for logging only once per container run
+      // (it tracks the latest usage and writes to DB when the run ends).
       writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId,
+        usage: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          cacheReadInputTokens: totalCacheRead,
+          cacheCreationInputTokens: totalCacheCreation,
+          costUsd: totalCostUsd,
+          modelUsage:
+            Object.keys(modelUsageMap).length > 0 ? modelUsageMap : undefined,
+        },
       });
     }
   }

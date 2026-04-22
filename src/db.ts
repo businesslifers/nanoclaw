@@ -157,6 +157,30 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Usage tracking table (dashboard)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS usage_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT,
+      logged_at TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_group ON usage_logs(group_folder);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_time ON usage_logs(logged_at);
+  `);
+
+  // Add model_usage column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE usage_logs ADD COLUMN model_usage TEXT`);
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -749,4 +773,318 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard queries
+// ---------------------------------------------------------------------------
+
+export function getTaskRunLogs(taskId: string, limit = 20): TaskRunLog[] {
+  return db
+    .prepare(
+      'SELECT task_id, run_at, duration_ms, status, result, error FROM task_run_logs WHERE task_id = ? ORDER BY run_at DESC LIMIT ?',
+    )
+    .all(taskId, limit) as TaskRunLog[];
+}
+
+export function getRecentTaskRunLogs(limit = 50): TaskRunLog[] {
+  return db
+    .prepare(
+      'SELECT task_id, run_at, duration_ms, status, result, error FROM task_run_logs ORDER BY run_at DESC LIMIT ?',
+    )
+    .all(limit) as TaskRunLog[];
+}
+
+// --- Usage tracking ---
+
+export interface UsageLog {
+  group_folder: string;
+  chat_jid: string | null;
+  logged_at: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number;
+  model_usage?: string | null;
+}
+
+export function logUsage(entry: UsageLog): number {
+  const result = db
+    .prepare(
+      `INSERT INTO usage_logs (group_folder, chat_jid, logged_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, model_usage)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      entry.group_folder,
+      entry.chat_jid,
+      entry.logged_at,
+      entry.input_tokens,
+      entry.output_tokens,
+      entry.cache_read_tokens,
+      entry.cache_creation_tokens,
+      entry.cost_usd,
+      entry.model_usage ?? null,
+    );
+  return Number(result.lastInsertRowid);
+}
+
+export function updateUsage(id: number, entry: UsageLog): void {
+  db.prepare(
+    `UPDATE usage_logs SET logged_at = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?, cost_usd = ?, model_usage = ? WHERE id = ?`,
+  ).run(
+    entry.logged_at,
+    entry.input_tokens,
+    entry.output_tokens,
+    entry.cache_read_tokens,
+    entry.cache_creation_tokens,
+    entry.cost_usd,
+    entry.model_usage ?? null,
+    id,
+  );
+}
+
+export function getUsageByGroup(): {
+  group_folder: string;
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_creation: number;
+  total_cost_usd: number;
+  run_count: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT group_folder,
+              SUM(input_tokens) as total_input,
+              SUM(output_tokens) as total_output,
+              SUM(cache_read_tokens) as total_cache_read,
+              SUM(cache_creation_tokens) as total_cache_creation,
+              ROUND(SUM(cost_usd), 6) as total_cost_usd,
+              COUNT(*) as run_count
+       FROM usage_logs
+       GROUP BY group_folder
+       ORDER BY total_cost_usd DESC`,
+    )
+    .all() as {
+    group_folder: string;
+    total_input: number;
+    total_output: number;
+    total_cache_read: number;
+    total_cache_creation: number;
+    total_cost_usd: number;
+    run_count: number;
+  }[];
+}
+
+export function getUsageRecent(limit = 50): UsageLog[] {
+  return db
+    .prepare(
+      `SELECT group_folder, chat_jid, logged_at, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, model_usage
+       FROM usage_logs ORDER BY logged_at DESC LIMIT ?`,
+    )
+    .all(limit) as UsageLog[];
+}
+
+export function getUsageTotals(): {
+  total_input: number;
+  total_output: number;
+  total_cache_read: number;
+  total_cache_creation: number;
+  total_cost_usd: number;
+  run_count: number;
+} {
+  return db
+    .prepare(
+      `SELECT COALESCE(SUM(input_tokens),0) as total_input,
+              COALESCE(SUM(output_tokens),0) as total_output,
+              COALESCE(SUM(cache_read_tokens),0) as total_cache_read,
+              COALESCE(SUM(cache_creation_tokens),0) as total_cache_creation,
+              ROUND(COALESCE(SUM(cost_usd),0), 6) as total_cost_usd,
+              COUNT(*) as run_count
+       FROM usage_logs`,
+    )
+    .get() as {
+    total_input: number;
+    total_output: number;
+    total_cache_read: number;
+    total_cache_creation: number;
+    total_cost_usd: number;
+    run_count: number;
+  };
+}
+
+export function getUsageDaily(): {
+  day: string;
+  group_folder: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  runs: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT date(logged_at) as day,
+              group_folder,
+              COALESCE(SUM(input_tokens),0) as input_tokens,
+              COALESCE(SUM(output_tokens),0) as output_tokens,
+              COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
+              ROUND(COALESCE(SUM(cost_usd),0), 4) as cost_usd,
+              COUNT(*) as runs
+       FROM usage_logs
+       GROUP BY date(logged_at), group_folder
+       ORDER BY day`,
+    )
+    .all() as {
+    day: string;
+    group_folder: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cost_usd: number;
+    runs: number;
+  }[];
+}
+
+export interface ModelUsageSummary {
+  model: string;
+  total_cost_usd: number;
+  total_input: number;
+  total_output: number;
+  run_count: number;
+}
+
+export function getUsageByModel(): ModelUsageSummary[] {
+  const rows = db
+    .prepare(`SELECT model_usage FROM usage_logs WHERE model_usage IS NOT NULL`)
+    .all() as { model_usage: string }[];
+
+  const acc: Record<
+    string,
+    {
+      costUSD: number;
+      inputTokens: number;
+      outputTokens: number;
+      count: number;
+    }
+  > = {};
+
+  for (const row of rows) {
+    let parsed: Record<
+      string,
+      { costUSD: number; inputTokens: number; outputTokens: number }
+    >;
+    try {
+      parsed = JSON.parse(row.model_usage);
+    } catch {
+      continue;
+    }
+    for (const [model, usage] of Object.entries(parsed)) {
+      if (!acc[model]) {
+        acc[model] = { costUSD: 0, inputTokens: 0, outputTokens: 0, count: 0 };
+      }
+      acc[model].costUSD += usage.costUSD ?? 0;
+      acc[model].inputTokens += usage.inputTokens ?? 0;
+      acc[model].outputTokens += usage.outputTokens ?? 0;
+      acc[model].count += 1;
+    }
+  }
+
+  return Object.entries(acc)
+    .map(([model, data]) => ({
+      model,
+      total_cost_usd: Math.round(data.costUSD * 1e6) / 1e6,
+      total_input: data.inputTokens,
+      total_output: data.outputTokens,
+      run_count: data.count,
+    }))
+    .sort((a, b) => b.total_cost_usd - a.total_cost_usd);
+}
+
+// --- Message activity ---
+
+export function getMessageActivity(sinceTimestamp: string): {
+  chat_jid: string;
+  total_count: number;
+  recent_count: number;
+}[] {
+  return db
+    .prepare(
+      `SELECT m.chat_jid,
+              COUNT(*) as total_count,
+              SUM(CASE WHEN m.timestamp > ? THEN 1 ELSE 0 END) as recent_count
+       FROM messages m
+       INNER JOIN registered_groups rg ON m.chat_jid = rg.jid
+       GROUP BY m.chat_jid
+       ORDER BY recent_count DESC
+       LIMIT 10`,
+    )
+    .all(sinceTimestamp) as {
+    chat_jid: string;
+    total_count: number;
+    recent_count: number;
+  }[];
+}
+
+// --- Reaction stats (gracefully degrades if reactions table absent) ---
+
+export function getReactionStats(chatJid?: string): Array<{
+  emoji: string;
+  count: number;
+}> {
+  try {
+    const sql = chatJid
+      ? `
+        SELECT emoji, COUNT(*) as count
+        FROM reactions
+        WHERE message_chat_jid = ?
+        GROUP BY emoji
+        ORDER BY count DESC
+      `
+      : `
+        SELECT emoji, COUNT(*) as count
+        FROM reactions
+        GROUP BY emoji
+        ORDER BY count DESC
+      `;
+
+    type Result = { emoji: string; count: number };
+    return chatJid
+      ? (db.prepare(sql).all(chatJid) as Result[])
+      : (db.prepare(sql).all() as Result[]);
+  } catch {
+    // reactions table may not exist if add-reactions skill is not installed
+    return [];
+  }
+}
+
+// --- Dashboard message history queries ---
+
+export function getMessageContent(
+  messageId: string,
+  chatJid: string,
+): { content: string; sender_name: string; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT content, sender_name, timestamp FROM messages WHERE id = ? AND chat_jid = ? LIMIT 1`,
+    )
+    .get(messageId, chatJid) as
+    | { content: string; sender_name: string; timestamp: string }
+    | undefined;
+}
+
+export function getBotReplyAfter(
+  chatJid: string,
+  afterTimestamp: string,
+): { id: string; content: string; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT id, content, timestamp FROM messages
+       WHERE chat_jid = ? AND is_bot_message = 1 AND timestamp >= ?
+       ORDER BY timestamp ASC LIMIT 1`,
+    )
+    .get(chatJid, afterTimestamp) as
+    | { id: string; content: string; timestamp: string }
+    | undefined;
 }
