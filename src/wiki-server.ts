@@ -175,10 +175,56 @@ a:hover { text-decoration: underline; }
 
 .empty-state { display: flex; align-items: center; justify-content: center; min-height: 60vh; color: var(--fg2); font-style: italic; }
 
+.wiki-content pre { position: relative; }
+.wiki-content pre .copy-btn {
+  position: absolute; top: 6px; right: 6px;
+  font: inherit; font-size: 11px; line-height: 1;
+  padding: 4px 8px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--fg2);
+  border-radius: 4px; cursor: pointer;
+  opacity: 0.25; transition: opacity 0.15s, color 0.15s;
+}
+.wiki-content pre:hover .copy-btn,
+.wiki-content pre .copy-btn:focus { opacity: 1; }
+.wiki-content pre .copy-btn:hover { color: var(--fg); }
+.wiki-content pre .copy-btn.copied { color: var(--green); opacity: 1; }
+
 @media (max-width: 768px) {
   .wiki-sidebar { display: none; }
   .wiki-content { padding: 1.25rem; }
 }
+`;
+
+// Post-processes rendered markdown code blocks to add a copy-to-clipboard
+// button. Runs after DOM ready; no external dependencies.
+const COPY_BUTTON_JS = `
+(function(){
+  function attach(pre){
+    if(pre.querySelector(':scope > .copy-btn'))return;
+    var btn=document.createElement('button');
+    btn.type='button';btn.className='copy-btn';btn.textContent='Copy';
+    btn.setAttribute('aria-label','Copy code to clipboard');
+    btn.addEventListener('click',function(){
+      var code=pre.querySelector('code');
+      var text=(code?code.innerText:pre.innerText).replace(/\\n$/,'');
+      var done=function(){
+        btn.textContent='Copied!';btn.classList.add('copied');
+        setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},1500);
+      };
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done,function(){});
+      }
+    });
+    pre.appendChild(btn);
+  }
+  function init(){
+    var pres=document.querySelectorAll('.wiki-content pre');
+    for(var i=0;i<pres.length;i++)attach(pres[i]);
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',init);
+  }else{init();}
+})();
 `;
 
 // ── HTML rendering ──────────────────────────────────────────────────────────
@@ -287,6 +333,7 @@ function renderPage(
   <nav class="wiki-sidebar">${sidebarHtml}</nav>
   ${contentHtml}
 </div>
+<script>${COPY_BUTTON_JS}</script>
 </body>
 </html>`;
 }
