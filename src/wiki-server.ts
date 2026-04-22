@@ -286,6 +286,7 @@ function renderPage(
     const evaluated = page.data.evaluated as string | undefined;
     const updated = page.data.updated as string | undefined;
     const source = page.data.source as string | undefined;
+    const sourceUrl = page.data.url as string | undefined;
 
     const metaParts: string[] = [];
     if (verdict === 'worth-exploring')
@@ -301,10 +302,21 @@ function renderPage(
     if (evaluated)
       metaParts.push(`<span>Evaluated: ${escapeHtml(evaluated)}</span>`);
     if (updated) metaParts.push(`<span>Updated: ${escapeHtml(updated)}</span>`);
-    if (source)
+    const isHttpUrl = (s: string) => /^https?:\/\//i.test(s);
+    const href =
+      sourceUrl && isHttpUrl(sourceUrl)
+        ? sourceUrl
+        : source && isHttpUrl(source)
+          ? source
+          : undefined;
+    if (href) {
+      const label = source && !isHttpUrl(source) ? source : 'Source';
       metaParts.push(
-        `<a href="${escapeHtml(source)}" target="_blank" rel="noopener noreferrer">Source ↗</a>`,
+        `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(label)}">${escapeHtml(label)} ↗</a>`,
       );
+    } else if (source) {
+      metaParts.push(`<span>Source: ${escapeHtml(source)}</span>`);
+    }
     if (tags.length > 0)
       metaParts.push(
         ...tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`),
