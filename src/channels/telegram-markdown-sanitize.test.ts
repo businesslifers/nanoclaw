@@ -68,9 +68,7 @@ describe('sanitizeTelegramLegacyMarkdown', () => {
 
   it('flattens Markdown horizontal rules (---, ***, ___)', () => {
     const input = 'before\n---\n***\n___\nafter';
-    expect(sanitizeTelegramLegacyMarkdown(input)).toBe(
-      'before\n⎯⎯⎯\n⎯⎯⎯\n⎯⎯⎯\nafter',
-    );
+    expect(sanitizeTelegramLegacyMarkdown(input)).toBe('before\n⎯⎯⎯\n⎯⎯⎯\n⎯⎯⎯\nafter');
   });
 
   it('leaves horizontal rules inside code blocks alone', () => {
