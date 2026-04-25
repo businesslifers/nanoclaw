@@ -25,6 +25,7 @@ import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
+import { onContainerWake, stopStatusTracking } from './modules/status-tracker/index.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
@@ -147,6 +148,9 @@ async function spawnContainer(session: Session): Promise<void> {
 
   activeContainers.set(session.id, { process: container, containerName });
   markContainerRunning(session.id);
+  // 💭 thinking: agent is loading. The status-tracker poll will promote
+  // to ⚙️ working once the first heartbeat lands.
+  onContainerWake(session.id);
 
   // Log stderr
   container.stderr?.on('data', (data) => {
@@ -167,6 +171,7 @@ async function spawnContainer(session: Session): Promise<void> {
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    stopStatusTracking(session.id);
     log.info('Container exited', { sessionId: session.id, code, containerName });
   });
 
@@ -174,6 +179,7 @@ async function spawnContainer(session: Session): Promise<void> {
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    stopStatusTracking(session.id);
     log.error('Container spawn error', { sessionId: session.id, err });
   });
 }

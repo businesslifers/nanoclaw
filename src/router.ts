@@ -27,6 +27,7 @@ import {
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
+import { startStatusTracking } from './modules/status-tracker/index.js';
 import { startTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
@@ -445,9 +446,17 @@ async function deliverToAgent(
   });
 
   if (wake) {
-    // Typing indicator + wake are only for the engaged branch; accumulated
-    // messages sit silently until a real trigger fires.
+    // Typing indicator + status reaction + wake are only for the engaged
+    // branch; accumulated messages sit silently until a real trigger fires.
     startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
+    startStatusTracking(
+      session.id,
+      session.agent_group_id,
+      event.channelType,
+      event.platformId,
+      event.threadId,
+      event.message.id,
+    );
     const freshSession = getSession(session.id);
     if (freshSession) {
       await wakeContainer(freshSession);
