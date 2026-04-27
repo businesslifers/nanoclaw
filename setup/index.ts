@@ -2,6 +2,8 @@
  * Setup CLI entry point.
  * Usage: pnpm exec tsx setup/index.ts --step <name> [args...]
  */
+import '../src/net-init.js';
+
 import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
 
@@ -14,6 +16,7 @@ const STEPS: Record<
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
   register: () => import('./register.js'),
+  'pair-telegram': () => import('./pair-telegram.js'),
   groups: () => import('./groups.js'),
   'whatsapp-auth': () => import('./whatsapp-auth.js'),
   'signal-auth': () => import('./signal-auth.js'),
