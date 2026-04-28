@@ -68,6 +68,13 @@ export function isContainerRunning(sessionId: string): boolean {
   return activeContainers.has(sessionId);
 }
 
+/** Snapshot of currently-tracked sessionId → container name. Read-only copy. */
+export function getActiveContainerNames(): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [sid, entry] of activeContainers) out.set(sid, entry.containerName);
+  return out;
+}
+
 /**
  * Wake up a container for a session. If already running or mid-spawn, no-op
  * (the in-flight wake promise is reused).
@@ -281,10 +288,18 @@ function buildMounts(
     mounts.push({ hostPath: fragmentsDir, containerPath: '/workspace/agent/.claude-fragments', readonly: true });
   }
 
-  // Global memory directory — always read-only.
+  // Global memory directory — read-write only for the configured "main"
+  // agent group (NANOCLAW_MAIN_GROUP_FOLDER). All other agents see
+  // /workspace/global as read-only. The main agent maintains the global
+  // wiki on behalf of all groups; non-main agents can read it freely but
+  // must propose updates as chat messages back to the operator instead of
+  // writing directly. If the env var is unset, the historical default
+  // (read-only for everyone) is preserved.
   const globalDir = path.join(GROUPS_DIR, 'global');
   if (fs.existsSync(globalDir)) {
-    mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: true });
+    const mainFolder = (process.env.NANOCLAW_MAIN_GROUP_FOLDER || '').trim();
+    const isMainGroup = mainFolder.length > 0 && agentGroup.folder === mainFolder;
+    mounts.push({ hostPath: globalDir, containerPath: '/workspace/global', readonly: !isMainGroup });
   }
 
   // Shared CLAUDE.md — read-only, imported by the composed entry point via

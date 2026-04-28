@@ -171,10 +171,23 @@ export function migrateGroupsToClaudeLocal(): void {
     }
   }
 
+  // The pre-wiki migration nuked `groups/global/` outright (content had
+  // moved to container/CLAUDE.md). The directory is now also a host for the
+  // shared wiki under `groups/global/wiki/` and `groups/global/sources/`,
+  // so we only clean up the legacy CLAUDE.md artifact here. If, after the
+  // cleanup, the directory is empty, remove it. Otherwise leave it — the
+  // wiki content stays put.
   const globalDir = path.join(GROUPS_DIR, 'global');
   if (fs.existsSync(globalDir)) {
-    fs.rmSync(globalDir, { recursive: true, force: true });
-    actions.push('groups/global/ removed');
+    const legacyClaudeMd = path.join(globalDir, 'CLAUDE.md');
+    if (fs.existsSync(legacyClaudeMd)) {
+      fs.unlinkSync(legacyClaudeMd);
+      actions.push('groups/global/CLAUDE.md removed');
+    }
+    if (fs.readdirSync(globalDir).length === 0) {
+      fs.rmdirSync(globalDir);
+      actions.push('groups/global/ removed (empty)');
+    }
   }
 
   if (actions.length > 0) {
