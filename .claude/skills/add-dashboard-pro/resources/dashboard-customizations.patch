@@ -1,5 +1,5 @@
 diff --git a/dist/router.js b/dist/router.js
-index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd7369477b 100644
+index 326434d..3ad20a0 100644
 --- a/dist/router.js
 +++ b/dist/router.js
 @@ -6,6 +6,10 @@ import { channelsPage } from './ui/pages/channels.js';
@@ -115,10 +115,10 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17da241fb5f 100644
+index 36b9575..3edc17a 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -5,169 +5,2506 @@
+@@ -5,169 +5,2704 @@
  import { getDashboardSecret } from '../server.js';
  const NAV_ITEMS = [
      { href: '/dashboard', label: 'Overview', icon: '&#9632;' },
@@ -176,6 +176,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
 +    font-weight: 700;
 +    color: #f1f5f9;
 +    letter-spacing: 0.2px;
++  }
++  .sidebar-logo {
++    width: 20px;
++    height: 20px;
++    vertical-align: -3px;
++    margin-right: 8px;
 +  }
 +  .sidebar-status {
 +    display: inline-flex;
@@ -967,6 +973,197 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
 +    font-family: inherit;
 +  }
 +  .agent-groups-v2 .ag-menu-item:hover { background: rgba(45, 212, 191, 0.10); color: var(--ag-cyan); }
++
++  /* View toggle (list / cards) */
++  .agent-groups-v2 .ag-view-toggle {
++    display: inline-flex;
++    background: var(--ag-surface);
++    border: 1px solid var(--ag-border);
++    border-radius: 8px;
++    padding: 2px;
++    gap: 2px;
++  }
++  .agent-groups-v2 .ag-view-btn {
++    background: none;
++    border: none;
++    color: var(--ag-text-dim);
++    padding: 6px 8px;
++    border-radius: 6px;
++    cursor: pointer;
++    display: inline-flex;
++    align-items: center;
++    transition: background 0.15s, color 0.15s;
++  }
++  .agent-groups-v2 .ag-view-btn:hover { color: var(--ag-text); background: rgba(45, 212, 191, 0.06); }
++  .agent-groups-v2 .ag-view-btn-active {
++    background: rgba(45, 212, 191, 0.15);
++    color: var(--ag-cyan);
++    box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.30) inset;
++  }
++
++  /* Cards view — collapsible group section */
++  .agent-groups-v2 .ag-view-cards { display: flex; flex-direction: column; gap: 16px; }
++  .agent-groups-v2 .ag-cards-group {
++    background: var(--ag-surface);
++    border: 1px solid var(--ag-border);
++    border-radius: 12px;
++    overflow: hidden;
++  }
++  .agent-groups-v2 .ag-cards-group-head {
++    display: flex;
++    align-items: center;
++    gap: 10px;
++    padding: 12px 16px;
++    background: var(--ag-surface-2);
++    border-bottom: 1px solid var(--ag-border);
++    flex-wrap: wrap;
++  }
++  .agent-groups-v2 .ag-cards-group-toggle {
++    background: none;
++    border: 1px solid transparent;
++    color: var(--ag-text-dim);
++    cursor: pointer;
++    padding: 4px;
++    border-radius: 6px;
++    display: inline-flex;
++    align-items: center;
++    transition: transform 0.2s, color 0.15s;
++  }
++  .agent-groups-v2 .ag-cards-group-toggle:hover { color: var(--ag-cyan); }
++  .agent-groups-v2 .ag-cards-group[data-collapsed="1"] .ag-cards-group-toggle { transform: rotate(-90deg); }
++  .agent-groups-v2 .ag-cards-group[data-collapsed="1"] .ag-cards-grid { display: none; }
++  .agent-groups-v2 .ag-cards-group-name {
++    font-size: 14px;
++    font-weight: 700;
++    color: #f1f5f9;
++    margin: 0;
++    letter-spacing: -0.1px;
++  }
++  .agent-groups-v2 .ag-cards-group-count { color: var(--ag-text-dim); font-size: 11.5px; }
++  .agent-groups-v2 .ag-cards-group-meta {
++    margin-left: auto;
++    display: inline-flex;
++    align-items: center;
++    gap: 16px;
++    color: var(--ag-text-dim);
++    font-size: 11.5px;
++  }
++  .agent-groups-v2 .ag-cards-group-stat { white-space: nowrap; }
++  .agent-groups-v2 .ag-cards-group-stat-num { color: var(--ag-text); font-weight: 600; margin-right: 2px; }
++  .agent-groups-v2 .ag-cards-group-stat-date { color: #475569; }
++
++  .agent-groups-v2 .ag-cards-grid {
++    display: grid;
++    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
++    gap: 12px;
++    padding: 14px 16px;
++  }
++  .agent-groups-v2 .ag-card {
++    background: var(--ag-surface-2);
++    border: 1px solid var(--ag-border);
++    border-radius: 10px;
++    padding: 14px;
++    display: flex;
++    flex-direction: column;
++    gap: 12px;
++    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
++    position: relative;
++  }
++  .agent-groups-v2 .ag-card:hover {
++    border-color: rgba(45, 212, 191, 0.45);
++    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(232, 121, 249, 0.18);
++    transform: translateY(-1px);
++  }
++  .agent-groups-v2 .ag-card-head { display: flex; align-items: flex-start; gap: 10px; }
++  .agent-groups-v2 .ag-card-avatar {
++    flex: 0 0 auto;
++    width: 38px;
++    height: 38px;
++    border-radius: 9px;
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    color: #0b0f1a;
++    font-weight: 700;
++    font-size: 16px;
++    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
++  }
++  .agent-groups-v2 .ag-card-titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
++  .agent-groups-v2 .ag-card-name {
++    font-weight: 600;
++    color: #f1f5f9;
++    font-size: 14px;
++    text-decoration: none;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .agent-groups-v2 .ag-card-name:hover { color: var(--ag-cyan); }
++  .agent-groups-v2 .ag-card-tag-row { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
++  .agent-groups-v2 .ag-card-tag-row .ag-tag { margin-left: 0; }
++  .agent-groups-v2 .ag-card-model { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
++  .agent-groups-v2 .ag-card-model .ag-model-name { margin-left: 2px; }
++  .agent-groups-v2 .ag-card-menu-btn {
++    flex: 0 0 auto;
++    margin-left: auto;
++    margin-top: -4px;
++    margin-right: -4px;
++  }
++
++  .agent-groups-v2 .ag-card-stats {
++    display: grid;
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++    gap: 8px;
++    padding: 10px 0;
++    border-top: 1px solid var(--ag-border);
++    border-bottom: 1px solid var(--ag-border);
++  }
++  .agent-groups-v2 .ag-card-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
++  .agent-groups-v2 .ag-card-stat-value {
++    color: #f1f5f9;
++    font-size: 14px;
++    font-weight: 600;
++    font-variant-numeric: tabular-nums;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .agent-groups-v2 .ag-card-stat-folder { font-size: 12px; font-weight: 500; color: var(--ag-text); }
++  .agent-groups-v2 .ag-card-stat-label {
++    color: var(--ag-text-dim);
++    font-size: 10px;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++  }
++  .agent-groups-v2 .ag-card-stat-running {
++    color: #34d399;
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++  }
++  .agent-groups-v2 .ag-pulse-dot {
++    width: 6px;
++    height: 6px;
++    border-radius: 50%;
++    background: #34d399;
++    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
++    animation: ag-pulse 1.6s infinite;
++  }
++  @keyframes ag-pulse {
++    0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6); }
++    70%  { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
++    100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
++  }
++
++  .agent-groups-v2 .ag-card-foot {
++    display: flex;
++    justify-content: space-between;
++    align-items: center;
++    color: var(--ag-text-dim);
++    font-size: 11px;
++  }
++  .agent-groups-v2 .ag-card-foot-date { white-space: nowrap; }
++  .agent-groups-v2 .ag-card-usage { color: #f1f5f9; font-weight: 600; font-variant-numeric: tabular-nums; }
 +
 +  /* ─────────────────────────────────────────────────────────
 +   * .sessions-v2 — scoped redesign for the Sessions page
@@ -2725,22 +2922,24 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
  `;
  export function layout(title, activePath, bodyHtml) {
      const token = getDashboardSecret() || '';
++    const NANOCLAW_ICON_DATA_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMzIwIiBmaWxsPSJub25lIiB2aWV3Qm94PSIxOTAgNjUgMzIwIDMyMCI+PHBhdGggZmlsbD0iIzEyMTcyOSIgZD0iTTM4MS41NTYgNzguNTgzYTEuNTQgMS41NCAwIDAgMSAxLjEzOS0uMjEyYy4zODkuMDgxLjczLjMxNS45NTkuNjUycy4zMjUuNzQ4LjI1OSAxLjE0M2ExMDYgMTA2IDAgMCAxLS42MyAzLjM5MWMtNC4wOTUgMTkuMjQtMTIuMTU2IDM3LjM4Ny0yMy44NzUgNTMuNjc1IDQuNTE1IDMuMzcgOC4zNzIgNy4yMSAxMS43OTggMTEuNDkgMTEuNDU0LTE2LjEyMSAxOS44MDctMzUuODM2IDI0LjM1NS01NS44LjI0My0xLjEyNS40NzMtMi4yNi42ODQtMy4zOS4wNzQtLjM5My4zMDUtLjc0Ny42MzUtLjk4M2ExLjU0IDEuNTQgMCAwIDEgMS4xMjctLjI3OGMuMzkzLjA1OS43NDguMjczLjk5Ni41OTYuMjQ3LjMyMy4zNjYuNzMuMzIyIDEuMTI3YTEyMyAxMjMgMCAwIDEtLjQ0MyAzLjUyNWMtMy4yNyAyMS4xMTktOS45NTggNDEuNDI0LTIxLjQyMSA2MC4zMTZhNDAgNDAgMCAwIDEtMS4yOTEgMS44MmMyLjI4MyAzLjU0NCA0LjM4OSA3LjMyNyA2LjQxIDExLjMzOCA2LjAyMiAxMS45MzMgOS4xMzkgMjUuMDU1IDEwLjEzNSAzOC4zMzguMDg3IDEuMTE4LjE0IDQuODcyLjk2NSA1LjUwNCAyLjA5Ni4xODMgMTAuMzczLTEwLjc0OCAxMS43MDQtMTIuNzIzIDEuMS0xLjYzMyAzLjk0Ni01Ljk3OCA0LjQ0Ni03LjgxNyAxLjc4OS02LjU5MyAyLjU2Ny0xMy41NDggMy4wNzgtMjAuMzYxIDEuMjA0LTEzLjgwMiA4LjUyMy0yNy4xMjEgMTkuNTgzLTM1LjM4IDQuNDY0LTMuMzM1IDEzLjQwNy04LjYzMiAxOC41NzMtMy4yNTQgNC41NDMgNC43My00LjQ4IDkuNjY5LTYuMTU2IDEzLjE4Ni0xLjA5IDIuMjg2LjI2NSA0LjkyLjY2NSA3LjE5My42NTMgMy43MTYtLjA4IDYuMzM3LTEuNTY2IDkuNjg1LS4zLjY3My0uNzA4IDEuNDQ0LS4zMjYgMi4xNjMgMi4wMzcgMS41MSA0LjM0My0zLjYyMSA1LjE5NS00LjgyNSAyLjY3LTMuOCA2LjQ5Ni02LjAyOCAxMC4wMzUtOC44NTcuNDItLjMzNi41OTQtLjg4Ny40ODctMS40MTYtLjc1My0zLjcwMS0xLjI0Ni0xMC45NjQuNTg2LTEzLjYyMSA2LjM0Ny05LjIxMyAxNS40NTYtLjEyIDE2Ljg0NCA3LjczOSAxLjM2NyA3LjQ4NiAxLjA1OSAxNS4wMzQtLjgzNSAyMi40MTktMy43NjcgMTQuNjc5LTExLjk1NiAyOC4yMDItMjQuMDc1IDM3LjM4LTQuNTQ4IDMuNDQ0LTguNzc0IDUuMzI3LTE0LjAzMyA2Ljc1MmEyLjg4IDIuODggMCAwIDAtMS42MSAxLjEzYy0xMy43NTIgMTkuNzI2LTM0Ljg4MiAzNC4xMzgtNTAuMjUzIDQwLjY1NS00LjIwNyAzLjkxOS03Ljc0IDkuMjYtMTEuNzQzIDEzLjUyNC0uNzI3Ljc3Ni0uNjU4IDIuMDI3LjIzOCAyLjU5OCAxLjkwNyAxLjIxNyAzLjg5NSAyLjE1IDUuODg2IDMuMzI4IDExLjkwNiA3LjA0IDE5LjQwOSAxOC4zNyAyMS4yMTQgMzIuMTY3YTc0LjIgNzQuMiAwIDAgMS0xLjcyMSAyOS4yNWMxMy4wMjggNC4wNDYgMzMuOSAyNS40MDUgMTQuODc5IDM1LjM4OS0xMy4wNjQgNi41Ny0zMi44IDUuNzktNDYuOTIgNi43MjItMzAuMDYyIDEuODI0LTYwLjQ2Ni44OTctOTAuNTEtMS40NjEtMy4zNDgtLjI0LTIwLjE4Mi0xLjA2NC0yMS43MzEtMy41OC0uMTUzLTQuNTExIDE5Ljk3NS00LjU3MyAyMy4zMjYtNS43NjYtMS43MTgtMS4xNjUtNC4zMy0yLjIyMy02LjI1My0zLjE5M2E1MyA1MyAwIDAgMS04Ljg0NC01LjcxM2MtNC4xNTUtMy4zMDItNi4wNTUtNi4yNi05LjE2Ny0xMC4zNDYtLjkyNS0xLjIxNC00LjU3My0yLjkyMS01Ljk5Ny00LjEzNS05LjI1NC03Ljg2My0xMy44MTUtMjAuNDg1LTE1LjAwNS0zMi4zMi0uMzY1LTMuNjMyLS43NjQtMy4xNy0yLjY5Mi02LjA0My04LjkzMy0xMy4zMDctNy42Ny0zOC40MjYtLjY2Ni01Mi4xNS0xMC43OC0zNi42MzcgMTUuNTM1LTkzLjQwNSA0Ni4zNjctMTEzLjc4NiAxOS4xOC0xMi44MzQgNDUuNjQzLTE1LjM1IDY3LjE5NC02LjczN2E3Mi41IDcyLjUgMCAwIDEgOC45NDMgNC4yOTJjMTIuMTYyLTE0LjIzNiAyMS44MDgtMzEuNzA3IDI3LjE4Ni01MC4xNjZxLjQ1Ni0xLjYwOC44NTktMy4yMzFjLjA5Ni0uMzg4LjM0OC0uNzI3LjY5LS45NDMiLz48ZyBmaWx0ZXI9InVybCgjYSkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIxLjY3IC4xNTYpIj48cGF0aCBmaWxsPSIjNTZlZGQ2IiBkPSJNMjk3Ljc5MiAyODguMzg1YTEuMDA3IDEuMDA3IDAgMCAxLS40NTUtMS42NTVjMzAuODQxLTMyLjM5OSA3MS42Ni0xMy4yOTMgNzMuMTU1IDE5LjAxMyAxLjU1MyA2OC42ODQtODYuOTQyIDU0Ljc2OS05My4xNTYgNTMuMjA4IDIuMzQxLTIuMDk0IDkuNjMtMy41MDggMTEuODI0LTEwLjMxNC42NDMtMS45OTMgMi43NjMtMy41MTQgNC43ODItMi45NjIgOS4yMDkgMi41MTkgMjYuMzEgNC44NDUgMjcuOTM5LTUuMTQ4IDEuMTQyLTcuMDA4LTguMzI1LTkuNTAxLTEzLjM3Mi0xNC4zMDktMS42OTUtMS42MTUtLjUwMi0zLjk5NyAxLjgyOS0zLjc4IDcuNDkuNjk3IDE3LjQzNSA1LjM3NSAyMC45OTgtMS43OTIgNi42OC0xMy40MzctMTguNDExLTI3Ljk3OC0zMy41NDQtMzIuMjYxIi8+PC9nPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0yOTQuNDc2IDEzNi43YzE0LjEyNi02LjI3IDMxLjg0LTUuMDg4IDQ1Ljk4Ni4wOTUgMS41OTkuNTg1IDMuNDA1IDEuMzQgNC44MzMgMi40MjIuODU4LjY1IDEuMDE5IDEuODQ1LjQ0NCAyLjc1Ny0yLjY5NyA0LjI3Mi03LjQ3MyA2Ljc3Ni0xMC4wNTQgMTEuMDQ4LTEuNjA3IDIuNjYyLjE5OCA0LjggMi41NSA2LjAxNiA1Ljk3MiAyLjQwNyAxMC44MDYtNy4yNzIgMTQuNDI1LTEyLjEwNS43NTYtMS4wMSAyLjEzNS0xLjE5IDMuMTctLjQ3NiAxMS41MDkgNy45MyAxOC45MzkgMjIuODg2IDIyLjk5NyAzNS4yMDYgNi4xNzQgMTguNzM5IDEwLjExIDQzLjgwOS44OTYgNjIuMjA5LTQuMjA2IDguMzU0LTguNzQzIDE0LjYzOC0yMC41MTUgMTcuMjc2LTEyLjAzNyAyLjU5Ny0yNi44Mi0yLjEyMi0zOS40NDMgMTIuNTI4LTIuNDkxIDIuNjg1LTQuODcgNi42NDQtNy43MDEgOC41NzgtNC40NzEgMy4wNTMtOC44My0zLjAzLTExLjQzNS03Ljc3NC0zLjg3My03LjA1LTguODA1LTE1LjA1NC0xNC4yNDYtMTYuNjY1LTcuNTgxLTMuMjQ2LTEzLjY3MiAxLjc2Ny0xMi45OCAxMC44MTVzLTUuMjU2IDQuMjEzLTEzLjI2Ny0uMzk4Yy04LjAxMi00LjYxMS0xOC42NTUtMTQuMDc1LTIxLjY0My0yNS40NjQtOC41NTItMzIuODIyIDIyLjE4LTk1LjAyNSA1NS45ODMtMTA2LjA2NyIvPjxwYXRoIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjcxIiBkPSJNMjk0LjQ3NiAxMzYuN2M3LjcwNy0zLjQyIDE2LjQ4LTQuNjIyIDI1LjE2LTQuMTY4LTYuMzQ4LjM0My0xMi41ODIgMS42NTgtMTguMjQgNC4xNjktMzMuODAyIDExLjA0Mi02NC41MzUgNzMuMjQ1LTU1Ljk4NCAxMDYuMDY3IDIuOTg4IDExLjM4OSAxMy42MzIgMjAuODUzIDIxLjY0MyAyNS40NjQgMi4yNyAxLjMwNiA0LjM3NCAyLjYzIDYuMjA5IDMuNjUyLTEuMDYgNC4zMDMtNi4zNTYuMjQ2LTEzLjEyOC0zLjY1Mi04LjAxMi00LjYxMS0xOC42NTUtMTQuMDc1LTIxLjY0My0yNS40NjQtOC41NTItMzIuODIyIDIyLjE4LTk1LjAyNSA1NS45ODMtMTA2LjA2NyIvPjxwYXRoIGZpbGw9IiMxMjE3MjkiIGQ9Ik0yODQuOTM0IDE3Ni42NzNjOC4yNi0uNjY4IDE1LjQ5OSA1LjUxNyAxNi4xNzkgMTMuODIzcy01LjQ1MyAxNS42LTEzLjcxMSAxNi4zMDJjLTguMjgyLjcwNC0xNS41Ni01LjQ4OC0xNi4yNDItMTMuODItLjY4My04LjMzIDUuNDg5LTE1LjYzNiAxMy43NzQtMTYuMzA1Ii8+PHBhdGggZmlsbD0iI2ZlZmVmZSIgZD0iTTI4OS45MDcgMTgxLjQ1OGMxLjE3OC4wMTggMi4yMjMuMTggMy4yODMuNzMgMS40MS43MjYgMi40NiAyIDIuOTA3IDMuNTI1YTUgNSAwIDAgMS0uNTI2IDMuOTdjLS45ODMgMS42NS0yLjQzMyAyLjMwNy00LjE3NiAyLjc5Mi0xLjI5Ni4yMy0yLjQ5NS4xNDgtMy42OTUtLjQ0M2E0Ljk0IDQuOTQgMCAwIDEtMi42MDMtMy4wOTUgNS43NSA1Ljc1IDAgMCAxIC41MzItNC40MzVjLjkyMy0xLjU4OCAyLjUyNS0yLjYxNyA0LjI3OC0zLjA0NCIvPjxwYXRoIGZpbGw9IiMxMjE3MjkiIGQ9Ik0zNjQuODQ1IDE3NS4yMzdjOC42NTMtLjcgMTYuMjM1IDUuNzc5IDE2Ljk0OCAxNC40OC43MTMgOC43MDMtNS43MTIgMTYuMzQzLTE0LjM2MyAxNy4wNzgtOC42NzUuNzM3LTE2LjI5OC01Ljc1LTE3LjAxNC0xNC40NzYtLjcxNS04LjcyOCA1Ljc1LTE2LjM4MSAxNC40MjktMTcuMDgyIi8+PHBhdGggZmlsbD0iI2ZlZmVmZSIgZD0iTTM2OS4yNDggMTc5LjM3YzEuMjg1LjAxOSAyLjQyNS4xOTIgMy41OC43NzZBNi4yIDYuMiAwIDAgMSAzNzYgMTgzLjg5YTUuMiA1LjIgMCAwIDEtLjU3NCA0LjIxOWMtMS4wNzIgMS43NTMtMi42NTQgMi40NS00LjU1NiAyLjk2Ni0xLjQxMy4yNDUtMi43MjEuMTU3LTQuMDMxLS40NzFhNS4zIDUuMyAwIDAgMS0yLjgzOC0zLjI5IDUuOTYgNS45NiAwIDAgMSAuNTgtNC43MTFjMS4wMDYtMS42ODcgMi43NTQtMi43OCA0LjY2Ny0zLjIzMyIvPjxnIGZpbGw9IiM1NmVkZDYiIGZpbHRlcj0idXJsKCNiKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGQ9Ik0yNTAuMTUgMzA2LjU5OWMtMzcuNTYzIDYuNDg2LTQxLjczOC0yMC45MjgtMzguNTY3LTM5LjExLjI0LTEuMzczIDIuMTk1LTEuNjM4IDMuMDQyLS41MzEgNi4xOTMgOC4wOTQgMTkuNDIgMTQuNjQ3IDI4LjY3OCAxNy44MTcgNC40MjMgMS41MTUgOC45MTQgNi40MTcgMTAuMDQzIDEwLjk1My4zOTkgMS42MDEuODE2IDMuMjQgMS4xNDkgNC44MDcuNjIyIDIuOTE4LTEuNDA1IDUuNTU2LTQuMzQ1IDYuMDY0bTExLjIwOCAyMC4xOTNjLTI4LjI3NCAxOS44MzQtMzcuODQ5IDEuNTk3LTM5LjQwNy0xMi4wMjEtLjExOS0xLjA0Ljg5Ny0xLjgxMSAxLjg5OC0xLjUwMyAxNC4yNDQgNC4zNzYgMjYuOTkgNC4zMDkgMzMuMjU1IDMuNTMzIDEuMTg2LS4xNDcgMi4zNjcuMzUzIDIuOTYxIDEuMzlhMTE4IDExOCAwIDAgMSAyLjMzOSA0LjMyNSAzLjM1IDMuMzUgMCAwIDEtMS4wNDYgNC4yNzZtLTE1LjA5OSAxNi41N2M2LjMzLTEuNTY0IDEwLjc5Ni0zLjU4NyAxMy44MTYtNS41MDQgMy4zMzktMi4xMTkgOC4yMDktMy42MTIgMTEuODEzLTEuOTg1IDIuMDQ1LjkyMyA0LjIwMyAxLjk4MyA2LjQ3NSAzLjQgMS44OTEgMS4xOCAyLjQxMyAzLjY5NCAxLjExOCA1LjUwOS0xMi4wMTQgMTYuODQ2LTI4LjgyNCA2LjU1Ni0zNCAuNjUtLjY1OS0uNzUyLS4xOTMtMS44My43NzgtMi4wNyIvPjwvZz48cGF0aCBmaWxsPSIjMTIxNzI5IiBkPSJNMzA3LjMxOSAyMDMuNDgzYzEuMjUtLjQ3MSAyLjY0OC0uNDMxIDMuOTEzLjEgMS4yNjcuNTMgMi4yODMgMS41MTUgMi45NDkgMi42OS4yNS4zNTkuNTM1LjcyNS44NDcgMS4wODYgMy45MDMgNC42MjUgMTEuMjA2IDcuMjM4IDE0Ljc3MiA1Ljg4MyAxLjcyLS41MDIgMy43MzYtMS4zMTcgNi4zMTQtMy4yNy40NS0uMzQyLjktLjY5IDEuMzgtMS4xLjk0LS44OSAyLjA4My0xLjYwOCAzLjM2LTEuODk1IDEuMjc4LS4yODcgMi41NzItLjEyNSAzLjY1OC40ODJzMS45IDEuNjI2IDIuMzI1IDIuODY0Yy40MjUgMS4yMzkuNDEgMi41ODguMTQ1IDMuODU2YTIyIDIyIDAgMCAxLS44MyAyLjUxM2MtMS43ODcgNC42NDQtNi4wODQgOS40NTQtMTIuMDg0IDExLjE1OC0xMy42MDggMy4zOTgtMjQuNTQ2LTQuNzUtMjkuMTQtMTQuOTk0YTIwIDIwIDAgMCAxLS45Mi0yLjc0NmMtLjI3NS0xLjMyMi0uMTYyLTIuNzMzLjQzOS0zLjk2OC41OTktMS4yMzUgMS42MjItMi4xODcgMi44NzItMi42NiIvPjxnIGZpbHRlcj0idXJsKCNjKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0zNzIuNzAxIDM0NC4xMzJjMS4yMzctMi4wMSAzLjM1My0zLjQ1NiA1LjUzMy0yLjU1MiA2LjU3OCAyLjcyOSAxNS40MTkgMTEuMDc4IDkuOTQxIDE2LjgxMS00LjYyNCA0Ljg0Mi0yNi4zMjIgNS4xNDktMzUuNzI5IDQuMzU3LS45MjctLjA3OC0xLjE0NC0xLjIyOC0uMzM1LTEuNjg0IDYuNTk0LTMuNzE1IDE1LjYyLTguODUyIDIwLjU5LTE2LjkzMiIvPjwvZz48cGF0aCBmaWxsPSIjNTZlZGQ2IiBkPSJNMjkyLjUyOSAyOTQuMjI2YzcuMjc2LTIuNzQxIDE0LjMwNy0xLjMwNiAyMS41ODktLjEzNCAxOS40MSAzLjEyNCAzNC45NDIgMTguNzQzIDMyLjYxMyAyMy40MjktMzYuNTItOC45MjMtMjguNzcxIDExLjI4LTEzLjkyMiAxOS45NjQuOTA0LjUyOS41OTYgMi4wNDktLjQ1MiAyLjA1NS0yMy43MzguMTQ2LTM4LjAzMy0xMS42NzMtNDQuMDc4LTI1LjE1LTYuNDAxLTE0LjI2Ny0xLjY3NC0xNy45MzEgNC4yNS0yMC4xNjRtLTEwLjQ3Mi0yOS4wNzZjNi4wMTYtMS44NTUgOS41NDIgMTQuNzg0IDE1LjE5NyAxOS44MjIuMzU4LjMxOS4yIDEuMDI5LS4yNzEgMS4xMDktNC4zNzYuNzM4LTkuNDE3IDIuMzA2LTEyLjg2NCA1LjIyNi0uNzI4LjYxNi0yLjI0NS4xNDUtMi4zOTgtLjc5Ny0xLjIzNy03LjYtNS4xODctMjMuNjU3LjMzNi0yNS4zNiIvPjxnIGZpbHRlcj0idXJsKCNkKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0zOTIuMTE0IDE5OC41MTRjLjUzLS45NjYgMS44OTItMS4wODEgMi42MDEtLjIzOSAzLjI1MyAzLjg2OSA2LjMzNCA1LjkxNiAxMC41MSA4LjMyMi43MDMuNDA1Ljk2NSAxLjI4Mi41MDkgMS45NTQtNi40MTYgOS40NS0zMy40NjUgMzMuNzg2LTM2LjA1IDI5LjI5NSAxLjAyNy0zLjUzNiAyLjIyMy04LjA2NiAyLjU5Mi0xMy41NTlhNy41IDcuNSAwIDAgMSAyLjg3LTUuNDA2YzguMDg2LTYuMjg2IDEzLjYzNi0xNC4yOTUgMTYuOTY4LTIwLjM2N201Mi42ODEtNjAuMTc5YzEyLjYyOSAxOC42MDgtMi45ODEgNDMuNDAxLTE3LjEwMSA1NS43OTItMTcuNTg3IDE1LjQzNS00Mi40MDgtNS4wMi0yNC4xNTYtMjAuMDYxIDcuMjgyLTYuMTA1IDE0LjctMi42NzYgMjIuNzMyLTQuODY2IDQuNDYyLTEuNDcgNS44NDktNy4wNDQgOS4xNTUtMTAuMTczIDIuMzgyLTIuMjU1IDguMzU2LTMuOTY3IDkuMTQ2LTcuMTY1Ljg3NS0zLjU0Mi0zLjU4MS0xMS43OTYuMjI0LTEzLjUyN20tMjIuNjYtMi43OTNjLTMuNDYgNC4xNzYtNi4wNTggMTAuNjE0LTQuMzI2IDE3LjkyMi0uODY4IDE2LjUyOS0xMy41NDEgOC4xNzctMjAuNTg3IDE5LjMxMi0yLjQyMiAzLjgyOC4zNDYtMTUuMTM2IDcuOTU4LTI0LjE4NCA3LjYxMS05LjA0OCAxMi45NzYtMTMuMDUgMTYuOTU1LTEzLjA1Ii8+PC9nPjxkZWZzPjxmaWx0ZXIgaWQ9ImEiIHdpZHRoPSI5My4xNzYiIGhlaWdodD0iOTEuMTYxIiB4PSIyNzcuMzM2IiB5PSIyNjkuOTc2IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSItOS4zODkiIGR5PSItMi40NzEiLz48ZmVDb21wb3NpdGUgaW4yPSJoYXJkQWxwaGEiIGsyPSItMSIgazM9IjEiIG9wZXJhdG9yPSJhcml0aG1ldGljIi8+PGZlQ29sb3JNYXRyaXggdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwLjE1IDAiLz48ZmVCbGVuZCBpbjI9InNoYXBlIiByZXN1bHQ9ImVmZmVjdDFfaW5uZXJTaGFkb3dfMzZfNjY1Ii8+PC9maWx0ZXI+PGZpbHRlciBpZD0iYiIgd2lkdGg9IjY5LjQ2NSIgaGVpZ2h0PSI4Ny43MjEiIHg9IjIxMC43MyIgeT0iMjY2LjI3IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSI2LjQyNCIgZHk9Ii02LjQyNCIvPjxmZUNvbXBvc2l0ZSBpbjI9ImhhcmRBbHBoYSIgazI9Ii0xIiBrMz0iMSIgb3BlcmF0b3I9ImFyaXRobWV0aWMiLz48ZmVDb2xvck1hdHJpeCB2YWx1ZXM9IjAgMCAwIDAgMSAwIDAgMCAwIDEgMCAwIDAgMCAxIDAgMCAwIDAuNzcgMCIvPjxmZUJsZW5kIGluMj0ic2hhcGUiIHJlc3VsdD0iZWZmZWN0MV9pbm5lclNoYWRvd18zNl82NjUiLz48L2ZpbHRlcj48ZmlsdGVyIGlkPSJjIiB3aWR0aD0iMzguMjc3IiBoZWlnaHQ9IjIxLjc3OCIgeD0iMzUxLjYwOSIgeT0iMzQxLjMwNSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ii8+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIi8+PGZlQ29sb3JNYXRyaXggaW49IlNvdXJjZUFscGhhIiByZXN1bHQ9ImhhcmRBbHBoYSIgdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAxMjcgMCIvPjxmZU9mZnNldCBkeT0iNi40MjQiLz48ZmVDb21wb3NpdGUgaW4yPSJoYXJkQWxwaGEiIGsyPSItMSIgazM9IjEiIG9wZXJhdG9yPSJhcml0aG1ldGljIi8+PGZlQ29sb3JNYXRyaXggdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwLjI1IDAiLz48ZmVCbGVuZCBpbjI9InNoYXBlIiByZXN1bHQ9ImVmZmVjdDFfaW5uZXJTaGFkb3dfMzZfNjY1Ii8+PC9maWx0ZXI+PGZpbHRlciBpZD0iZCIgd2lkdGg9Ijc5Ljc1OCIgaGVpZ2h0PSIxMDIuODUxIiB4PSIzNjkuNjg0IiB5PSIxMzUuNTQyIiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSI1LjQzNiIgZHk9IjQuNDQ3Ii8+PGZlQ29tcG9zaXRlIGluMj0iaGFyZEFscGhhIiBrMj0iLTEiIGszPSIxIiBvcGVyYXRvcj0iYXJpdGhtZXRpYyIvPjxmZUNvbG9yTWF0cml4IHZhbHVlcz0iMCAwIDAgMCAxIDAgMCAwIDAgMSAwIDAgMCAwIDEgMCAwIDAgMC4zNiAwIi8+PGZlQmxlbmQgaW4yPSJzaGFwZSIgcmVzdWx0PSJlZmZlY3QxX2lubmVyU2hhZG93XzM2XzY2NSIvPjwvZmlsdGVyPjwvZGVmcz48L3N2Zz4=';
      const navHtml = NAV_ITEMS.map((item) => `<a href="${item.href}" class="${item.href === activePath ? 'active' : ''}">
 -        <span class="icon">${item.icon}</span>${item.label}
 +        <span class="icon">${item.icon}</span><span class="nav-label">${item.label}</span>${item.countKey ? `<span class="nav-count" data-count-key="${item.countKey}"></span>` : ''}
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,7 +2512,7 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,7 +2710,8 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
 -  <title>${title} — NanoClaw Dashboard</title>
 +  <title>${title} — Dashboard Pro</title>
++  <link rel="icon" type="image/svg+xml" href="${NANOCLAW_ICON_DATA_URL}">
    <style>${CSS}</style>
    <script>
      const TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
-@@ -207,9 +2544,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +2743,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -2757,7 +2956,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2565,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +2764,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -2799,7 +2998,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <div class="sidebar">
 -    <h1>NanoClaw</h1>
 +    <div class="sidebar-header">
-+      <h1>Dashboard Pro</h1>
++      <h1><img class="sidebar-logo" src="${NANOCLAW_ICON_DATA_URL}" alt="" />Dashboard Pro</h1>
 +      <span class="sidebar-status"><span class="sidebar-dot"></span>Online</span>
 +    </div>
      <nav>${navHtml}</nav>
@@ -2811,7 +3010,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec00ea7a3ae 100644
+index 0c33db8..ed5a979 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -2826,11 +3025,22 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,458 @@ export function agentGroupsPage() {
+@@ -16,112 +15,655 @@ export function agentGroupsPage() {
        }
      })();
  
 +    var __agData = { groups: [], byId: {}, childrenOf: {}, costByGroup: {} };
++
++    // View mode persistence — 'list' (default) or 'cards'.
++    function getViewMode() {
++      try {
++        var v = localStorage.getItem('ag-view');
++        return v === 'cards' ? 'cards' : 'list';
++      } catch (e) { return 'list'; }
++    }
++    function setViewMode(v) {
++      try { localStorage.setItem('ag-view', v); } catch (e) {}
++    }
 +
      async function loadList() {
        try {
@@ -2893,6 +3103,14 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +              '<select id="ag-model-filter" class="ag-select">' +
 +                '<option value="">All Models</option>' + modelOpts +
 +              '</select>' +
++              '<div class="ag-view-toggle" role="tablist" aria-label="View mode">' +
++                '<button class="ag-view-btn" data-ag-view="list" role="tab" aria-label="List view" title="List view">' +
++                  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/></svg>' +
++                '</button>' +
++                '<button class="ag-view-btn" data-ag-view="cards" role="tab" aria-label="Card view" title="Card view">' +
++                  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>' +
++                '</button>' +
++              '</div>' +
 +            '</div>' +
 +          '</header>';
 +
@@ -2903,24 +3121,42 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +          (childrenOf[lead.id] || []).forEach(function(child){ body += rowHtml(child, true); });
 +        });
 +
-+        var tableHtml =
-+          '<div class="ov-panel ag-table-panel">' +
-+          '<table class="ag-table">' +
-+            '<thead><tr>' +
-+              '<th>Name</th><th>Folder</th><th>Model</th>' +
-+              '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
-+              '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
-+              '<th>Created</th><th class="ag-actions"></th>' +
-+            '</tr></thead>' +
-+            '<tbody>' + body + '</tbody>' +
-+          '</table>' +
++        var listHtml =
++          '<div class="ag-view ag-view-list" data-ag-view-pane="list">' +
++            '<div class="ov-panel ag-table-panel">' +
++            '<table class="ag-table">' +
++              '<thead><tr>' +
++                '<th>Name</th><th>Folder</th><th>Model</th>' +
++                '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
++                '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
++                '<th>Created</th><th class="ag-actions"></th>' +
++              '</tr></thead>' +
++              '<tbody>' + body + '</tbody>' +
++            '</table>' +
++            '</div>' +
 +          '</div>';
 +
-+        document.getElementById('ag-index').innerHTML = headerHtml + tableHtml;
++        // Cards view — same data, grouped by lead.
++        var cardsBody = '';
++        leads.forEach(function(lead){
++          cardsBody += cardsGroupHtml(lead, childrenOf[lead.id] || []);
++        });
++        var cardsHtml =
++          '<div class="ag-view ag-view-cards" data-ag-view-pane="cards">' +
++            cardsBody +
++          '</div>';
++
++        document.getElementById('ag-index').innerHTML = headerHtml + listHtml + cardsHtml;
++
++        // Apply persisted view mode (defaults to list).
++        applyViewMode(getViewMode());
 +
 +        // Wire up search + filter
 +        document.getElementById('ag-search').addEventListener('input', applyFilters);
 +        document.getElementById('ag-model-filter').addEventListener('change', applyFilters);
++
++        // Wire up view toggle (delegated to keep menu logic separate).
++        document.getElementById('ag-index').addEventListener('click', handleAgViewToggleClick);
 +
 +        // Wire up ⋮ menus (delegated)
 +        document.addEventListener('click', handleAgClick);
@@ -2989,6 +3225,152 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +        '</td></tr>';
 +    }
 +
++    // ─────────────────────────────────────────────────────────
++    // Cards view
++    // ─────────────────────────────────────────────────────────
++
++    // Deterministic 0–360 hue from a string. Used to colour avatar bubbles
++    // so the same agent always gets the same colour without needing a stored
++    // attribute on the row.
++    function hueFor(s) {
++      var h = 0;
++      s = s || '';
++      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
++      return Math.abs(h) % 360;
++    }
++
++    function avatarHtml(g) {
++      var initial = (g.name || '?').charAt(0).toUpperCase();
++      var hue = hueFor(g.id || g.name || '');
++      var style = 'background: linear-gradient(135deg, hsl(' + hue + ' 65% 55%), hsl(' + ((hue + 40) % 360) + ' 65% 45%))';
++      return '<span class="ag-card-avatar" style="' + style + '">' + esc(initial) + '</span>';
++    }
++
++    // Header for one team-section in card view. lead is the parent agent
++    // group (or a solo agent with no children); children is its sub-agents.
++    function cardsGroupHtml(lead, children) {
++      var members = [lead].concat(children);
++      var totalSessions = members.reduce(function(a, g){ return a + (g.sessionCount || 0); }, 0);
++      var totalRunning = members.reduce(function(a, g){ return a + (g.runningSessions || 0); }, 0);
++      var groupTag = children.length > 0
++        ? '<span class="ag-tag ag-tag-lead">TEAM</span>'
++        : '<span class="ag-tag ag-tag-agent">AGENT</span>';
++      var created = lead.created_at ? formatDate(lead.created_at) : '';
++      var cards = members.map(function(g, i){ return cardHtml(g, i === 0 && children.length > 0); }).join('');
++      return '<section class="ag-cards-group" data-collapsed="0" data-ag-group-id="' + esc(lead.id) + '">' +
++          '<header class="ag-cards-group-head">' +
++            '<button class="ag-cards-group-toggle" data-ag-collapse aria-label="Toggle group" aria-expanded="true">' +
++              '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 6 8 10 12 6"/></svg>' +
++            '</button>' +
++            '<h3 class="ag-cards-group-name">' + esc(lead.name) + '</h3>' +
++            groupTag +
++            '<span class="ag-cards-group-count">' + members.length + ' ' + (members.length === 1 ? 'agent' : 'agents') + '</span>' +
++            '<div class="ag-cards-group-meta">' +
++              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalSessions + '</span> sessions</span>' +
++              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalRunning + '</span> running</span>' +
++              (created ? '<span class="ag-cards-group-stat ag-cards-group-stat-date">Created ' + esc(created) + '</span>' : '') +
++            '</div>' +
++          '</header>' +
++          '<div class="ag-cards-grid">' + cards + '</div>' +
++        '</section>';
++    }
++
++    function cardHtml(g, isLeadOfTeam) {
++      var provider = (g.agent_provider || 'claude').toLowerCase();
++      var model = g.model || 'default';
++      var providerColor = provider === 'codex' ? 'green' : provider === 'opencode' ? 'yellow' : 'purple';
++      var roleTag = isLeadOfTeam
++        ? '<span class="ag-tag ag-tag-lead">LEAD</span>'
++        : (g.parentId
++            ? '<span class="ag-tag ag-tag-sub">SUB-AGENT</span>'
++            : '<span class="ag-tag ag-tag-agent">AGENT</span>');
++
++      var costUsd = (__agData.costByGroup && __agData.costByGroup[g.id]) || 0;
++      var usageBadge = costUsd > 0
++        ? '<span class="ag-card-usage" title="$' + costUsd.toFixed(4) + '">' + formatUsd(costUsd) + '</span>'
++        : '';
++
++      var running = g.runningSessions || 0;
++      var runningCell = running > 0
++        ? '<span class="ag-card-stat-running"><span class="ag-pulse-dot"></span>' + running + '</span>'
++        : '0';
++
++      var modelKey = provider + ':' + model;
++      var created = g.created_at ? formatDate(g.created_at) : '';
++
++      return '<article class="ag-card"' +
++          ' data-name="' + esc((g.name || '').toLowerCase()) +
++          '" data-folder="' + esc((g.folder || '').toLowerCase()) +
++          '" data-model="' + esc(modelKey) + '"' +
++          ' data-id="' + esc(g.id) + '">' +
++          '<div class="ag-card-head">' +
++            avatarHtml(g) +
++            '<div class="ag-card-titles">' +
++              '<a class="ag-card-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
++              '<div class="ag-card-tag-row">' + roleTag +
++                '<span class="ag-card-model">' + badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span></span>' +
++              '</div>' +
++            '</div>' +
++            '<button class="ag-menu-btn ag-card-menu-btn" data-ag-menu="' + esc(g.id) + '" title="Actions" aria-label="Card actions">⋮</button>' +
++          '</div>' +
++          '<div class="ag-card-stats">' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value">' + (g.sessionCount || 0) + '</div>' +
++              '<div class="ag-card-stat-label">Sessions</div>' +
++            '</div>' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value">' + runningCell + '</div>' +
++              '<div class="ag-card-stat-label">Running</div>' +
++            '</div>' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value ag-card-stat-folder" title="' + esc(g.folder || '') + '">' + esc(g.folder || '—') + '</div>' +
++              '<div class="ag-card-stat-label">Folder</div>' +
++            '</div>' +
++          '</div>' +
++          '<div class="ag-card-foot">' +
++            (usageBadge ? '<span class="ag-card-foot-usage">' + usageBadge + '</span>' : '<span></span>') +
++            (created ? '<span class="ag-card-foot-date">Created ' + esc(created) + '</span>' : '') +
++          '</div>' +
++        '</article>';
++    }
++
++    function applyViewMode(mode) {
++      mode = mode === 'cards' ? 'cards' : 'list';
++      var index = document.getElementById('ag-index');
++      if (!index) return;
++      index.dataset.viewMode = mode;
++      var panes = index.querySelectorAll('[data-ag-view-pane]');
++      for (var i = 0; i < panes.length; i++) {
++        panes[i].style.display = (panes[i].dataset.agViewPane === mode) ? '' : 'none';
++      }
++      var btns = index.querySelectorAll('[data-ag-view]');
++      for (var j = 0; j < btns.length; j++) {
++        var active = btns[j].dataset.agView === mode;
++        btns[j].classList.toggle('ag-view-btn-active', active);
++        btns[j].setAttribute('aria-selected', active ? 'true' : 'false');
+       }
+     }
+ 
++    function handleAgViewToggleClick(ev) {
++      var viewBtn = ev.target.closest && ev.target.closest('[data-ag-view]');
++      if (viewBtn) {
++        ev.preventDefault();
++        var mode = viewBtn.dataset.agView;
++        setViewMode(mode);
++        applyViewMode(mode);
++        return;
++      }
++      var collapseBtn = ev.target.closest && ev.target.closest('[data-ag-collapse]');
++      if (collapseBtn) {
++        ev.preventDefault();
++        var section = collapseBtn.closest('.ag-cards-group');
++        if (!section) return;
++        var collapsed = section.dataset.collapsed === '1';
++        section.dataset.collapsed = collapsed ? '0' : '1';
++        collapseBtn.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
++      }
++    }
++
 +    function formatUsd(n) {
 +      // <$0.01 → "<$0.01", <$10 → "$0.42", <$1000 → "$42.10", else → "$1.2K"
 +      if (n < 0.01) return '<$0.01';
@@ -3013,12 +3395,26 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +      var mEl = document.getElementById('ag-model-filter');
 +      var q = (qEl && qEl.value || '').toLowerCase().trim();
 +      var modelKey = mEl && mEl.value || '';
++      var match = function(el) {
++        var matchText = !q || el.dataset.name.indexOf(q) >= 0 || el.dataset.folder.indexOf(q) >= 0;
++        var matchModel = !modelKey || el.dataset.model === modelKey;
++        return matchText && matchModel;
++      };
++      // List view rows
 +      var rows = document.querySelectorAll('.ag-row');
 +      for (var i = 0; i < rows.length; i++) {
-+        var r = rows[i];
-+        var matchText = !q || r.dataset.name.indexOf(q) >= 0 || r.dataset.folder.indexOf(q) >= 0;
-+        var matchModel = !modelKey || r.dataset.model === modelKey;
-+        r.style.display = (matchText && matchModel) ? '' : 'none';
++        rows[i].style.display = match(rows[i]) ? '' : 'none';
++      }
++      // Card view cards
++      var cards = document.querySelectorAll('.ag-card');
++      for (var j = 0; j < cards.length; j++) {
++        cards[j].style.display = match(cards[j]) ? '' : 'none';
++      }
++      // Hide group sections that have no visible cards.
++      var sections = document.querySelectorAll('.ag-cards-group');
++      for (var k = 0; k < sections.length; k++) {
++        var anyVisible = sections[k].querySelector('.ag-card:not([style*="display: none"])');
++        sections[k].style.display = anyVisible ? '' : 'none';
 +      }
 +    }
 +
@@ -3043,7 +3439,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +          '<button class="ag-menu-item" data-ag-action="copy" data-ag-id="' + esc(id) + '">Copy ID</button>';
 +        menuBtn.parentElement.appendChild(pop);
 +        return;
-       }
++      }
 +      var actionBtn = ev.target.closest && ev.target.closest('[data-ag-action]');
 +      if (actionBtn) {
 +        ev.preventDefault();
@@ -3071,8 +3467,8 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +      }
 +      // Click outside any menu — close
 +      closeAllMenus();
-     }
- 
++    }
++
      async function loadDetail(id) {
 -      document.getElementById('content').innerHTML = '<a href="/dashboard/agent-groups">&larr; Back to list</a>';
 -      document.getElementById('detail').style.display = 'block';
@@ -3370,7 +3766,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
      </script>
    `);
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
+index 4433c2a..e047d6b 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -3628,7 +4024,7 @@ index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3d
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
+index 93fe37a..6094425 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -3870,7 +4266,7 @@ index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
+index 38aa022..517e1e2 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -4275,7 +4671,7 @@ index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..fa6ecd315a6f32e7848ff84824ac17023f547259 100644
+index 3e0cc9e..fa6ecd3 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
 @@ -1,160 +1,269 @@
@@ -4652,7 +5048,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..fa6ecd315a6f32e7848ff84824ac1702
        var h = Math.floor(s / 3600);
        var m = Math.floor((s % 3600) / 60);
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052ee04684b9 100644
+index 7e438eb..fbdf77f 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -4946,7 +5342,7 @@ index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052e
    `);
  }
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9de659d44 100644
+index ea390fe..f77712c 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -5284,7 +5680,7 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d3912cdd3b5b
+index 0000000..83eaee0
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,630 @@
@@ -5920,7 +6316,7 @@ index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d391
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
+index 0000000..020f9ff
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,180 @@
@@ -6105,7 +6501,7 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5325aa6b39234a12e6e9b5cec731604d318f5028 100644
+index 27d581b..5325aa6 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,9 @@
