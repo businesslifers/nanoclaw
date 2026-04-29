@@ -288,6 +288,37 @@ What this does:
 
 After this completes, the script prints the new `agent_groups.id`. Capture it as `V2_AGENT_GROUP_ID` and execute phase 5b's pre-create.
 
+### 6a. Audit existing wirings on the messaging group
+
+`init-group-agent.ts` adds a wiring for the new agent but does NOT remove pre-existing wirings on the same messaging group. This bites when the messaging_group was auto-created by the channel adapter (typical: phase 3's "send a message in LaunchMate so the bot sees it" — that auto-creates the row AND auto-wires whatever agent the host's channel-registration flow defaulted to, often with `engage_mode='pattern'` + `engage_pattern='.'` which fires on every message).
+
+Symptom if missed: the new agent responds to mentions correctly, but a *second* agent (typically a DM agent) also responds to every message in the group. Two replies, two costs, and the operator can't tell which Janet is talking from chat.
+
+Run:
+
+```bash
+pnpm exec tsx -e "
+const Database = require('better-sqlite3');
+const db = new Database('data/v2.db', { readonly: true });
+const rows = db.prepare(\"SELECT mga.id, mga.engage_mode, mga.engage_pattern, ag.name, ag.id as agent_id, ag.folder FROM messaging_group_agents mga JOIN agent_groups ag ON mga.agent_group_id = ag.id WHERE mga.messaging_group_id = ?\").all('<messaging-group-id>');
+for (const r of rows) console.log(JSON.stringify(r));
+"
+```
+
+Substitute `<messaging-group-id>` with the `mg-...` id from phase 3 (or `init-group-agent.ts`'s output). Expect exactly **one** row — the wiring for `$V2_AGENT_GROUP_ID`. If you see more than one:
+
+```bash
+# Inspect each — confirm with the operator which to keep before deleting.
+pnpm exec tsx -e "
+const Database = require('better-sqlite3');
+const db = new Database('data/v2.db');
+const result = db.prepare(\"DELETE FROM messaging_group_agents WHERE id = ?\").run('<unwanted-mga-id>');
+console.log('deleted rows:', result.changes);
+"
+```
+
+Repeat for each wiring that isn't the one for `$V2_AGENT_GROUP_ID`. Don't blanket-delete: some installs intentionally wire multiple agents to a group (e.g. a hub group with multiple lanes listening). When in doubt, ask.
+
 ## Phase 7 — Drop the v1 filesystem in
 
 ### 7a. CLAUDE.role.md (team identity)
