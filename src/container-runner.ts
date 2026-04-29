@@ -442,6 +442,13 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // FIGMA_API_KEY is consumed inline by the figma MCP server's launcher
+  // (see container.json mcpServers.figma). The OneCLI HTTPS proxy can't
+  // inject this header cleanly so the token is forwarded directly.
+  if (process.env.FIGMA_API_KEY) {
+    args.push('-e', `FIGMA_API_KEY=${process.env.FIGMA_API_KEY}`);
+  }
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
