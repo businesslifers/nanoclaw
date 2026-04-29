@@ -115,10 +115,10 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4cddc5f50 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17da241fb5f 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -5,169 +5,2503 @@
+@@ -5,169 +5,2506 @@
  import { getDashboardSecret } from '../server.js';
  const NAV_ITEMS = [
      { href: '/dashboard', label: 'Overview', icon: '&#9632;' },
@@ -872,6 +872,9 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4
 +    background: var(--ag-surface-2);
 +  }
 +  .agent-groups-v2 .ag-table .ag-num { text-align: center; }
++  .agent-groups-v2 .ag-table .ag-cell-usage { text-align: right; padding-right: 16px; font-variant-numeric: tabular-nums; }
++  .agent-groups-v2 .ag-usage { color: #f1f5f9; font-weight: 600; }
++  .agent-groups-v2 .ag-usage-zero { color: var(--ag-text-dim); font-weight: 400; }
 +  .agent-groups-v2 .ag-table .ag-actions { width: 40px; text-align: right; padding-right: 16px; }
 +  .agent-groups-v2 .ag-table tbody td {
 +    padding: 12px 16px;
@@ -2728,16 +2731,16 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,7 +2509,7 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,7 +2512,7 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
 -  <title>${title} — NanoClaw Dashboard</title>
-+  <title>${title} — Derek Dashboard</title>
++  <title>${title} — Dashboard Pro</title>
    <style>${CSS}</style>
    <script>
      const TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
-@@ -207,9 +2541,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +2544,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -2754,7 +2757,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2562,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +2565,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -2796,7 +2799,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4
    <div class="sidebar">
 -    <h1>NanoClaw</h1>
 +    <div class="sidebar-header">
-+      <h1>Derek</h1>
++      <h1>Dashboard Pro</h1>
 +      <span class="sidebar-status"><span class="sidebar-dot"></span>Online</span>
 +    </div>
      <nav>${navHtml}</nav>
@@ -2808,7 +2811,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824aa736826 100644
+index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec00ea7a3ae 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -2823,17 +2826,24 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,423 @@ export function agentGroupsPage() {
+@@ -16,112 +15,458 @@ export function agentGroupsPage() {
        }
      })();
  
-+    var __agData = { groups: [], byId: {}, childrenOf: {} };
++    var __agData = { groups: [], byId: {}, childrenOf: {}, costByGroup: {} };
 +
      async function loadList() {
        try {
-         const groups = await api('/api/agent-groups');
+-        const groups = await api('/api/agent-groups');
 -        if (groups.length === 0) {
 -          document.getElementById('content').innerHTML = '<div class="loading">No agent groups configured</div>';
++        // Fetch agent groups + token usage in parallel. Token summary is best-effort —
++        // if it fails (e.g. endpoint not configured), we still render the table without
++        // the Usage column populated.
++        const [groups, tokenSummary] = await Promise.all([
++          api('/api/agent-groups'),
++          api('/api/tokens/summary').catch(function(){ return null; }),
++        ]);
 +        if (!groups || groups.length === 0) {
 +          document.getElementById('ag-index').innerHTML = '<div class="ov-loading">No agent groups configured</div>';
            return;
@@ -2848,6 +2858,15 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 -            '<td style="color:#666">' + esc(g.created_at) + '</td></tr>'
 -          ).join('') + '</table>';
 +
++        var costByGroup = {};
++        if (tokenSummary && tokenSummary.byGroup) {
++          for (var k in tokenSummary.byGroup) {
++            if (Object.prototype.hasOwnProperty.call(tokenSummary.byGroup, k)) {
++              costByGroup[k] = Number(tokenSummary.byGroup[k].costUsd) || 0;
++            }
++          }
++        }
++
 +        var byId = {};
 +        groups.forEach(function(g){ byId[g.id] = g; });
 +        var leads = groups.filter(function(g){ return !g.parentId || !byId[g.parentId]; });
@@ -2857,7 +2876,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +            (childrenOf[g.parentId] = childrenOf[g.parentId] || []).push(g);
 +          }
 +        });
-+        __agData = { groups: groups, byId: byId, childrenOf: childrenOf };
++        __agData = { groups: groups, byId: byId, childrenOf: childrenOf, costByGroup: costByGroup };
 +
 +        // Header (subtitle + toolbar)
 +        var modelOpts = uniqueModels(groups).map(function(m){
@@ -2889,6 +2908,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +          '<table class="ag-table">' +
 +            '<thead><tr>' +
 +              '<th>Name</th><th>Folder</th><th>Model</th>' +
++              '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
 +              '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
 +              '<th>Created</th><th class="ag-actions"></th>' +
 +            '</tr></thead>' +
@@ -2942,6 +2962,15 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +
 +      var created = g.created_at ? formatDate(g.created_at) : '';
 +
++      // Usage: cumulative API-equivalent cost in USD across all this agent group's
++      // sessions. Sourced from /api/tokens/summary (tokens.byGroup[id].costUsd).
++      // Displayed as "—" when usage is 0 or data isn't available, so empty-state
++      // rows don't visually compete with active ones.
++      var costUsd = (__agData.costByGroup && __agData.costByGroup[g.id]) || 0;
++      var usageCell = costUsd > 0
++        ? '<span class="ag-usage" title="$' + costUsd.toFixed(4) + '">' + formatUsd(costUsd) + '</span>'
++        : '<span class="ag-usage ag-usage-zero">—</span>';
++
 +      var modelKey = provider + ':' + model;
 +      return '<tr class="ag-row' + (isSub ? ' ag-row-sub' : '') + '"' +
 +        ' data-name="' + esc((g.name || '').toLowerCase()) +
@@ -2951,12 +2980,22 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +        '<td class="ag-cell-name">' + nameCell + '</td>' +
 +        '<td class="ag-cell-folder">' + esc(g.folder) + '</td>' +
 +        '<td class="ag-cell-model">' + modelCell + '</td>' +
++        '<td class="ag-num ag-cell-usage">' + usageCell + '</td>' +
 +        '<td class="ag-num">' + (g.sessionCount || 0) + '</td>' +
 +        '<td class="ag-num">' + runningPill + '</td>' +
 +        '<td class="ag-cell-date">' + esc(created) + '</td>' +
 +        '<td class="ag-actions">' +
 +          '<button class="ag-menu-btn" data-ag-menu="' + esc(g.id) + '" title="Actions" aria-label="Row actions">⋮</button>' +
 +        '</td></tr>';
++    }
++
++    function formatUsd(n) {
++      // <$0.01 → "<$0.01", <$10 → "$0.42", <$1000 → "$42.10", else → "$1.2K"
++      if (n < 0.01) return '<$0.01';
++      if (n < 10) return '$' + n.toFixed(2);
++      if (n < 1000) return '$' + n.toFixed(2);
++      if (n < 1_000_000) return '$' + (n / 1000).toFixed(1) + 'K';
++      return '$' + (n / 1_000_000).toFixed(2) + 'M';
 +    }
 +
 +    function formatDate(s) {
@@ -3004,7 +3043,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +          '<button class="ag-menu-item" data-ag-action="copy" data-ag-id="' + esc(id) + '">Copy ID</button>';
 +        menuBtn.parentElement.appendChild(pop);
 +        return;
-+      }
+       }
 +      var actionBtn = ev.target.closest && ev.target.closest('[data-ag-action]');
 +      if (actionBtn) {
 +        ev.preventDefault();
@@ -3029,7 +3068,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..82b81f12fe547a11a48d755d5c273824
 +          }
 +        }
 +        return;
-       }
++      }
 +      // Click outside any menu — close
 +      closeAllMenus();
      }

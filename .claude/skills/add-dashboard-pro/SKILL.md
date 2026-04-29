@@ -5,11 +5,12 @@ description: Layer the businesslifers customizations onto the base NanoClaw dash
 
 # /add-dashboard-pro — businesslifers dashboard customizations
 
-Adds three things on top of the base `/add-dashboard` install:
+Adds four things on top of the base `/add-dashboard` install:
 
 1. **Wiki page redesign** — restyles the dashboard's `/dashboard/wikis` route (markdown rendering, sidebar layout). Surfaces YAML frontmatter as a metadata bar above the article — `verdict:` (worth-exploring / interesting-but-not-now / pass) as a colored badge, `evaluated:` and `updated:` dates, a clickable source link (preferring `url:` for the href, with `source:` as label fallback), and `tags:` as pills. Code blocks get a hover-revealed copy-to-clipboard button.
 2. **Per-container CPU + memory columns** on the `/dashboard/sessions` table, with bar visualisations and color thresholds.
-3. **CPU-pinned watchdog** — the host pusher tracks each container's CPU over a rolling 5-snapshot window (~5 minutes) and appends a reason to `health.reasons` for any container holding ≥80% CPU. The dashboard's existing health pill turns "degraded" automatically. Built after a v1 install once spent days at 98% CPU silently.
+3. **Usage ($) column on the Agent Groups table** — sits between Model and Sessions, shows cumulative API-equivalent USD cost per agent group sourced from `/api/tokens/summary` (`tokens.byGroup[id].costUsd`). Useful for spotting which agents are chewing the most context. Empty rows show "—" instead of "$0.00" so they don't visually compete with active ones; values <$0.01 show as "<$0.01"; the cell `title` attribute carries the full 4-decimal value for hover.
+4. **CPU-pinned watchdog** — the host pusher tracks each container's CPU over a rolling 5-snapshot window (~5 minutes) and appends a reason to `health.reasons` for any container holding ≥80% CPU. The dashboard's existing health pill turns "degraded" automatically. Built after a v1 install once spent days at 98% CPU silently.
 
 ## What this skill is NOT
 
