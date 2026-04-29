@@ -259,12 +259,21 @@ pnpm exec tsx scripts/init-group-agent.ts \
   --channel "$CHANNEL" \
   --platform-id "$PLATFORM_ID" \
   --display-name "<Team Display Name>" \
-  --agent-name "<assistant name from .env ASSISTANT_NAME>" \
+  --agent-name "<Team Display Name>" \
   --folder "<V2_FOLDER>" \
   --engage-mode pattern \
   --engage-pattern '.' \
   --unknown-sender-policy request_approval
 ```
+
+**About the two name flags** (this trips operators up):
+
+- `--display-name` writes `messaging_groups.name` — the chat-side label (rarely visible to humans on most channels).
+- `--agent-name` writes `agent_groups.name` — **the dashboard label**. v2's `src/container-runner.ts` then auto-syncs this value into `container.json.groupName` AND `container.json.assistantName` on every spawn (and re-syncs if you hand-edit those fields and the agent group name later changes). So the agent group name is effectively the single source of truth for "what is this team called" in v2.
+
+Use the **team name** for both flags (typically the same value). Don't pass the persona name (e.g. "Janet", "Derek") to `--agent-name` — that puts the persona on the dashboard and makes multiple ported teams indistinguishable from each other (every team becomes "Janet" in the listing).
+
+The agent's persona/voice is independent of the agent group name — it's encoded in `CLAUDE.role.md` and `memory.md` (auto-loaded via `CLAUDE.local.md`, see 7a.bis + 7f). Setting `agent_groups.name = "LaunchMate"` doesn't make the agent stop sounding like Janet; her persona instructions live in memory.md and continue to apply regardless of what the system-prompt-addendum identifier says.
 
 Pick `V2_FOLDER` — typically a clean version of `V1_FOLDER` without prefixes (e.g. `whatsapp_insights-team` → `insights-team`).
 
