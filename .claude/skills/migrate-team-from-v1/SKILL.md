@@ -299,7 +299,7 @@ cp "$V1_PATH/groups/$V1_FOLDER/CLAUDE.md" "groups/$V2_FOLDER/CLAUDE.role.md"
 Then read the file and edit:
 
 - Replace any reference to v1's channel ("WhatsApp", "@<assistant> WhatsApp trigger") with the chosen v2 channel equivalent.
-- v1 paths like `/workspace/extra/<team>-creds/...` work as-is in v2 if `additionalMounts` (phase 7c) reuses the same `containerPath`.
+- **`/workspace/group/` paths from v1 must become `/workspace/agent/`** — v2 mounts the team folder at `/workspace/agent/`, not `/workspace/group/`. Phase 7e does this sweep across all team files (CLAUDE.role.md, scripts, configs); just be aware that the references you see in `CLAUDE.role.md` will move. v1 paths under `/workspace/extra/<team>-creds/...` (host-mounted secrets) DO work as-is in v2 if `additionalMounts` (phase 7c) reuses the same `containerPath`.
 - Strip v1-only operational notes (e.g. "agents.json must not contain literal newlines" — v1-specific).
 - **Move v1's "Improvement Backlog" / "Watch items" sections out** of `CLAUDE.role.md` into `sources/improvement-backlog.md` — they're operational state, not role spec.
 - If you went lane-agent (phase 4), update the "delegation" section to refer to lane agents addressed via `send_message` rather than sub-agents addressed via Task tool.
@@ -356,7 +356,43 @@ mkdir -p "groups/$V2_FOLDER/sources"
 
 Skip `conversations/` and `logs/` — fresh start in v2.
 
-### 7e. Leave CLAUDE.local.md empty
+### 7e. Migrate v1 hardcoded paths
+
+v1 mounted the team folder at `/workspace/group/`. **v2 mounts it at `/workspace/agent/`** (the Dockerfile's `WORKDIR=/workspace/group` still exists as an empty stub, but that's not where the team's files land — they're at `/workspace/agent/`). Any `/workspace/group/...` reference in the v1 files will silently break in v2: the agent will report "the folder is empty" or scripts will throw `ENOENT` on imports.
+
+Sweep team files (excluding historical logs the operator won't fix anyway):
+
+```bash
+find "groups/$V2_FOLDER" "groups/$V2_FOLDER"-* \
+  -type f \( -name '*.mjs' -o -name '*.md' -o -name '*.json' -o -name '*.ts' -o -name '*.js' -o -name '*.sh' \) \
+  -not -path '*/data/*' \
+  -not -path '*/logs/*' \
+  -not -path '*/conversations/*' \
+  -print0 | xargs -0 sed -i 's|/workspace/group/|/workspace/agent/|g'
+```
+
+The `groups/$V2_FOLDER-*` glob also picks up lane folders created in phase 8. If you're running this between 7d and phase 8 (recommended), the lane folders don't exist yet — re-run the sed after phase 8 completes (or run it now AND after phase 8; sed is idempotent).
+
+Verify zero reachable references remain:
+
+```bash
+grep -rln "/workspace/group" "groups/$V2_FOLDER" "groups/$V2_FOLDER"-* 2>/dev/null \
+  | grep -vE '/(data|logs|conversations)/' || echo "(clean)"
+```
+
+Expected output: `(clean)`. If anything else prints, open those files and adjust by hand — they may have non-path uses (e.g. a markdown link with `/workspace/group/` in display text).
+
+What this catches in practice:
+- `.mjs` scripts that hardcode `/workspace/group/node_modules/...` import paths
+- Role specs (`CLAUDE.role.md`, `roles/<name>.md`, `specs/<name>-role.md`) that reference data/credentials paths
+- `credentials/*.json` config files with `serviceAccountKeyFile` etc.
+- Cron prompt bodies in `sources/v1-scheduled-tasks.md` (phase 9)
+
+What it skips:
+- `data/` and `logs/` — historical output from v1, not files the v2 agent reads
+- Anything outside the team's group folder
+
+### 7f. Leave CLAUDE.local.md empty
 
 `CLAUDE.local.md` is the agent's own memory. Don't seed with v1 history.
 
