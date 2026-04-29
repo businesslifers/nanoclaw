@@ -461,9 +461,33 @@ The next inbound message will spawn a new container and reload the role spec. (T
 
 `.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
 
-### 7f. CLAUDE.local.md — role import only
+### 7f. CLAUDE.local.md — role + memory imports
 
-`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, leave the rest of `CLAUDE.local.md` empty: it's the agent's own evolving memory, not a place to seed v1 history. The agent will append observations / preferences below the import line over time.
+`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, also import v1's curated memory file if present:
+
+```bash
+LOCAL="groups/$V2_FOLDER/CLAUDE.local.md"
+[ -f "$V1_PATH/groups/$V1_FOLDER/memory.md" ] && \
+  cp "$V1_PATH/groups/$V1_FOLDER/memory.md" "groups/$V2_FOLDER/memory.md" && \
+  echo '@./memory.md' >> "$LOCAL"
+```
+
+In v1, `memory.md` was the per-team curated memory file (personality, principles, hard "always/never" rules). It wasn't auto-loaded by v1's stack either — but the role spec or v1 system prompt explicitly read it on every turn. In v2, the equivalent is auto-loading via `CLAUDE.local.md`.
+
+**Symptom if missed:** the agent loses its persona / hard rules. For LaunchMate this looks like Janet forgetting she's "Janet from The Good Place"; for other teams it can be more subtle (e.g. forgetting a "never X without Y" guardrail).
+
+**Final shape of the file:**
+
+```
+@./CLAUDE.role.md
+@./memory.md     # only if v1 had memory.md
+```
+
+The agent will append its own observations / preferences below these imports over time. Don't pre-seed conversation history or other dynamic state — that's what `conversations/` (skipped) and the wiki are for.
+
+### 7f.bis — Other v1 memory artifacts
+
+If v1 had additional team-specific memory files (`people.md`, `clients.md`, `preferences.md`, `customers.md`, etc.), the rsync in 7d already copied them. They live as separate files at `/workspace/agent/<name>.md` and the agent reads them on demand (the role spec usually points to them). Don't auto-import these into `CLAUDE.local.md` unless they're small (<1KB) and load-bearing on every turn — keeping them as on-demand-readable files saves context budget.
 
 ## Phase 8 — Lane agents (only if phase 4 = lane path)
 
