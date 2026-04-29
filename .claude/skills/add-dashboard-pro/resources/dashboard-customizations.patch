@@ -1,5 +1,5 @@
 diff --git a/dist/router.js b/dist/router.js
-index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd7369477b 100644
+index 326434d..3ad20a0 100644
 --- a/dist/router.js
 +++ b/dist/router.js
 @@ -6,6 +6,10 @@ import { channelsPage } from './ui/pages/channels.js';
@@ -115,10 +115,10 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17da241fb5f 100644
+index 36b9575..3edc17a 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -5,169 +5,2513 @@
+@@ -5,169 +5,2704 @@
  import { getDashboardSecret } from '../server.js';
  const NAV_ITEMS = [
      { href: '/dashboard', label: 'Overview', icon: '&#9632;' },
@@ -973,6 +973,197 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
 +    font-family: inherit;
 +  }
 +  .agent-groups-v2 .ag-menu-item:hover { background: rgba(45, 212, 191, 0.10); color: var(--ag-cyan); }
++
++  /* View toggle (list / cards) */
++  .agent-groups-v2 .ag-view-toggle {
++    display: inline-flex;
++    background: var(--ag-surface);
++    border: 1px solid var(--ag-border);
++    border-radius: 8px;
++    padding: 2px;
++    gap: 2px;
++  }
++  .agent-groups-v2 .ag-view-btn {
++    background: none;
++    border: none;
++    color: var(--ag-text-dim);
++    padding: 6px 8px;
++    border-radius: 6px;
++    cursor: pointer;
++    display: inline-flex;
++    align-items: center;
++    transition: background 0.15s, color 0.15s;
++  }
++  .agent-groups-v2 .ag-view-btn:hover { color: var(--ag-text); background: rgba(45, 212, 191, 0.06); }
++  .agent-groups-v2 .ag-view-btn-active {
++    background: rgba(45, 212, 191, 0.15);
++    color: var(--ag-cyan);
++    box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.30) inset;
++  }
++
++  /* Cards view — collapsible group section */
++  .agent-groups-v2 .ag-view-cards { display: flex; flex-direction: column; gap: 16px; }
++  .agent-groups-v2 .ag-cards-group {
++    background: var(--ag-surface);
++    border: 1px solid var(--ag-border);
++    border-radius: 12px;
++    overflow: hidden;
++  }
++  .agent-groups-v2 .ag-cards-group-head {
++    display: flex;
++    align-items: center;
++    gap: 10px;
++    padding: 12px 16px;
++    background: var(--ag-surface-2);
++    border-bottom: 1px solid var(--ag-border);
++    flex-wrap: wrap;
++  }
++  .agent-groups-v2 .ag-cards-group-toggle {
++    background: none;
++    border: 1px solid transparent;
++    color: var(--ag-text-dim);
++    cursor: pointer;
++    padding: 4px;
++    border-radius: 6px;
++    display: inline-flex;
++    align-items: center;
++    transition: transform 0.2s, color 0.15s;
++  }
++  .agent-groups-v2 .ag-cards-group-toggle:hover { color: var(--ag-cyan); }
++  .agent-groups-v2 .ag-cards-group[data-collapsed="1"] .ag-cards-group-toggle { transform: rotate(-90deg); }
++  .agent-groups-v2 .ag-cards-group[data-collapsed="1"] .ag-cards-grid { display: none; }
++  .agent-groups-v2 .ag-cards-group-name {
++    font-size: 14px;
++    font-weight: 700;
++    color: #f1f5f9;
++    margin: 0;
++    letter-spacing: -0.1px;
++  }
++  .agent-groups-v2 .ag-cards-group-count { color: var(--ag-text-dim); font-size: 11.5px; }
++  .agent-groups-v2 .ag-cards-group-meta {
++    margin-left: auto;
++    display: inline-flex;
++    align-items: center;
++    gap: 16px;
++    color: var(--ag-text-dim);
++    font-size: 11.5px;
++  }
++  .agent-groups-v2 .ag-cards-group-stat { white-space: nowrap; }
++  .agent-groups-v2 .ag-cards-group-stat-num { color: var(--ag-text); font-weight: 600; margin-right: 2px; }
++  .agent-groups-v2 .ag-cards-group-stat-date { color: #475569; }
++
++  .agent-groups-v2 .ag-cards-grid {
++    display: grid;
++    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
++    gap: 12px;
++    padding: 14px 16px;
++  }
++  .agent-groups-v2 .ag-card {
++    background: var(--ag-surface-2);
++    border: 1px solid var(--ag-border);
++    border-radius: 10px;
++    padding: 14px;
++    display: flex;
++    flex-direction: column;
++    gap: 12px;
++    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
++    position: relative;
++  }
++  .agent-groups-v2 .ag-card:hover {
++    border-color: rgba(45, 212, 191, 0.45);
++    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(232, 121, 249, 0.18);
++    transform: translateY(-1px);
++  }
++  .agent-groups-v2 .ag-card-head { display: flex; align-items: flex-start; gap: 10px; }
++  .agent-groups-v2 .ag-card-avatar {
++    flex: 0 0 auto;
++    width: 38px;
++    height: 38px;
++    border-radius: 9px;
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    color: #0b0f1a;
++    font-weight: 700;
++    font-size: 16px;
++    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
++  }
++  .agent-groups-v2 .ag-card-titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
++  .agent-groups-v2 .ag-card-name {
++    font-weight: 600;
++    color: #f1f5f9;
++    font-size: 14px;
++    text-decoration: none;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .agent-groups-v2 .ag-card-name:hover { color: var(--ag-cyan); }
++  .agent-groups-v2 .ag-card-tag-row { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
++  .agent-groups-v2 .ag-card-tag-row .ag-tag { margin-left: 0; }
++  .agent-groups-v2 .ag-card-model { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
++  .agent-groups-v2 .ag-card-model .ag-model-name { margin-left: 2px; }
++  .agent-groups-v2 .ag-card-menu-btn {
++    flex: 0 0 auto;
++    margin-left: auto;
++    margin-top: -4px;
++    margin-right: -4px;
++  }
++
++  .agent-groups-v2 .ag-card-stats {
++    display: grid;
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++    gap: 8px;
++    padding: 10px 0;
++    border-top: 1px solid var(--ag-border);
++    border-bottom: 1px solid var(--ag-border);
++  }
++  .agent-groups-v2 .ag-card-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
++  .agent-groups-v2 .ag-card-stat-value {
++    color: #f1f5f9;
++    font-size: 14px;
++    font-weight: 600;
++    font-variant-numeric: tabular-nums;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .agent-groups-v2 .ag-card-stat-folder { font-size: 12px; font-weight: 500; color: var(--ag-text); }
++  .agent-groups-v2 .ag-card-stat-label {
++    color: var(--ag-text-dim);
++    font-size: 10px;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++  }
++  .agent-groups-v2 .ag-card-stat-running {
++    color: #34d399;
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++  }
++  .agent-groups-v2 .ag-pulse-dot {
++    width: 6px;
++    height: 6px;
++    border-radius: 50%;
++    background: #34d399;
++    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
++    animation: ag-pulse 1.6s infinite;
++  }
++  @keyframes ag-pulse {
++    0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6); }
++    70%  { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
++    100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
++  }
++
++  .agent-groups-v2 .ag-card-foot {
++    display: flex;
++    justify-content: space-between;
++    align-items: center;
++    color: var(--ag-text-dim);
++    font-size: 11px;
++  }
++  .agent-groups-v2 .ag-card-foot-date { white-space: nowrap; }
++  .agent-groups-v2 .ag-card-usage { color: #f1f5f9; font-weight: 600; font-variant-numeric: tabular-nums; }
 +
 +  /* ─────────────────────────────────────────────────────────
 +   * .sessions-v2 — scoped redesign for the Sessions page
@@ -2738,7 +2929,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,7 +2519,8 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,7 +2710,8 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -2748,7 +2939,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <style>${CSS}</style>
    <script>
      const TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
-@@ -207,9 +2552,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +2743,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -2765,7 +2956,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2573,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +2764,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -2819,7 +3010,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec00ea7a3ae 100644
+index 0c33db8..ed5a979 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -2834,11 +3025,22 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,458 @@ export function agentGroupsPage() {
+@@ -16,112 +15,655 @@ export function agentGroupsPage() {
        }
      })();
  
 +    var __agData = { groups: [], byId: {}, childrenOf: {}, costByGroup: {} };
++
++    // View mode persistence — 'list' (default) or 'cards'.
++    function getViewMode() {
++      try {
++        var v = localStorage.getItem('ag-view');
++        return v === 'cards' ? 'cards' : 'list';
++      } catch (e) { return 'list'; }
++    }
++    function setViewMode(v) {
++      try { localStorage.setItem('ag-view', v); } catch (e) {}
++    }
 +
      async function loadList() {
        try {
@@ -2901,6 +3103,14 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +              '<select id="ag-model-filter" class="ag-select">' +
 +                '<option value="">All Models</option>' + modelOpts +
 +              '</select>' +
++              '<div class="ag-view-toggle" role="tablist" aria-label="View mode">' +
++                '<button class="ag-view-btn" data-ag-view="list" role="tab" aria-label="List view" title="List view">' +
++                  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/></svg>' +
++                '</button>' +
++                '<button class="ag-view-btn" data-ag-view="cards" role="tab" aria-label="Card view" title="Card view">' +
++                  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>' +
++                '</button>' +
++              '</div>' +
 +            '</div>' +
 +          '</header>';
 +
@@ -2911,24 +3121,42 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +          (childrenOf[lead.id] || []).forEach(function(child){ body += rowHtml(child, true); });
 +        });
 +
-+        var tableHtml =
-+          '<div class="ov-panel ag-table-panel">' +
-+          '<table class="ag-table">' +
-+            '<thead><tr>' +
-+              '<th>Name</th><th>Folder</th><th>Model</th>' +
-+              '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
-+              '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
-+              '<th>Created</th><th class="ag-actions"></th>' +
-+            '</tr></thead>' +
-+            '<tbody>' + body + '</tbody>' +
-+          '</table>' +
++        var listHtml =
++          '<div class="ag-view ag-view-list" data-ag-view-pane="list">' +
++            '<div class="ov-panel ag-table-panel">' +
++            '<table class="ag-table">' +
++              '<thead><tr>' +
++                '<th>Name</th><th>Folder</th><th>Model</th>' +
++                '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
++                '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
++                '<th>Created</th><th class="ag-actions"></th>' +
++              '</tr></thead>' +
++              '<tbody>' + body + '</tbody>' +
++            '</table>' +
++            '</div>' +
 +          '</div>';
 +
-+        document.getElementById('ag-index').innerHTML = headerHtml + tableHtml;
++        // Cards view — same data, grouped by lead.
++        var cardsBody = '';
++        leads.forEach(function(lead){
++          cardsBody += cardsGroupHtml(lead, childrenOf[lead.id] || []);
++        });
++        var cardsHtml =
++          '<div class="ag-view ag-view-cards" data-ag-view-pane="cards">' +
++            cardsBody +
++          '</div>';
++
++        document.getElementById('ag-index').innerHTML = headerHtml + listHtml + cardsHtml;
++
++        // Apply persisted view mode (defaults to list).
++        applyViewMode(getViewMode());
 +
 +        // Wire up search + filter
 +        document.getElementById('ag-search').addEventListener('input', applyFilters);
 +        document.getElementById('ag-model-filter').addEventListener('change', applyFilters);
++
++        // Wire up view toggle (delegated to keep menu logic separate).
++        document.getElementById('ag-index').addEventListener('click', handleAgViewToggleClick);
 +
 +        // Wire up ⋮ menus (delegated)
 +        document.addEventListener('click', handleAgClick);
@@ -2997,6 +3225,152 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +        '</td></tr>';
 +    }
 +
++    // ─────────────────────────────────────────────────────────
++    // Cards view
++    // ─────────────────────────────────────────────────────────
++
++    // Deterministic 0–360 hue from a string. Used to colour avatar bubbles
++    // so the same agent always gets the same colour without needing a stored
++    // attribute on the row.
++    function hueFor(s) {
++      var h = 0;
++      s = s || '';
++      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
++      return Math.abs(h) % 360;
++    }
++
++    function avatarHtml(g) {
++      var initial = (g.name || '?').charAt(0).toUpperCase();
++      var hue = hueFor(g.id || g.name || '');
++      var style = 'background: linear-gradient(135deg, hsl(' + hue + ' 65% 55%), hsl(' + ((hue + 40) % 360) + ' 65% 45%))';
++      return '<span class="ag-card-avatar" style="' + style + '">' + esc(initial) + '</span>';
++    }
++
++    // Header for one team-section in card view. lead is the parent agent
++    // group (or a solo agent with no children); children is its sub-agents.
++    function cardsGroupHtml(lead, children) {
++      var members = [lead].concat(children);
++      var totalSessions = members.reduce(function(a, g){ return a + (g.sessionCount || 0); }, 0);
++      var totalRunning = members.reduce(function(a, g){ return a + (g.runningSessions || 0); }, 0);
++      var groupTag = children.length > 0
++        ? '<span class="ag-tag ag-tag-lead">TEAM</span>'
++        : '<span class="ag-tag ag-tag-agent">AGENT</span>';
++      var created = lead.created_at ? formatDate(lead.created_at) : '';
++      var cards = members.map(function(g, i){ return cardHtml(g, i === 0 && children.length > 0); }).join('');
++      return '<section class="ag-cards-group" data-collapsed="0" data-ag-group-id="' + esc(lead.id) + '">' +
++          '<header class="ag-cards-group-head">' +
++            '<button class="ag-cards-group-toggle" data-ag-collapse aria-label="Toggle group" aria-expanded="true">' +
++              '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 6 8 10 12 6"/></svg>' +
++            '</button>' +
++            '<h3 class="ag-cards-group-name">' + esc(lead.name) + '</h3>' +
++            groupTag +
++            '<span class="ag-cards-group-count">' + members.length + ' ' + (members.length === 1 ? 'agent' : 'agents') + '</span>' +
++            '<div class="ag-cards-group-meta">' +
++              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalSessions + '</span> sessions</span>' +
++              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalRunning + '</span> running</span>' +
++              (created ? '<span class="ag-cards-group-stat ag-cards-group-stat-date">Created ' + esc(created) + '</span>' : '') +
++            '</div>' +
++          '</header>' +
++          '<div class="ag-cards-grid">' + cards + '</div>' +
++        '</section>';
++    }
++
++    function cardHtml(g, isLeadOfTeam) {
++      var provider = (g.agent_provider || 'claude').toLowerCase();
++      var model = g.model || 'default';
++      var providerColor = provider === 'codex' ? 'green' : provider === 'opencode' ? 'yellow' : 'purple';
++      var roleTag = isLeadOfTeam
++        ? '<span class="ag-tag ag-tag-lead">LEAD</span>'
++        : (g.parentId
++            ? '<span class="ag-tag ag-tag-sub">SUB-AGENT</span>'
++            : '<span class="ag-tag ag-tag-agent">AGENT</span>');
++
++      var costUsd = (__agData.costByGroup && __agData.costByGroup[g.id]) || 0;
++      var usageBadge = costUsd > 0
++        ? '<span class="ag-card-usage" title="$' + costUsd.toFixed(4) + '">' + formatUsd(costUsd) + '</span>'
++        : '';
++
++      var running = g.runningSessions || 0;
++      var runningCell = running > 0
++        ? '<span class="ag-card-stat-running"><span class="ag-pulse-dot"></span>' + running + '</span>'
++        : '0';
++
++      var modelKey = provider + ':' + model;
++      var created = g.created_at ? formatDate(g.created_at) : '';
++
++      return '<article class="ag-card"' +
++          ' data-name="' + esc((g.name || '').toLowerCase()) +
++          '" data-folder="' + esc((g.folder || '').toLowerCase()) +
++          '" data-model="' + esc(modelKey) + '"' +
++          ' data-id="' + esc(g.id) + '">' +
++          '<div class="ag-card-head">' +
++            avatarHtml(g) +
++            '<div class="ag-card-titles">' +
++              '<a class="ag-card-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
++              '<div class="ag-card-tag-row">' + roleTag +
++                '<span class="ag-card-model">' + badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span></span>' +
++              '</div>' +
++            '</div>' +
++            '<button class="ag-menu-btn ag-card-menu-btn" data-ag-menu="' + esc(g.id) + '" title="Actions" aria-label="Card actions">⋮</button>' +
++          '</div>' +
++          '<div class="ag-card-stats">' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value">' + (g.sessionCount || 0) + '</div>' +
++              '<div class="ag-card-stat-label">Sessions</div>' +
++            '</div>' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value">' + runningCell + '</div>' +
++              '<div class="ag-card-stat-label">Running</div>' +
++            '</div>' +
++            '<div class="ag-card-stat">' +
++              '<div class="ag-card-stat-value ag-card-stat-folder" title="' + esc(g.folder || '') + '">' + esc(g.folder || '—') + '</div>' +
++              '<div class="ag-card-stat-label">Folder</div>' +
++            '</div>' +
++          '</div>' +
++          '<div class="ag-card-foot">' +
++            (usageBadge ? '<span class="ag-card-foot-usage">' + usageBadge + '</span>' : '<span></span>') +
++            (created ? '<span class="ag-card-foot-date">Created ' + esc(created) + '</span>' : '') +
++          '</div>' +
++        '</article>';
++    }
++
++    function applyViewMode(mode) {
++      mode = mode === 'cards' ? 'cards' : 'list';
++      var index = document.getElementById('ag-index');
++      if (!index) return;
++      index.dataset.viewMode = mode;
++      var panes = index.querySelectorAll('[data-ag-view-pane]');
++      for (var i = 0; i < panes.length; i++) {
++        panes[i].style.display = (panes[i].dataset.agViewPane === mode) ? '' : 'none';
++      }
++      var btns = index.querySelectorAll('[data-ag-view]');
++      for (var j = 0; j < btns.length; j++) {
++        var active = btns[j].dataset.agView === mode;
++        btns[j].classList.toggle('ag-view-btn-active', active);
++        btns[j].setAttribute('aria-selected', active ? 'true' : 'false');
+       }
+     }
+ 
++    function handleAgViewToggleClick(ev) {
++      var viewBtn = ev.target.closest && ev.target.closest('[data-ag-view]');
++      if (viewBtn) {
++        ev.preventDefault();
++        var mode = viewBtn.dataset.agView;
++        setViewMode(mode);
++        applyViewMode(mode);
++        return;
++      }
++      var collapseBtn = ev.target.closest && ev.target.closest('[data-ag-collapse]');
++      if (collapseBtn) {
++        ev.preventDefault();
++        var section = collapseBtn.closest('.ag-cards-group');
++        if (!section) return;
++        var collapsed = section.dataset.collapsed === '1';
++        section.dataset.collapsed = collapsed ? '0' : '1';
++        collapseBtn.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
++      }
++    }
++
 +    function formatUsd(n) {
 +      // <$0.01 → "<$0.01", <$10 → "$0.42", <$1000 → "$42.10", else → "$1.2K"
 +      if (n < 0.01) return '<$0.01';
@@ -3021,12 +3395,26 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +      var mEl = document.getElementById('ag-model-filter');
 +      var q = (qEl && qEl.value || '').toLowerCase().trim();
 +      var modelKey = mEl && mEl.value || '';
++      var match = function(el) {
++        var matchText = !q || el.dataset.name.indexOf(q) >= 0 || el.dataset.folder.indexOf(q) >= 0;
++        var matchModel = !modelKey || el.dataset.model === modelKey;
++        return matchText && matchModel;
++      };
++      // List view rows
 +      var rows = document.querySelectorAll('.ag-row');
 +      for (var i = 0; i < rows.length; i++) {
-+        var r = rows[i];
-+        var matchText = !q || r.dataset.name.indexOf(q) >= 0 || r.dataset.folder.indexOf(q) >= 0;
-+        var matchModel = !modelKey || r.dataset.model === modelKey;
-+        r.style.display = (matchText && matchModel) ? '' : 'none';
++        rows[i].style.display = match(rows[i]) ? '' : 'none';
++      }
++      // Card view cards
++      var cards = document.querySelectorAll('.ag-card');
++      for (var j = 0; j < cards.length; j++) {
++        cards[j].style.display = match(cards[j]) ? '' : 'none';
++      }
++      // Hide group sections that have no visible cards.
++      var sections = document.querySelectorAll('.ag-cards-group');
++      for (var k = 0; k < sections.length; k++) {
++        var anyVisible = sections[k].querySelector('.ag-card:not([style*="display: none"])');
++        sections[k].style.display = anyVisible ? '' : 'none';
 +      }
 +    }
 +
@@ -3051,7 +3439,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +          '<button class="ag-menu-item" data-ag-action="copy" data-ag-id="' + esc(id) + '">Copy ID</button>';
 +        menuBtn.parentElement.appendChild(pop);
 +        return;
-       }
++      }
 +      var actionBtn = ev.target.closest && ev.target.closest('[data-ag-action]');
 +      if (actionBtn) {
 +        ev.preventDefault();
@@ -3079,8 +3467,8 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
 +      }
 +      // Click outside any menu — close
 +      closeAllMenus();
-     }
- 
++    }
++
      async function loadDetail(id) {
 -      document.getElementById('content').innerHTML = '<a href="/dashboard/agent-groups">&larr; Back to list</a>';
 -      document.getElementById('detail').style.display = 'block';
@@ -3378,7 +3766,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..dedbb49c914fd73859d558021d161ec0
      </script>
    `);
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
+index 4433c2a..e047d6b 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -3636,7 +4024,7 @@ index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3d
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
+index 93fe37a..6094425 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -3878,7 +4266,7 @@ index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
+index 38aa022..517e1e2 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -4283,7 +4671,7 @@ index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..fa6ecd315a6f32e7848ff84824ac17023f547259 100644
+index 3e0cc9e..fa6ecd3 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
 @@ -1,160 +1,269 @@
@@ -4660,7 +5048,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..fa6ecd315a6f32e7848ff84824ac1702
        var h = Math.floor(s / 3600);
        var m = Math.floor((s % 3600) / 60);
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052ee04684b9 100644
+index 7e438eb..fbdf77f 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -4954,7 +5342,7 @@ index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052e
    `);
  }
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9de659d44 100644
+index ea390fe..f77712c 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -5292,7 +5680,7 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d3912cdd3b5b
+index 0000000..83eaee0
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,630 @@
@@ -5928,7 +6316,7 @@ index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d391
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
+index 0000000..020f9ff
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,180 @@
@@ -6113,7 +6501,7 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5325aa6b39234a12e6e9b5cec731604d318f5028 100644
+index 27d581b..5325aa6 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,9 @@
