@@ -561,12 +561,18 @@ For each entry in v1's `agents.json`:
 ```bash
 pnpm exec tsx scripts/init-lane-agent.ts \
   --parent-folder "$V2_FOLDER" \
-  --folder "<lane-folder>" \
-  --name "<Lane Display Name>" \
+  --folder "<parent-folder>-<role>" \
+  --name "<Role>" \
+  --local-name <role> \
   --provider claude \
   --model sonnet \
   --clone-secrets-from-parent
 ```
+
+**Naming conventions for lanes:**
+- `--name` ("Analyst", "Collector", "Reporter") becomes `agent_groups.name` and the dashboard label. Use just the role — the parent's name (e.g. "LaunchMate") groups them visually already; prefixing every lane with the team name ("LaunchMate Analyst") is verbose without adding info.
+- `--folder` ("launchmate-analyst") is the on-disk folder. Team-prefixed because folders are global, not nested under the parent.
+- `--local-name` ("analyst") is what the parent calls in `send_message to="analyst"`. Lowercase, role-only, matches the conversational reference. Default is `--folder` if omitted, but role-only is much friendlier for chat.
 
 The script:
 
