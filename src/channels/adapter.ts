@@ -145,12 +145,7 @@ export interface ChannelAdapter {
    * Adapters that don't support reactions can omit this; the status-tracker
    * treats absence as a no-op.
    */
-  setReaction?(
-    platformId: string,
-    threadId: string | null,
-    platformMsgId: string,
-    emoji: string | null,
-  ): Promise<void>;
+  setReaction?(platformId: string, threadId: string | null, platformMsgId: string, emoji: string | null): Promise<void>;
 
   /**
    * Subscribe the bot to a thread so follow-up messages route via the
