@@ -335,6 +335,28 @@ Then read the file and edit:
 - **Move v1's "Improvement Backlog" / "Watch items" sections out** of `CLAUDE.role.md` into `sources/improvement-backlog.md` — they're operational state, not role spec.
 - If you went lane-agent (phase 4), update the "delegation" section to refer to lane agents addressed via `send_message` rather than sub-agents addressed via Task tool.
 
+### 7a.bis. Wire CLAUDE.role.md into the auto-load chain
+
+**v2's composed `CLAUDE.md` does NOT auto-import `CLAUDE.role.md`.** It imports `.claude-shared.md`, the module fragments, and `CLAUDE.local.md` (which Claude Code auto-loads). So the role spec you just wrote to `CLAUDE.role.md` will be invisible to the agent unless `CLAUDE.local.md` pulls it in.
+
+`init-group-agent.ts` creates an empty `CLAUDE.local.md`. Add a single import line:
+
+```bash
+echo '@./CLAUDE.role.md' > "groups/$V2_FOLDER/CLAUDE.local.md"
+```
+
+The agent's effective system prompt will then be: shared base + module fragments + role spec + (room below the import for operational memory you or the agent add over time). Keep the `@./CLAUDE.role.md` line at the top so the role loads first.
+
+For lane agents (phase 8), do the same after each lane is created:
+
+```bash
+for lane in <lane-folder-1> <lane-folder-2> ...; do
+  echo '@./CLAUDE.role.md' > "groups/$lane/CLAUDE.local.md"
+done
+```
+
+Symptom if missed: the agent operates from the generic NanoClaw base only — it knows nothing team-specific (no Google Ads paths, no lane refs, no client-specific instructions). Reports like "I don't see a credentials/ folder" while staring at `/workspace/group/` (the empty Dockerfile WORKDIR) are the typical tell.
+
 ### 7b. Sub-agents (only if phase 4 = sub-agent path)
 
 For each entry in v1's `agents.json`, create one file at `groups/<V2_FOLDER>/.claude/agents/<name>.md`:
@@ -439,9 +461,9 @@ The next inbound message will spawn a new container and reload the role spec. (T
 
 `.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
 
-### 7f. Leave CLAUDE.local.md empty
+### 7f. CLAUDE.local.md — role import only
 
-`CLAUDE.local.md` is the agent's own memory. Don't seed with v1 history.
+`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, leave the rest of `CLAUDE.local.md` empty: it's the agent's own evolving memory, not a place to seed v1 history. The agent will append observations / preferences below the import line over time.
 
 ## Phase 8 — Lane agents (only if phase 4 = lane path)
 
