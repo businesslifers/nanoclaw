@@ -2736,7 +2736,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
 -  <title>${title} — NanoClaw Dashboard</title>
-+  <title>${title} — Derek Dashboard</title>
++  <title>${title} — Dashboard Pro</title>
    <style>${CSS}</style>
    <script>
      const TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
@@ -2799,7 +2799,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3baa07275fee68fff4a3d2369ac5a17d
    <div class="sidebar">
 -    <h1>NanoClaw</h1>
 +    <div class="sidebar-header">
-+      <h1>Derek</h1>
++      <h1>Dashboard Pro</h1>
 +      <span class="sidebar-status"><span class="sidebar-dot"></span>Online</span>
 +    </div>
      <nav>${navHtml}</nav>
