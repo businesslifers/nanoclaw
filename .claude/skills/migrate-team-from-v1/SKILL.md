@@ -407,7 +407,35 @@ mkdir -p "groups/$V2_FOLDER/sources"
 [ -d "$V1_PATH/groups/$V1_FOLDER/sources" ] && cp -r "$V1_PATH/groups/$V1_FOLDER/sources/." "groups/$V2_FOLDER/sources/"
 ```
 
-Skip `conversations/` and `logs/` — fresh start in v2.
+Always skip `logs/` — operational noise, never useful.
+
+**Conversation transcripts are a decision** — ask the operator. v1 stored Slack/WhatsApp transcripts in `conversations/`; some teams have rich history worth preserving, others are noisy enough that a clean start is better. Show the size and let the operator pick:
+
+```bash
+SIZE=$(du -sh "$V1_PATH/groups/$V1_FOLDER/conversations" 2>/dev/null | cut -f1)
+COUNT=$(find "$V1_PATH/groups/$V1_FOLDER/conversations" -type f 2>/dev/null | wc -l | tr -d ' ')
+echo "v1 conversations: $COUNT files, $SIZE total"
+```
+
+Use AskUserQuestion (or plain prompt) with these three options. Default recommendation is skip; bring if the operator answers a clear use case ("yes, the agent needs to recall what was discussed about X").
+
+| Option | Where it lands | When to pick |
+|---|---|---|
+| **Skip** *(default)* | not copied; v1 retains them | Fresh start. Wiki + memory.md already capture distilled knowledge. Agent can re-derive from new conversations. |
+| **Copy as reference** | `groups/$V2_FOLDER/sources/v1-conversations/` | Long-tail context the wiki didn't capture. Agent can `grep` these on demand but they don't auto-load — no token cost unless the agent reaches for them. Recommended when in doubt. |
+| **Restore in original location** | `groups/$V2_FOLDER/conversations/` | The team's role spec / scripts explicitly reference `conversations/` paths and would break without them. Rare — usually only matches if the v1 install ran a custom transcript-search workflow. |
+
+```bash
+# If operator picks "Copy as reference":
+[ -d "$V1_PATH/groups/$V1_FOLDER/conversations" ] && \
+  cp -r "$V1_PATH/groups/$V1_FOLDER/conversations" "groups/$V2_FOLDER/sources/v1-conversations"
+
+# If operator picks "Restore in original location":
+[ -d "$V1_PATH/groups/$V1_FOLDER/conversations" ] && \
+  cp -r "$V1_PATH/groups/$V1_FOLDER/conversations" "groups/$V2_FOLDER/conversations"
+```
+
+**Caveat for both copy options:** transcripts are channel-formatted (Slack mrkdwn, WhatsApp emoji, etc.). The agent reading them as examples may pick up wrong formatting habits for the v2 channel. If the team is changing channels (phase 3 cutover), warn the operator that copied transcripts will reference the old channel's syntax. Copy-as-reference is safer than restore-in-place because the agent treats `sources/` as research material, not as authoritative examples.
 
 ### 7e. Migrate v1 hardcoded paths
 
