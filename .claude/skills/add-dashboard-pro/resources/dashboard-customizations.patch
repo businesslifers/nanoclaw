@@ -115,7 +115,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..3ad20a007d0c9e7aadd3f779c0a420dd
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..22c037a8c2e30ae4530241d25d5028628b805b0b 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..50f229cb6d3855e50cf1f16fdd063ec4cddc5f50 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
 @@ -5,169 +5,2503 @@
@@ -5245,10 +5245,10 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..5340671b803969d509f793185c9a35a0d211d203
+index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d3912cdd3b5b
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
-@@ -0,0 +1,558 @@
+@@ -0,0 +1,630 @@
 +// dist/ui/pages/wikis.js
 +import { layout } from '../layout.js';
 +
@@ -5508,6 +5508,7 @@ index 0000000000000000000000000000000000000000..5340671b803969d509f793185c9a35a0
 +            renderGlance(w) +
 +          '</div>' +
 +        '</div>';
++      attachCopyButtons();
 +    } catch (e) {
 +      document.getElementById('wk-root').innerHTML =
 +        '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
@@ -5533,9 +5534,43 @@ index 0000000000000000000000000000000000000000..5340671b803969d509f793185c9a35a0
 +            '<article class="wk-body">' + html + '</article>' +
 +          '</div>' +
 +        '</div>';
++      attachCopyButtons();
 +    } catch (e) {
 +      document.getElementById('wk-root').innerHTML =
 +        '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
++    }
++  }
++
++  // ---- Code block copy buttons ----
++
++  function attachCopyButtons() {
++    var pres = document.querySelectorAll('.wk-body pre');
++    for (var i = 0; i < pres.length; i++) {
++      var pre = pres[i];
++      if (pre.querySelector(':scope > .wk-copy-btn')) continue;
++      var btn = document.createElement('button');
++      btn.type = 'button';
++      btn.className = 'wk-copy-btn';
++      btn.textContent = 'Copy';
++      btn.setAttribute('aria-label', 'Copy code to clipboard');
++      btn.addEventListener('click', (function (target, button) {
++        return function () {
++          var code = target.querySelector('code');
++          var text = (code ? code.innerText : target.innerText).replace(/\n$/, '');
++          var done = function () {
++            button.textContent = 'Copied!';
++            button.classList.add('wk-copy-btn-done');
++            setTimeout(function () {
++              button.textContent = 'Copy';
++              button.classList.remove('wk-copy-btn-done');
++            }, 1500);
++          };
++          if (navigator.clipboard && navigator.clipboard.writeText) {
++            navigator.clipboard.writeText(text).then(done, function () {});
++          }
++        };
++      })(pre, btn));
++      pre.appendChild(btn);
 +    }
 +  }
 +  </script>
@@ -5780,6 +5815,43 @@ index 0000000000000000000000000000000000000000..5340671b803969d509f793185c9a35a0
 +    }
 +
 +    /* rendered markdown body */
++    /* ---- frontmatter meta bar ---- */
++    .wk-meta {
++      display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
++      margin: 0 0 18px; padding: 10px 12px;
++      background: #0d1426; border: 1px solid #1f2944; border-radius: 8px;
++      font-size: 12.5px; color: #94a3b8;
++    }
++    .wk-meta-item { color: #94a3b8; }
++    .wk-meta-source { color: var(--accent, #67e8f9); text-decoration: none; }
++    .wk-meta-source:hover { text-decoration: underline; }
++    .wk-verdict {
++      display: inline-block; padding: 2px 10px; border-radius: 999px;
++      font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em;
++    }
++    .wk-verdict-pass  { background: rgba(52,211,153,0.15); color: #34d399; }
++    .wk-verdict-maybe { background: rgba(251,191,36,0.15); color: #fbbf24; }
++    .wk-verdict-fail  { background: rgba(244,114,182,0.15); color: #f472b6; }
++    .wk-tag {
++      display: inline-block; padding: 1px 8px; border-radius: 999px;
++      background: #1f2944; color: #cbd5e1; font-size: 11px;
++    }
++
++    /* ---- code block copy button ---- */
++    .wk-body pre { position: relative; }
++    .wk-copy-btn {
++      position: absolute; top: 6px; right: 6px;
++      font: inherit; font-size: 11px; line-height: 1;
++      padding: 4px 8px; border: 1px solid #1f2944;
++      background: #0d1426; color: #94a3b8;
++      border-radius: 4px; cursor: pointer;
++      opacity: 0.25; transition: opacity 0.15s, color 0.15s;
++    }
++    .wk-body pre:hover .wk-copy-btn,
++    .wk-copy-btn:focus { opacity: 1; }
++    .wk-copy-btn:hover { color: #e2e8f0; }
++    .wk-copy-btn-done { color: #34d399 !important; opacity: 1; }
++
 +    .wk-body { color: #e2e8f0; line-height: 1.65; max-width: 820px; }
 +    .wk-body h1, .wk-body h2, .wk-body h3, .wk-body h4 { color: #e2e8f0; }
 +    .wk-body h1 { margin-top: 0; font-size: 28px; font-weight: 700; padding-bottom: 12px; border-bottom: 1px solid #1f2944; }
@@ -5809,10 +5881,10 @@ index 0000000000000000000000000000000000000000..5340671b803969d509f793185c9a35a0
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..a0831b923969d412d64ae363da8f535a7911f507
+index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,180 @@
 +// dist/ui/wiki-render.js
 +import { Marked } from 'marked';
 +
@@ -5823,8 +5895,14 @@ index 0000000000000000000000000000000000000000..a0831b923969d412d64ae363da8f535a
 + *
 + * `pagePath` is the wiki-relative path of the page being rendered, e.g.
 + * "concepts/foo.md" — used to resolve relative links.
++ *
++ * If the markdown begins with YAML frontmatter, the recognised fields
++ * (verdict, evaluated, updated, source, url, tags) are surfaced as a
++ * metadata bar prepended to the rendered HTML. Other fields are ignored.
 + */
 +export function renderWikiMarkdown(markdown, wikiId, pagePath) {
++  const { data, content } = parseFrontmatter(markdown);
++
 +  const m = new Marked({ gfm: true, breaks: false });
 +
 +  m.use({
@@ -5845,7 +5923,7 @@ index 0000000000000000000000000000000000000000..a0831b923969d412d64ae363da8f535a
 +    },
 +  });
 +
-+  return m.parse(markdown);
++  return renderMetaBar(data) + m.parse(content);
 +}
 +
 +/**
@@ -5866,6 +5944,126 @@ index 0000000000000000000000000000000000000000..a0831b923969d412d64ae363da8f535a
 +    }
 +  }
 +  return stack.join('/');
++}
++
++// ── Minimal YAML frontmatter parser ──────────────────────────────────────
++// Handles the subset we surface: scalar key:value, inline arrays
++// (`tags: [a, b, "c"]`), and block-style sequences (`- item` lines).
++// Anything else is ignored. Values may be quoted with single or double
++// quotes; quotes are stripped.
++
++function parseFrontmatter(md) {
++  const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
++  if (!m) return { data: {}, content: md };
++  const data = parseSimpleYaml(m[1]);
++  const content = md.slice(m[0].length);
++  return { data, content };
++}
++
++function parseSimpleYaml(text) {
++  const out = {};
++  const lines = text.split(/\r?\n/);
++  let currentKey = null;
++  let currentList = null;
++  for (const line of lines) {
++    if (!line.trim() || line.trim().startsWith('#')) continue;
++    const seqMatch = line.match(/^\s*-\s+(.*)$/);
++    if (seqMatch && currentList) {
++      currentList.push(stripQuotes(seqMatch[1].trim()));
++      continue;
++    }
++    const kv = line.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
++    if (!kv) continue;
++    const key = kv[1];
++    const rawVal = kv[2].trim();
++    if (rawVal === '') {
++      currentKey = key;
++      currentList = [];
++      out[key] = currentList;
++      continue;
++    }
++    currentKey = null;
++    currentList = null;
++    if (rawVal.startsWith('[') && rawVal.endsWith(']')) {
++      out[key] = rawVal
++        .slice(1, -1)
++        .split(',')
++        .map((s) => stripQuotes(s.trim()))
++        .filter(Boolean);
++    } else {
++      out[key] = stripQuotes(rawVal);
++    }
++  }
++  return out;
++}
++
++function stripQuotes(s) {
++  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
++    return s.slice(1, -1);
++  }
++  return s;
++}
++
++// ── Metadata bar ─────────────────────────────────────────────────────────
++
++function escapeHtml(s) {
++  return String(s == null ? '' : s)
++    .replace(/&/g, '&amp;')
++    .replace(/</g, '&lt;')
++    .replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;')
++    .replace(/'/g, '&#39;');
++}
++
++function isHttpUrl(s) {
++  return typeof s === 'string' && /^https?:\/\//i.test(s);
++}
++
++function renderMetaBar(data) {
++  const parts = [];
++
++  const verdict = data.verdict;
++  if (verdict === 'worth-exploring') {
++    parts.push('<span class="wk-verdict wk-verdict-pass">✅ Worth exploring</span>');
++  } else if (verdict === 'interesting-but-not-now') {
++    parts.push('<span class="wk-verdict wk-verdict-maybe">⏸️ Interesting but not now</span>');
++  } else if (verdict === 'pass') {
++    parts.push('<span class="wk-verdict wk-verdict-fail">❌ Pass</span>');
++  }
++
++  if (data.evaluated) {
++    parts.push('<span class="wk-meta-item">Evaluated: ' + escapeHtml(data.evaluated) + '</span>');
++  }
++  if (data.updated) {
++    parts.push('<span class="wk-meta-item">Updated: ' + escapeHtml(data.updated) + '</span>');
++  }
++
++  // Source link: prefer `url:` for the href, fall back to `source:` if it
++  // looks like a URL. If `source:` is a non-URL label and `url:` is set,
++  // use the label as the link text.
++  const url = isHttpUrl(data.url) ? data.url : isHttpUrl(data.source) ? data.source : null;
++  if (url) {
++    const label = data.source && !isHttpUrl(data.source) ? data.source : 'Source';
++    parts.push(
++      '<a class="wk-meta-source" href="' +
++        escapeHtml(url) +
++        '" target="_blank" rel="noopener noreferrer" title="' +
++        escapeHtml(label) +
++        '">' +
++        escapeHtml(label) +
++        ' ↗</a>'
++    );
++  } else if (data.source) {
++    parts.push('<span class="wk-meta-item">Source: ' + escapeHtml(data.source) + '</span>');
++  }
++
++  const tags = Array.isArray(data.tags) ? data.tags : [];
++  for (const t of tags) {
++    if (t) parts.push('<span class="wk-tag">' + escapeHtml(t) + '</span>');
++  }
++
++  if (parts.length === 0) return '';
++  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
 index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5325aa6b39234a12e6e9b5cec731604d318f5028 100644
