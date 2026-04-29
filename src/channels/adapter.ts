@@ -137,6 +137,22 @@ export interface ChannelAdapter {
   syncConversations?(): Promise<ConversationInfo[]>;
 
   /**
+   * Set (or clear) an emoji reaction on a previously-delivered platform
+   * message. Used by the status-tracker module to indicate agent lifecycle
+   * state (👀 viewed, 💭 thinking, ⚙️ working, ✅ done) on the user's last
+   * inbound message. `emoji = null` clears the reaction.
+   *
+   * Adapters that don't support reactions can omit this; the status-tracker
+   * treats absence as a no-op.
+   */
+  setReaction?(
+    platformId: string,
+    threadId: string | null,
+    platformMsgId: string,
+    emoji: string | null,
+  ): Promise<void>;
+
+  /**
    * Subscribe the bot to a thread so follow-up messages route via the
    * platform's "subscribed message" path (onSubscribedMessage in Chat SDK).
    * Called by the router when a mention-sticky wiring first engages in a

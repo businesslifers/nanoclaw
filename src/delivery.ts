@@ -23,6 +23,7 @@ import {
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
+import { onReplyDelivered, setStatusAdapter } from './modules/status-tracker/index.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
@@ -59,6 +60,13 @@ export interface ChannelDeliveryAdapter {
     files?: OutboundFile[],
   ): Promise<string | undefined>;
   setTyping?(channelType: string, platformId: string, threadId: string | null): Promise<void>;
+  setReaction?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    platformMsgId: string,
+    emoji: string | null,
+  ): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
@@ -97,6 +105,8 @@ export function setDeliveryAdapter(adapter: ChannelDeliveryAdapter): void {
   // Forward to the typing module so it can fire setTyping on its own
   // interval. Direct call, not a registry — typing is a default module.
   setTypingAdapter(adapter);
+  // Same pattern for status reactions — default module, direct call.
+  setStatusAdapter(adapter);
   for (const cb of adapterReadyCallbacks) {
     void Promise.resolve()
       .then(() => cb(adapter))
@@ -201,6 +211,10 @@ async function drainSession(session: Session): Promise<void> {
         // shouldn't get a gap in their typing indicator for them.
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
           pauseTypingRefreshAfterDelivery(session.id);
+          // ✅ done: status-tracker promotes the user's last-message reaction
+          // and clears it after a short delay. Same gate as typing — user
+          // doesn't see internal traffic, so no reaction churn for those.
+          onReplyDelivered(session.id);
         }
       } catch (err) {
         const attempts = (deliveryAttempts.get(msg.id) ?? 0) + 1;
