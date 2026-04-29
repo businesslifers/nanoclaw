@@ -392,6 +392,22 @@ What it skips:
 - `data/` and `logs/` — historical output from v1, not files the v2 agent reads
 - Anything outside the team's group folder
 
+### 7e.bis — Restart any running session
+
+If the agent's container started before this sed (e.g. because a smoke-test message was sent during/before phase 7), the agent already loaded the old role spec into its session context. Path edits on disk DON'T update an active session's context — markdown files load once, at session start. The agent will report a confusing mix: it can `ls /workspace/agent/credentials/` and see the files (the bash tool reads live), but its description of the role spec / config will quote the old `/workspace/group/...` paths it remembers.
+
+Force a fresh session:
+
+```bash
+docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.ID}}' | xargs -r docker stop
+# lanes too:
+docker ps --filter "name=nanoclaw-v2-$V2_FOLDER-" --format '{{.ID}}' | xargs -r docker stop
+```
+
+The next inbound message will spawn a new container and reload the role spec. (The host sweep may also do this on its own next tick.)
+
+`.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
+
 ### 7f. Leave CLAUDE.local.md empty
 
 `CLAUDE.local.md` is the agent's own memory. Don't seed with v1 history.
