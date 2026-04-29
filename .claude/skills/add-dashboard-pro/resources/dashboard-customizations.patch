@@ -3010,7 +3010,7 @@ index 36b9575..3edc17a 100644
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db8..ed5a979 100644
+index 0c33db8..e19ef33 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -3031,12 +3031,12 @@ index 0c33db8..ed5a979 100644
  
 +    var __agData = { groups: [], byId: {}, childrenOf: {}, costByGroup: {} };
 +
-+    // View mode persistence — 'list' (default) or 'cards'.
++    // View mode persistence — 'cards' (default) or 'list'.
 +    function getViewMode() {
 +      try {
 +        var v = localStorage.getItem('ag-view');
-+        return v === 'cards' ? 'cards' : 'list';
-+      } catch (e) { return 'list'; }
++        return v === 'list' ? 'list' : 'cards';
++      } catch (e) { return 'cards'; }
 +    }
 +    function setViewMode(v) {
 +      try { localStorage.setItem('ag-view', v); } catch (e) {}
@@ -3335,7 +3335,7 @@ index 0c33db8..ed5a979 100644
 +    }
 +
 +    function applyViewMode(mode) {
-+      mode = mode === 'cards' ? 'cards' : 'list';
++      mode = mode === 'list' ? 'list' : 'cards';
 +      var index = document.getElementById('ag-index');
 +      if (!index) return;
 +      index.dataset.viewMode = mode;
