@@ -477,9 +477,14 @@ What it skips:
 
 ### 7e.bis — Restart any running session
 
-If the agent's container started before this sed (e.g. because a smoke-test message was sent during/before phase 7), the agent already loaded the old role spec into its session context. Path edits on disk DON'T update an active session's context — markdown files load once, at session start. The agent will report a confusing mix: it can `ls /workspace/agent/credentials/` and see the files (the bash tool reads live), but its description of the role spec / config will quote the old `/workspace/group/...` paths it remembers.
+If the agent's container started before this sed (e.g. because a smoke-test message was sent during/before phase 7), the agent already loaded the old role spec into its session context — and may have *also* read config files (e.g. `credentials/<service>-config.json`) that quoted v1 paths. Path edits on disk DON'T update either of those:
 
-Force a fresh session:
+- **Role spec / system prompt:** loaded once at session start. A container restart fixes this part.
+- **Config / data files the agent already opened:** the Claude Agent SDK persists conversation transcripts (under the session's `.claude-shared/projects/*.jsonl`). Any value the agent quoted in an earlier turn — including stale paths inside JSON configs — survives the container restart and gets re-quoted in later turns. The agent isn't lying; it's faithfully reading from its own preserved memory.
+
+Symptom: the agent's `ls /workspace/agent/credentials/` correctly shows the live files, but its prose still describes paths under `/workspace/group/...` that it "saw earlier in the config". This was caught during the LaunchMate port — the agent acknowledged the mistake only after being explicitly told to re-read the config from disk.
+
+#### Step 1: Restart the container (always)
 
 ```bash
 docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.ID}}' | xargs -r docker stop
@@ -487,9 +492,30 @@ docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.ID}}' | xargs -r d
 docker ps --filter "name=nanoclaw-v2-$V2_FOLDER-" --format '{{.ID}}' | xargs -r docker stop
 ```
 
-The next inbound message will spawn a new container and reload the role spec. (The host sweep may also do this on its own next tick.)
+The next inbound message spawns a new container and reloads the role spec. `.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
 
-`.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
+#### Step 2: Clear cached session transcripts (if the agent had real-message turns before phase 7)
+
+Skip this for fresh ports where the operator hasn't smoke-tested yet — there's nothing to clear and you don't want to wipe legit memory.
+
+If the agent was tested mid-port (saw real messages, ran tools, quoted file content), the transcripts persist its stale reads. Optional aggressive reset:
+
+```bash
+# Find the session id(s) for this agent group
+SESSION_DIRS=$(find data/v2-sessions/ -maxdepth 1 -type d -name "ag-*" 2>/dev/null)
+# (or filter to a specific agent_groups.id if you've ported many)
+
+# Clear only the SDK's transcripts; keep inbound.db / outbound.db / heartbeat
+for d in $SESSION_DIRS; do
+  rm -rf "$d/.claude-shared/projects" 2>/dev/null
+done
+```
+
+This wipes the agent's conversation memory for that session — it forgets earlier turns entirely. Use only when the agent's stale-content quoting is causing real confusion that a plain restart didn't fix.
+
+#### Step 3: Tell the user how to verify
+
+If you're still in conversation with the agent, ask it to **re-read** specific files rather than recall their contents — e.g. *"Read CLAUDE.role.md and the credentials JSON, then list the actual paths shown there."* This forces fresh reads and surfaces any remaining stale-quoting before the operator gets confused by mixed-truth replies.
 
 ### 7f. CLAUDE.local.md — role + memory imports
 
