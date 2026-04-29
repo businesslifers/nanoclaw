@@ -449,6 +449,7 @@ find "groups/$V2_FOLDER" "groups/$V2_FOLDER"-* \
   -not -path '*/data/*' \
   -not -path '*/logs/*' \
   -not -path '*/conversations/*' \
+  -not -path '*/v1-conversations/*' \
   -print0 | xargs -0 sed -i 's|/workspace/group/|/workspace/agent/|g'
 ```
 
@@ -471,6 +472,7 @@ What this catches in practice:
 
 What it skips:
 - `data/` and `logs/` — historical output from v1, not files the v2 agent reads
+- `conversations/` and `sources/v1-conversations/` — these are historical chat transcripts. Rewriting paths inside them would falsify what was actually said in v1 (e.g. an agent quoted a path during a real chat — that quote is part of the historical record, not authoritative configuration).
 - Anything outside the team's group folder
 
 ### 7e.bis — Restart any running session
