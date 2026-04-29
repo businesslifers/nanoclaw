@@ -290,9 +290,9 @@ After this completes, the script prints the new `agent_groups.id`. Capture it as
 
 ### 6a. Audit existing wirings on the messaging group
 
-`init-group-agent.ts` adds a wiring for the new agent but does NOT remove pre-existing wirings on the same messaging group. This bites when the messaging_group was auto-created by the channel adapter (typical: phase 3's "send a message in LaunchMate so the bot sees it" — that auto-creates the row AND auto-wires whatever agent the host's channel-registration flow defaulted to, often with `engage_mode='pattern'` + `engage_pattern='.'` which fires on every message).
+`init-group-agent.ts` adds a wiring for the new agent but does NOT remove pre-existing wirings on the same messaging group. This bites when the messaging_group was auto-created by the channel adapter (typical: phase 3's "send a message in the new chat so the bot sees it" — that auto-creates the row AND auto-wires whatever agent the host's channel-registration flow defaulted to, often with `engage_mode='pattern'` + `engage_pattern='.'` which fires on every message).
 
-Symptom if missed: the new agent responds to mentions correctly, but a *second* agent (typically a DM agent) also responds to every message in the group. Two replies, two costs, and the operator can't tell which Janet is talking from chat.
+Symptom if missed: the new agent responds to mentions correctly, but a *second* agent (typically the install's main DM agent) also responds to every message in the group. Two replies, two costs, and they share a display name so the operator can't tell from chat which one is talking.
 
 Run:
 
@@ -474,7 +474,7 @@ LOCAL="groups/$V2_FOLDER/CLAUDE.local.md"
 
 In v1, `memory.md` was the per-team curated memory file (personality, principles, hard "always/never" rules). It wasn't auto-loaded by v1's stack either — but the role spec or v1 system prompt explicitly read it on every turn. In v2, the equivalent is auto-loading via `CLAUDE.local.md`.
 
-**Symptom if missed:** the agent loses its persona / hard rules. For LaunchMate this looks like Janet forgetting she's "Janet from The Good Place"; for other teams it can be more subtle (e.g. forgetting a "never X without Y" guardrail).
+**Symptom if missed:** the agent loses its persona / hard rules — its assigned voice or character disappears, "always X" / "never Y" guardrails go missing, and team-specific defaults the operator carefully wrote in v1 stop influencing replies.
 
 **Final shape of the file:**
 
