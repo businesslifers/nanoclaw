@@ -528,10 +528,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a63069b5ed 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f6148096ddbc 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3242 @@
+@@ -2,172 +2,3253 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -2956,13 +2956,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
 +    padding: 0;
 +    overflow: hidden;
 +    position: relative;
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
--    margin-bottom: 8px;
++  }
 +  .agent-groups-v2 .ad-table-panel::before {
 +    content: '';
 +    position: absolute;
@@ -2970,8 +2964,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
 +    height: 1px;
 +    background: linear-gradient(90deg, transparent, var(--ag-cyan), transparent);
 +    opacity: 0.4;
-   }
--  .sidebar nav a {
++  }
 +  .agent-groups-v2 .ad-table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
 +  .agent-groups-v2 .ad-table thead th {
 +    text-align: left;
@@ -2983,14 +2976,21 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
 +    color: var(--ag-text-label);
 +    border-bottom: 1px solid var(--ag-border);
 +    background: var(--ag-surface-2);
-+  }
+   }
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
+-    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
+-    margin-bottom: 8px;
 +  .agent-groups-v2 .ad-table tbody td {
 +    padding: 10px 14px;
 +    font-size: 12.5px;
 +    border-bottom: 1px solid var(--ag-surface-2);
 +    color: var(--ag-text);
 +    vertical-align: middle;
-+  }
+   }
+-  .sidebar nav a {
 +  .agent-groups-v2 .ad-table tbody tr:last-child td { border-bottom: none; }
 +  .agent-groups-v2 .ad-table tbody tr:hover td { background: rgba(45, 212, 191, 0.04); }
 +  .agent-groups-v2 .ad-num { text-align: center; }
@@ -3471,10 +3471,21 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
 -  .chart-bar-out { background: #22c55e; }
 -  .chart-value { font-size: 11px; color: #666; }
 +  /* Tasks page */
++  .tasks-v2 .ov-header {
++    display: flex;
++    justify-content: space-between;
++    align-items: center;
++    margin-bottom: 20px;
++    flex-wrap: wrap;
++    gap: 12px;
++  }
++  .tasks-v2 .ov-header-title h2 { font-size: 24px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.3px; }
++  .tasks-v2 .ov-subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
 +  .tasks-v2 .tasks-toolbar {
 +    display: flex;
 +    align-items: center;
 +    gap: 12px;
++    margin-top: 8px;
 +    margin-bottom: 16px;
 +    flex-wrap: wrap;
 +  }
@@ -3880,7 +3891,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3245,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3256,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -3895,7 +3906,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3259,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3270,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -3921,7 +3932,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3285,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3296,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -3940,7 +3951,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3306,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3317,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -3957,7 +3968,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..2eff77a0fc2232820f9956285fe072a6
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3327,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3338,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
