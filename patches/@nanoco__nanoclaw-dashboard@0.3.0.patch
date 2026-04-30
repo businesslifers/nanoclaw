@@ -528,7 +528,7 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..76b6b16e3aabce34597b52cd6c379395f6583269 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc00edd644 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
 @@ -2,172 +2,3254 @@
@@ -3626,17 +3626,17 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..76b6b16e3aabce34597b52cd6c379395
 +    padding: 10px 12px;
 +    font-size: 12px;
 +    color: #cbd5e1;
-+    vertical-align: middle;
++    vertical-align: top;
 +    border-bottom: 1px solid #111827;
 +  }
 +  .tasks-v2 .task-row { cursor: pointer; }
 +  .tasks-v2 .task-row:hover { background: #18223a; }
 +  .tasks-v2 .task-row:focus { outline: 2px solid #2dd4bf; outline-offset: -2px; }
 +  .tasks-v2 .task-prompt {
-+    overflow: hidden;
-+    text-overflow: ellipsis;
-+    white-space: nowrap;
 +    color: #e2e8f0;
++    white-space: pre-wrap;
++    word-break: break-word;
++    line-height: 1.5;
 +  }
 +  .tasks-v2 .task-status-badge {
 +    display: inline-block;
