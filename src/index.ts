@@ -185,8 +185,7 @@ async function main(): Promise<void> {
       // host's AccessDecision discriminated union to the simpler shape
       // the dashboard package consumes.
       permissions: {
-        canAccessAgentGroup: (userId, agentGroupId) =>
-          canAccessAgentGroup(userId, agentGroupId).allowed,
+        canAccessAgentGroup: (userId, agentGroupId) => canAccessAgentGroup(userId, agentGroupId).allowed,
       },
     });
     startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });

@@ -232,12 +232,7 @@ export function cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMuta
     // cancelTaskPrim only acts on rows in ('pending','paused'); a 'processing'
     // row is left untouched. Detect the no-op so the caller sees a 404 rather
     // than a misleading "ok" response.
-    if (
-      after &&
-      after.id === before.id &&
-      after.status === before.status &&
-      after.recurrence === before.recurrence
-    ) {
+    if (after && after.id === before.id && after.status === before.status && after.recurrence === before.recurrence) {
       throw new MutatorNotFoundError(
         `task ${args.taskId} could not be cancelled (status=${before.status}; only pending/paused are cancellable)`,
       );

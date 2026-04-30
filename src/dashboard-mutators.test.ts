@@ -270,9 +270,7 @@ describe('cancelTask', () => {
   it('cancels a pending task and writes audit', () => {
     seedAgentGroup('ag-1', 'Group A');
     seedUserWithRole('u-owner', 'owner', null);
-    seedSessionWithTasks('s1', 'ag-1', [
-      { id: 't-pending', status: 'pending', recurrence: '0 9 * * *' },
-    ]);
+    seedSessionWithTasks('s1', 'ag-1', [{ id: 't-pending', status: 'pending', recurrence: '0 9 * * *' }]);
 
     const r = cancelTask({ taskId: 't-pending', sessionId: 's1' }, 'u-owner');
     expect(r.ok).toBe(true);
@@ -389,9 +387,9 @@ describe('updateTask', () => {
     seedAgentGroup('ag-1', 'Group A');
     seedUserWithRole('u-owner', 'owner', null);
     seedSessionWithTasks('s1', 'ag-1', [{ id: 't1', status: 'pending' }]);
-    expect(() =>
-      updateTask({ taskId: 't1', sessionId: 's1', recurrence: 'not-a-cron' }, 'u-owner'),
-    ).toThrow(MutatorValidationError);
+    expect(() => updateTask({ taskId: 't1', sessionId: 's1', recurrence: 'not-a-cron' }, 'u-owner')).toThrow(
+      MutatorValidationError,
+    );
   });
 
   it('throws not-found when task does not exist', () => {
