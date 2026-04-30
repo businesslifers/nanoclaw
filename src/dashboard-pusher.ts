@@ -90,6 +90,7 @@ import { DATA_DIR, ASSISTANT_NAME } from './config.js';
 import { readContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
+import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
 
@@ -252,6 +253,17 @@ function collectSnapshot(): Record<string, unknown> {
 
   const pinned = cpuWatchdog.pinned();
 
+  // Build session refs from the already-decorated sessions array — no extra
+  // DB roundtrips. collectTasks() opens each session's inbound.db read-only.
+  const sessionRefs: SessionRef[] = sessions
+    .filter((s) => typeof s.id === 'string' && typeof s.agent_group_id === 'string')
+    .map((s) => ({
+      sessionId: s.id as string,
+      agentGroupId: s.agent_group_id as string,
+      agentGroupName: (s.agent_group_name as string | null) ?? '',
+    }));
+  const tasks = collectTasks(sessionRefs);
+
   return {
     timestamp: new Date().toISOString(),
     assistant_name: ASSISTANT_NAME,
@@ -265,6 +277,7 @@ function collectSnapshot(): Record<string, unknown> {
     activity: collectActivity(),
     messages: collectMessages(),
     wikis: collectWikis(),
+    tasks,
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
     audit: getRecentAudit(200),
