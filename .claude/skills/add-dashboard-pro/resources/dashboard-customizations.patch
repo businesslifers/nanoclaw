@@ -528,10 +528,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f6148096ddbc 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..76b6b16e3aabce34597b52cd6c379395f6583269 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3253 @@
+@@ -2,172 +2,3254 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -589,6 +589,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
 +    padding: 20px 20px 16px;
 +    border-bottom: 1px solid #1f2944;
 +    margin-bottom: 8px;
++    text-align: center;
 +  }
 +  .sidebar-header h1 {
 +    font-size: 18px;
@@ -597,10 +598,10 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
 +    letter-spacing: 0.2px;
 +  }
 +  .sidebar-logo {
-+    width: 20px;
-+    height: 20px;
-+    vertical-align: -3px;
-+    margin-right: 8px;
++    display: block;
++    width: 80px;
++    height: 80px;
++    margin: 0 auto 12px;
 +  }
 +  .sidebar-status {
 +    display: inline-flex;
@@ -3891,7 +3892,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3256,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3257,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -3906,7 +3907,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3270,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3271,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -3932,7 +3933,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3296,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3297,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -3951,7 +3952,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3317,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3318,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -3968,7 +3969,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3338,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3339,52 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -4010,7 +4011,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f614
    <div class="sidebar">
 -    <h1>NanoClaw</h1>
 +    <div class="sidebar-header">
-+      <h1><img class="sidebar-logo" src="${NANOCLAW_ICON_DATA_URL}" alt="" />Dashboard Pro</h1>
++      <img class="sidebar-logo" src="${NANOCLAW_ICON_DATA_URL}" alt="" />
++      <h1>Dashboard Pro</h1>
 +      <span class="sidebar-status"><span class="sidebar-dot"></span>Online</span>
 +    </div>
      <nav>${navHtml}</nav>
