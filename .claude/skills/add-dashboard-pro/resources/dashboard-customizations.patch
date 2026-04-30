@@ -1,19 +1,31 @@
+diff --git a/dist/router.d.ts b/dist/router.d.ts
+index ba5d8934236d9327cfc7e6b5a54100963109aa9b..e79004442919bcba67c07d9b7239ac84ae546360 100644
+--- a/dist/router.d.ts
++++ b/dist/router.d.ts
+@@ -3,4 +3,6 @@
+  * All data comes from the in-memory store (populated via POST /api/ingest).
+  */
+ import type http from 'http';
++import type { DashboardMutators } from './types.js';
+ export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse): Promise<void>;
++export declare function dispatchMutating(method: string, path: string, body: unknown, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d..3ad20a0 100644
+index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c69137d95f5c 100644
 --- a/dist/router.js
 +++ b/dist/router.js
-@@ -6,6 +6,10 @@ import { channelsPage } from './ui/pages/channels.js';
+@@ -6,6 +6,11 @@ import { channelsPage } from './ui/pages/channels.js';
  import { messagesPage } from './ui/pages/messages.js';
  import { usersPage } from './ui/pages/users.js';
  import { logsPage } from './ui/pages/logs.js';
 +import { wikisPage } from './ui/pages/wikis.js';
++import { auditPage } from './ui/pages/audit.js';
 +import { renderWikiMarkdown } from './ui/wiki-render.js';
 +import { readFileSync, realpathSync } from 'node:fs';
 +import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from 'node:path';
  function json(res, data, status = 200) {
      res.writeHead(status, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify(data));
-@@ -14,6 +18,16 @@ function html(res, content) {
+@@ -14,6 +19,16 @@ function html(res, content) {
      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
      res.end(content);
  }
@@ -30,7 +42,7 @@ index 326434d..3ad20a0 100644
  export async function dispatch(method, path, params, res) {
      const s = getSnapshot();
      // --- API routes ---
-@@ -45,6 +59,7 @@ export async function dispatch(method, path, params, res) {
+@@ -45,6 +60,7 @@ export async function dispatch(method, path, params, res) {
                  owners: s.users.filter((u) => u.privilege === 'owner').length,
                  globalAdmins: s.users.filter((u) => u.privilege === 'global_admin').length,
              },
@@ -38,7 +50,7 @@ index 326434d..3ad20a0 100644
              lastUpdated: getLastUpdated(),
          });
      }
-@@ -74,10 +89,66 @@ export async function dispatch(method, path, params, res) {
+@@ -74,10 +90,66 @@ export async function dispatch(method, path, params, res) {
              admins: group.admins,
          });
      }
@@ -106,20 +118,233 @@ index 326434d..3ad20a0 100644
      }
      if (method === 'GET' && path === '/api/channels') {
          if (!s)
-@@ -130,6 +201,7 @@ export async function dispatch(method, path, params, res) {
+@@ -114,6 +186,11 @@ export async function dispatch(method, path, params, res) {
+             return json(res, { error: 'No data yet' }, 503);
+         return json(res, { sessions: s.context_windows });
+     }
++    if (method === 'GET' && path === '/api/audit') {
++        if (!s)
++            return json(res, { error: 'No data yet' }, 503);
++        return json(res, s.audit || []);
++    }
+     // --- HTML pages ---
+     if (method === 'GET') {
+         if (path === '/dashboard')
+@@ -130,6 +207,8 @@ export async function dispatch(method, path, params, res) {
              return html(res, usersPage());
          if (path === '/dashboard/logs')
              return html(res, logsPage());
 +        if (path.startsWith('/dashboard/wikis')) return html(res, wikisPage());
++        if (path === '/dashboard/audit') return html(res, auditPage());
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
+@@ -139,3 +218,27 @@ export async function dispatch(method, path, params, res) {
+     res.writeHead(404, { 'Content-Type': 'application/json' });
+     res.end(JSON.stringify({ error: 'Not found' }));
+ }
++
++/**
++ * Mutating dispatch — invoked by the dashboard server for PATCH/POST/DELETE
++ * under /api/* (excluding the self-authed ingest/log POSTs handled inline).
++ * The server has already validated bearer + CSRF and resolved the actor.
++ *
++ * Mutators throw structured errors with a `.status` field; we map those to
++ * the HTTP response. Any unrecognised throw becomes a 500.
++ */
++export async function dispatchMutating(method, path, body, actorUserId, mutators, res) {
++    if (method === 'PATCH' && path.startsWith('/api/agent-groups/')) {
++        const id = decodeURIComponent(path.slice('/api/agent-groups/'.length));
++        if (!id || id.includes('/')) return json(res, { error: 'Invalid agent group id' }, 400);
++        try {
++            const after = mutators.renameAgentGroup({ id, name: body.name }, actorUserId);
++            return json(res, { ok: true, after });
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
++    return json(res, { error: 'Not found' }, 404);
++}
+diff --git a/dist/server.d.ts b/dist/server.d.ts
+index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..b0f6a1422cc234d4fc613e5406b4cf1eb2e54949 100644
+--- a/dist/server.d.ts
++++ b/dist/server.d.ts
+@@ -1,4 +1,5 @@
+ import type { DashboardConfig } from './types.js';
+ export declare function getDashboardSecret(): string | null;
++export declare function getDashboardCsrfToken(): string | null;
+ export declare function startDashboard(config?: DashboardConfig): void;
+ export declare function stopDashboard(): Promise<void>;
+diff --git a/dist/server.js b/dist/server.js
+index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6ef6c10a45 100644
+--- a/dist/server.js
++++ b/dist/server.js
+@@ -4,32 +4,73 @@
+  * Serves dashboard UI and API endpoints.
+  */
+ import http from 'http';
++import crypto from 'crypto';
+ import { setSnapshot, addLogClient, removeLogClient, pushLogLines } from './store.js';
+-import { dispatch } from './router.js';
++import { dispatch, dispatchMutating } from './router.js';
+ const DEFAULT_PORT = 3100;
+ let server = null;
+ let dashboardSecret = null;
++let dashboardMutators = null;
++let dashboardResolveActor = null;
++let csrfToken = null;
+ export function getDashboardSecret() {
+     return dashboardSecret;
+ }
++export function getDashboardCsrfToken() {
++    return csrfToken;
++}
++function readCookie(req, name) {
++    const raw = req.headers.cookie;
++    if (!raw) return null;
++    for (const part of raw.split(/;\s*/)) {
++        const eq = part.indexOf('=');
++        if (eq < 0) continue;
++        if (part.slice(0, eq) === name) return decodeURIComponent(part.slice(eq + 1));
++    }
++    return null;
++}
++async function readJsonBody(req) {
++    const chunks = [];
++    for await (const chunk of req) chunks.push(chunk);
++    if (chunks.length === 0) return {};
++    try {
++        return JSON.parse(Buffer.concat(chunks).toString());
++    }
++    catch {
++        const err = new Error('Invalid JSON');
++        err.status = 400;
++        throw err;
++    }
++}
+ export function startDashboard(config = {}) {
+     const port = config.port || DEFAULT_PORT;
+     dashboardSecret = config.secret || null;
++    dashboardMutators = config.mutators || null;
++    dashboardResolveActor = config.resolveActor || null;
+     if (!dashboardSecret) {
+         console.warn('[dashboard] Starting without secret — endpoints are unauthenticated');
+     }
++    csrfToken = dashboardSecret
++        ? crypto.createHmac('sha256', dashboardSecret).update('csrf-v1').digest('hex').slice(0, 32)
++        : null;
+     server = http.createServer(async (req, res) => {
+         const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+         const path = url.pathname;
+         const method = req.method || 'GET';
+         // CORS
+         res.setHeader('Access-Control-Allow-Origin', '*');
+-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
++        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Dashboard-CSRF');
+         if (method === 'OPTIONS') {
+             res.writeHead(204);
+             res.end();
+             return;
+         }
++        // CSRF cookie — set on dashboard HTML responses so subsequent
++        // mutating requests have something to double-submit. SameSite=Strict
++        // keeps it scoped to first-party requests.
++        if (csrfToken && (path === '/' || path.startsWith('/dashboard'))) {
++            res.setHeader('Set-Cookie', `nc-csrf=${csrfToken}; Path=/; SameSite=Strict`);
++        }
+         // Auth check for /api/* routes (endpoints with their own auth are excluded)
+         const selfAuthed = ['/api/ingest', '/api/logs', '/api/logs/push'];
+         if (path.startsWith('/api/') && !selfAuthed.includes(path) && dashboardSecret) {
+@@ -55,6 +96,41 @@ export function startDashboard(config = {}) {
+             handleLogStream(req, res);
+             return;
+         }
++        // Mutating dispatch — PATCH/POST/DELETE under /api/* (excluding the
++        // self-authed POSTs above which have already returned).
++        if (path.startsWith('/api/') && (method === 'PATCH' || method === 'POST' || method === 'DELETE')) {
++            try {
++                const body = await readJsonBody(req);
++                const cookieCsrf = readCookie(req, 'nc-csrf');
++                const headerCsrf = req.headers['x-dashboard-csrf'];
++                if (!csrfToken || cookieCsrf !== csrfToken || headerCsrf !== csrfToken) {
++                    res.writeHead(403, { 'Content-Type': 'application/json' });
++                    res.end(JSON.stringify({ error: 'CSRF check failed' }));
++                    return;
++                }
++                if (!dashboardMutators || !dashboardResolveActor) {
++                    res.writeHead(503, { 'Content-Type': 'application/json' });
++                    res.end(JSON.stringify({ error: 'Mutators not configured' }));
++                    return;
++                }
++                const actor = dashboardResolveActor(req);
++                if (!actor) {
++                    res.writeHead(401, { 'Content-Type': 'application/json' });
++                    res.end(JSON.stringify({ error: 'Could not resolve actor' }));
++                    return;
++                }
++                await dispatchMutating(method, path, body, actor, dashboardMutators, res);
++                return;
++            }
++            catch (err) {
++                if (!res.headersSent) {
++                    const status = typeof err?.status === 'number' ? err.status : 500;
++                    res.writeHead(status, { 'Content-Type': 'application/json' });
++                    res.end(JSON.stringify({ error: err?.message || 'Internal Server Error' }));
++                }
++                return;
++            }
++        }
+         try {
+             await dispatch(method, path, url.searchParams, res);
+         }
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..8a6cb478de4f21c8a39ecf71ba9e74a62afd2023 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -139,7 +139,31 @@ export interface ActivityBucket {
+     inbound: number;
+     outbound: number;
+ }
++export interface AgentGroupRenameArgs {
++    id: string;
++    name: string;
++}
++export interface AgentGroupRenameResult {
++    id: string;
++    name: string;
++}
++export interface DashboardMutators {
++    renameAgentGroup(args: AgentGroupRenameArgs, actorUserId: string): AgentGroupRenameResult;
++}
++export type ResolveActor = (req: import('http').IncomingMessage) => string | undefined;
++export interface AuditRow {
++    id: number;
++    ts: string;
++    actor_user_id: string;
++    action: string;
++    target_type: string;
++    target_id: string;
++    before_json: string | null;
++    after_json: string | null;
++}
+ export interface DashboardConfig {
+     port?: number;
+     secret?: string;
++    mutators?: DashboardMutators;
++    resolveActor?: ResolveActor;
+ }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b9575..3edc17a 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e4073d851 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -5,169 +5,2704 @@
- import { getDashboardSecret } from '../server.js';
+@@ -2,172 +2,2845 @@
+  * Shared HTML layout for dashboard pages.
+  * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
+  */
+-import { getDashboardSecret } from '../server.js';
++import { getDashboardSecret, getDashboardCsrfToken } from '../server.js';
  const NAV_ITEMS = [
      { href: '/dashboard', label: 'Overview', icon: '&#9632;' },
 -    { href: '/dashboard/agent-groups', label: 'Agent Groups', icon: '&#9654;' },
@@ -133,6 +358,7 @@ index 36b9575..3edc17a 100644
 +    { href: '/dashboard/wikis', label: 'Wikis', icon: '&#9783;' },
 +    { href: '/dashboard/users', label: 'Users', icon: '&#9679;', countKey: 'users' },
      { href: '/dashboard/logs', label: 'Logs', icon: '&#9776;' },
++    { href: '/dashboard/audit', label: 'Audit', icon: '&#9745;' },
  ];
  const CSS = `
    * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1979,26 +2205,12 @@ index 36b9575..3edc17a 100644
 +    font-size: 13px;
 +    width: 220px;
 +    transition: border-color 0.15s, box-shadow 0.15s;
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
--    margin-bottom: 8px;
++  }
 +  .users-v2 .us-search:focus {
 +    outline: none;
 +    border-color: var(--us-cyan);
 +    box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.20);
-   }
--  .sidebar nav a {
--    display: flex;
--    align-items: center;
--    gap: 10px;
--    padding: 10px 20px;
--    color: #999;
--    font-size: 14px;
--    transition: background 0.15s, color 0.15s;
++  }
 +  .users-v2 .us-select {
 +    background: var(--us-surface);
 +    color: var(--us-text);
@@ -2006,17 +2218,8 @@ index 36b9575..3edc17a 100644
 +    border-radius: 8px;
 +    padding: 8px 12px;
 +    font-size: 13px;
-   }
--  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
--  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
--  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
- 
--  /* Main */
--  .main {
--    margin-left: 220px;
--    padding: 24px 32px;
--    flex: 1;
--    min-width: 0;
++  }
++
 +  /* Privilege pills (used in row + hierarchy legend) */
 +  .users-v2 .us-priv {
 +    display: inline-block;
@@ -2027,9 +2230,7 @@ index 36b9575..3edc17a 100644
 +    letter-spacing: 0.5px;
 +    text-transform: uppercase;
 +    border: 1px solid transparent;
-   }
--  .page-title {
--    font-size: 22px;
++  }
 +  .users-v2 .us-priv-owner        { background: rgba(232, 121, 249, 0.14); color: var(--us-magenta); border-color: rgba(232, 121, 249, 0.35); }
 +  .users-v2 .us-priv-global_admin { background: rgba(125, 211, 252, 0.12); color: #7dd3fc;          border-color: rgba(125, 211, 252, 0.30); }
 +  .users-v2 .us-priv-admin        { background: rgba(251, 191, 36, 0.12);  color: var(--us-amber);  border-color: rgba(251, 191, 36, 0.30); }
@@ -2058,23 +2259,13 @@ index 36b9575..3edc17a 100644
 +    text-align: left;
 +    padding: 12px 16px;
 +    font-size: 10px;
-     font-weight: 600;
--    margin-bottom: 20px;
--    color: #fff;
++    font-weight: 600;
 +    text-transform: uppercase;
 +    letter-spacing: 1px;
 +    color: var(--us-text-label);
 +    border-bottom: 1px solid var(--us-border);
 +    background: var(--us-surface-2);
-   }
--
--  /* Cards */
--  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
--  .card {
--    background: #1a1a1a;
--    border: 1px solid #2a2a2a;
--    border-radius: 8px;
--    padding: 16px;
++  }
 +  .users-v2 .us-col-actions { width: 40px; text-align: right; padding-right: 16px; position: relative; }
 +  .users-v2 .us-table tbody td {
 +    padding: 12px 16px;
@@ -2082,18 +2273,10 @@ index 36b9575..3edc17a 100644
 +    border-bottom: 1px solid var(--us-surface-2);
 +    color: var(--us-text);
 +    vertical-align: middle;
-   }
--  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
--  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
--  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
++  }
 +  .users-v2 .us-table tbody tr:last-child td { border-bottom: none; }
 +  .users-v2 .us-row:hover td { background: rgba(45, 212, 191, 0.04); }
- 
--  /* Tables */
--  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
--  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
--  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
--  tr:hover td { background: #151515; }
++
 +  /* User cell with avatar */
 +  .users-v2 .us-user-cell { display: flex; align-items: center; gap: 12px; }
 +  .users-v2 .us-avatar {
@@ -2112,14 +2295,12 @@ index 36b9575..3edc17a 100644
 +  .users-v2 .us-user-name { color: #f1f5f9; font-weight: 600; }
 +  .users-v2 .us-user-handle { font-size: 11px; color: var(--us-text-dim); margin-top: 2px; }
 +  .users-v2 .us-cell-time { color: var(--us-text-dim); font-size: 12px; white-space: nowrap; }
- 
--  /* Badges */
--  .badge {
++
 +  /* Generic tag/role pills */
 +  .users-v2 .us-tag {
-     display: inline-block;
-     padding: 2px 8px;
-     border-radius: 4px;
++    display: inline-block;
++    padding: 2px 8px;
++    border-radius: 4px;
 +    font-size: 10px;
 +    font-weight: 700;
 +    letter-spacing: 0.6px;
@@ -2164,12 +2345,19 @@ index 36b9575..3edc17a 100644
 +    padding: 4px 8px;
 +    border-radius: 6px;
 +    transition: background 0.15s, color 0.15s, border-color 0.15s;
-+  }
+   }
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
+-    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
+-    margin-bottom: 8px;
 +  .users-v2 .us-menu-btn:hover {
 +    background: rgba(45, 212, 191, 0.08);
 +    color: var(--us-cyan);
 +    border-color: var(--us-border);
-+  }
+   }
+-  .sidebar nav a {
 +  .users-v2 .us-menu-popover {
 +    position: absolute;
 +    top: 100%;
@@ -2241,19 +2429,13 @@ index 36b9575..3edc17a 100644
 +    gap: 8px;
 +    padding: 6px 12px;
 +    border-radius: 999px;
-     font-size: 11px;
-     font-weight: 600;
-     text-transform: uppercase;
++    font-size: 11px;
++    font-weight: 600;
++    text-transform: uppercase;
 +    letter-spacing: 0.4px;
 +    border: 1px solid var(--lg-border);
 +    background: var(--lg-surface);
-   }
--  .badge-green { background: #1a3a1a; color: #4ade80; }
--  .badge-yellow { background: #3a3a1a; color: #facc15; }
--  .badge-red { background: #3a1a1a; color: #f87171; }
--  .badge-blue { background: #1a2a3a; color: #7eb8da; }
--  .badge-gray { background: #2a2a2a; color: #999; }
--  .badge-purple { background: #2a1a3a; color: #c084fc; }
++  }
 +  .logs-v2 .lg-status-dot {
 +    width: 8px; height: 8px;
 +    border-radius: 50%;
@@ -2266,14 +2448,12 @@ index 36b9575..3edc17a 100644
 +  .logs-v2 .lg-status-disconnected { color: var(--lg-red); border-color: rgba(248, 113, 113, 0.40); }
 +  .logs-v2 .lg-status-disconnected .lg-status-dot { box-shadow: 0 0 6px currentColor; }
 +  @keyframes lg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
- 
--  /* Section headers */
--  .section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #ccc; }
++
 +  /* Toolbar */
 +  .logs-v2 .lg-toolbar {
-+    display: flex;
+     display: flex;
 +    justify-content: space-between;
-+    align-items: center;
+     align-items: center;
 +    gap: 12px;
 +    margin-bottom: 12px;
 +    flex-wrap: wrap;
@@ -2281,9 +2461,16 @@ index 36b9575..3edc17a 100644
 +  .logs-v2 .lg-toolbar-left,
 +  .logs-v2 .lg-toolbar-right {
 +    display: flex;
-+    gap: 10px;
+     gap: 10px;
+-    padding: 10px 20px;
+-    color: #999;
+-    font-size: 14px;
+-    transition: background 0.15s, color 0.15s;
 +    align-items: center;
-+  }
+   }
+-  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
+-  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
+-  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
 +  .logs-v2 .lg-select,
 +  .logs-v2 .lg-search {
 +    background: var(--lg-surface);
@@ -2330,14 +2517,12 @@ index 36b9575..3edc17a 100644
 +  }
 +  .logs-v2 .lg-clear-btn:hover { color: var(--lg-red); border-color: rgba(248, 113, 113, 0.40); }
  
--  /* Chart container */
--  .chart-container { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
--  .chart-bar-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
--  .chart-label { width: 40px; font-size: 11px; color: #888; text-align: right; }
--  .chart-bar { height: 20px; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
--  .chart-bar-in { background: #3b82f6; }
--  .chart-bar-out { background: #22c55e; }
--  .chart-value { font-size: 11px; color: #666; }
+-  /* Main */
+-  .main {
+-    margin-left: 220px;
+-    padding: 24px 32px;
+-    flex: 1;
+-    min-width: 0;
 +  /* Log viewer panel */
 +  .logs-v2 .lg-viewer {
 +    background: var(--lg-bg);
@@ -2351,7 +2536,12 @@ index 36b9575..3edc17a 100644
 +    font-size: 11.5px;
 +    line-height: 1.7;
 +    position: relative;
-+  }
+   }
+-  .page-title {
+-    font-size: 22px;
+-    font-weight: 600;
+-    margin-bottom: 20px;
+-    color: #fff;
 +  .logs-v2 .lg-viewer::before {
 +    content: '';
 +    position: absolute;
@@ -2364,7 +2554,7 @@ index 36b9575..3edc17a 100644
 +    white-space: pre-wrap;
 +    word-break: break-all;
 +    color: var(--lg-text);
-+  }
+   }
 +  .logs-v2 .lg-line:hover { background: rgba(45, 212, 191, 0.04); }
 +  .logs-v2 .lg-time { color: var(--lg-cyan); }
 +  .logs-v2 .lg-level {
@@ -2376,9 +2566,10 @@ index 36b9575..3edc17a 100644
 +  .logs-v2 .lg-kv-key { color: #94a3b8; }
 +  .logs-v2 .lg-kv-val { color: var(--lg-text-label); }
  
--  /* Log viewer */
--  .log-container {
--    background: #0a0a0a;
+-  /* Cards */
+-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+-  .card {
+-    background: #1a1a1a;
 -    border: 1px solid #2a2a2a;
 +  /* Per-level coloring (whole line tint for prominence) */
 +  .logs-v2 .lg-lvl-info  .lg-level { color: #67e8f9; }
@@ -2480,7 +2671,6 @@ index 36b9575..3edc17a 100644
 +    line-height: 1;
 +    padding: 6px 12px;
      border-radius: 8px;
--    padding: 12px;
 +    transition: background 0.15s, color 0.15s, border-color 0.15s;
 +  }
 +  .agent-groups-v2 .ad-menu-btn:hover {
@@ -2517,21 +2707,10 @@ index 36b9575..3edc17a 100644
 +  .agent-groups-v2 .ad-detail-value {
 +    font-size: 13px;
 +    color: var(--ag-text);
-     font-family: 'Cascadia Code', 'Fira Code', monospace;
--    font-size: 12px;
--    height: calc(100vh - 140px);
--    overflow-y: auto;
--    line-height: 1.6;
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    overflow-wrap: anywhere;
-   }
--  .log-line { white-space: pre-wrap; word-break: break-all; }
--  .log-line:hover { background: #151515; }
- 
--  /* Detail panel */
--  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
--  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
--  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
--  .detail-value { color: #e0e0e0; font-size: 13px; }
++  }
++
 +  /* KPI cards (smaller, 4 across) */
 +  .agent-groups-v2 .ad-kpi-grid {
 +    display: grid;
@@ -2595,14 +2774,12 @@ index 36b9575..3edc17a 100644
 +    overflow: hidden;
 +    text-overflow: ellipsis;
 +  }
- 
--  /* Loading */
--  .loading { color: #666; font-style: italic; padding: 20px; }
++
 +  /* Section panels (Sessions / Wirings / etc) */
 +  .agent-groups-v2 .ad-section { margin-bottom: 24px; }
 +  .agent-groups-v2 .ad-section-head { margin-bottom: 8px; }
 +  .agent-groups-v2 .ad-empty {
-+    padding: 16px;
+     padding: 16px;
 +    color: var(--ag-text-dim);
 +    font-size: 12px;
 +    background: var(--ag-surface);
@@ -2643,7 +2820,10 @@ index 36b9575..3edc17a 100644
 +    border-bottom: 1px solid var(--ag-surface-2);
 +    color: var(--ag-text);
 +    vertical-align: middle;
-+  }
+   }
+-  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+-  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
+-  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
 +  .agent-groups-v2 .ad-table tbody tr:last-child td { border-bottom: none; }
 +  .agent-groups-v2 .ad-table tbody tr:hover td { background: rgba(45, 212, 191, 0.04); }
 +  .agent-groups-v2 .ad-num { text-align: center; }
@@ -2655,11 +2835,11 @@ index 36b9575..3edc17a 100644
 +  .agent-groups-v2 .ad-cell-name-id { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: var(--ag-text-dim); }
 +  .agent-groups-v2 .ad-id-hint { font-size: 11px; color: var(--ag-text-dim); }
  
--  /* Select */
--  select {
--    background: #1a1a1a;
--    color: #e0e0e0;
--    border: 1px solid #2a2a2a;
+-  /* Tables */
+-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+-  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
+-  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
+-  tr:hover td { background: #151515; }
 +  /* Pills */
 +  .agent-groups-v2 .ad-pill {
 +    display: inline-flex;
@@ -2685,30 +2865,24 @@ index 36b9575..3edc17a 100644
 +  .agent-groups-v2 .ad-pill-idle     { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border-color: rgba(251, 191, 36, 0.30); }
 +  .agent-groups-v2 .ad-pill-stopped  { background: rgba(100, 116, 139, 0.10); color: #94a3b8; border-color: rgba(100, 116, 139, 0.20); }
 +  .agent-groups-v2 .ad-pill-crashed  { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.30); }
-+
+ 
+-  /* Badges */
+-  .badge {
 +  .agent-groups-v2 .ad-tag {
-+    display: inline-block;
-+    padding: 2px 8px;
+     display: inline-block;
+     padding: 2px 8px;
      border-radius: 4px;
--    padding: 6px 10px;
--    font-size: 13px;
 +    font-size: 10px;
 +    font-weight: 700;
 +    letter-spacing: 0.6px;
 +    border: 1px solid transparent;
-   }
++  }
 +  .agent-groups-v2 .ad-policy-public   { background: rgba(52, 211, 153, 0.12); color: #34d399; border-color: rgba(52, 211, 153, 0.30); }
 +  .agent-groups-v2 .ad-policy-strict   { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.30); }
 +  .agent-groups-v2 .ad-policy-approval { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border-color: rgba(251, 191, 36, 0.30); }
 +  .agent-groups-v2 .ad-role-admin      { background: rgba(232, 121, 249, 0.12); color: #e879f9; border-color: rgba(232, 121, 249, 0.30); }
 +  .agent-groups-v2 .ad-role-member     { background: rgba(125, 211, 252, 0.10); color: #7dd3fc; border-color: rgba(125, 211, 252, 0.25); }
- 
--  /* Tabs */
--  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
--  .tab {
--    padding: 8px 16px;
--    font-size: 13px;
--    color: #888;
++
 +  .agent-groups-v2 .ad-channel {
 +    display: inline-block;
 +    padding: 2px 9px;
@@ -2737,7 +2911,7 @@ index 36b9575..3edc17a 100644
 +  .messages-v2 .mdt-title-row h2 { font-size: 22px; font-weight: 700; color: #f1f5f9; }
 +  .messages-v2 .mdt-id-chip {
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
-+    font-size: 11px;
+     font-size: 11px;
 +    background: var(--msg-surface);
 +    color: var(--msg-text-label);
 +    padding: 4px 10px;
@@ -2750,14 +2924,11 @@ index 36b9575..3edc17a 100644
 +    color: var(--msg-text-dim);
 +    border-radius: 6px;
 +    padding: 5px 8px;
-     cursor: pointer;
--    border-bottom: 2px solid transparent;
++    cursor: pointer;
 +    display: inline-flex;
 +    align-items: center;
-     transition: color 0.15s, border-color 0.15s;
-   }
--  .tab:hover { color: #e0e0e0; }
--  .tab.active { color: #7eb8da; border-bottom-color: #7eb8da; }
++    transition: color 0.15s, border-color 0.15s;
++  }
 +  .messages-v2 .mdt-copy-btn:hover { color: var(--msg-cyan); border-color: var(--msg-cyan); }
 +  .messages-v2 .mdt-copy-btn.mdt-copied { color: var(--msg-green); border-color: var(--msg-green); font-weight: 700; }
 +
@@ -2793,7 +2964,7 @@ index 36b9575..3edc17a 100644
 +    padding: 2px 9px;
 +    border-radius: 999px;
 +    font-size: 10.5px;
-+    font-weight: 600;
+     font-weight: 600;
 +    text-transform: lowercase;
 +    border: 1px solid transparent;
 +  }
@@ -2840,7 +3011,7 @@ index 36b9575..3edc17a 100644
 +  }
 +  .messages-v2 .mdt-meta-label {
 +    font-size: 10px;
-+    text-transform: uppercase;
+     text-transform: uppercase;
 +    letter-spacing: 0.7px;
 +    color: var(--msg-text-dim);
 +  }
@@ -2849,8 +3020,16 @@ index 36b9575..3edc17a 100644
 +    color: var(--msg-text);
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    overflow-wrap: anywhere;
-+  }
-+
+   }
+-  .badge-green { background: #1a3a1a; color: #4ade80; }
+-  .badge-yellow { background: #3a3a1a; color: #facc15; }
+-  .badge-red { background: #3a1a1a; color: #f87171; }
+-  .badge-blue { background: #1a2a3a; color: #7eb8da; }
+-  .badge-gray { background: #2a2a2a; color: #999; }
+-  .badge-purple { background: #2a1a3a; color: #c084fc; }
+ 
+-  /* Section headers */
+-  .section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #ccc; }
 +  /* Bottom row: thread + raw */
 +  .messages-v2 .mdt-bottom-row {
 +    display: grid;
@@ -2859,7 +3038,15 @@ index 36b9575..3edc17a 100644
 +    margin-bottom: 24px;
 +  }
 +  @media (max-width: 1100px) { .messages-v2 .mdt-bottom-row { grid-template-columns: minmax(0, 1fr); } }
-+
+ 
+-  /* Chart container */
+-  .chart-container { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+-  .chart-bar-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+-  .chart-label { width: 40px; font-size: 11px; color: #888; text-align: right; }
+-  .chart-bar { height: 20px; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+-  .chart-bar-in { background: #3b82f6; }
+-  .chart-bar-out { background: #22c55e; }
+-  .chart-value { font-size: 11px; color: #666; }
 +  .messages-v2 .mdt-thread-item {
 +    border-left: 3px solid transparent;
 +    padding: 8px 12px;
@@ -2897,7 +3084,12 @@ index 36b9575..3edc17a 100644
 +    white-space: pre-wrap;
 +    word-break: break-word;
 +  }
-+
+ 
+-  /* Log viewer */
+-  .log-container {
+-    background: #0a0a0a;
+-    border: 1px solid #2a2a2a;
+-    border-radius: 8px;
 +  /* Raw JSON viewer */
 +  .messages-v2 .mdt-raw-head {
 +    display: flex;
@@ -2909,19 +3101,188 @@ index 36b9575..3edc17a 100644
 +    margin-top: 10px;
 +    background: #0a0e1a;
 +    color: #cbd5e1;
-+    padding: 12px;
+     padding: 12px;
 +    border-radius: 8px;
 +    border: 1px solid var(--msg-border);
-+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+     font-family: 'Cascadia Code', 'Fira Code', monospace;
+-    font-size: 12px;
+-    height: calc(100vh - 140px);
+-    overflow-y: auto;
+-    line-height: 1.6;
 +    font-size: 11.5px;
 +    line-height: 1.55;
 +    max-height: 360px;
 +    overflow: auto;
 +    white-space: pre;
+   }
+-  .log-line { white-space: pre-wrap; word-break: break-all; }
+-  .log-line:hover { background: #151515; }
+-
+-  /* Detail panel */
+-  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+-  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
+-  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
+-  .detail-value { color: #e0e0e0; font-size: 13px; }
+-
+-  /* Loading */
+-  .loading { color: #666; font-style: italic; padding: 20px; }
+ 
+-  /* Select */
+-  select {
+-    background: #1a1a1a;
+-    color: #e0e0e0;
+-    border: 1px solid #2a2a2a;
+-    border-radius: 4px;
+-    padding: 6px 10px;
++  /* Audit page */
++  .audit-v2 .audit-toolbar {
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    margin-bottom: 16px;
 +  }
++  .audit-v2 .audit-search {
++    flex: 1;
++    min-width: 240px;
++    background: #0f172a;
++    color: #e2e8f0;
++    border: 1px solid #1e293b;
++    border-radius: 6px;
++    padding: 8px 12px;
+     font-size: 13px;
++    font-family: inherit;
++  }
++  .audit-v2 .audit-search:focus { outline: none; border-color: #2dd4bf; }
++  .audit-v2 .audit-filter {
++    background: #0f172a;
++    color: #e2e8f0;
++    border: 1px solid #1e293b;
++    border-radius: 6px;
++    padding: 7px 10px;
++    font-size: 12.5px;
++    font-family: inherit;
++  }
++  .audit-v2 .audit-count {
++    margin-left: auto;
++    font-size: 11.5px;
++    color: #64748b;
++    font-variant-numeric: tabular-nums;
++  }
++  .audit-v2 .audit-table {
++    width: 100%;
++    border-collapse: collapse;
++    background: #0f172a;
++    border: 1px solid #1e293b;
++    border-radius: 8px;
++    overflow: hidden;
++    table-layout: fixed;
++  }
++  .audit-v2 .audit-table th {
++    text-align: left;
++    padding: 10px 12px;
++    background: #111827;
++    color: #94a3b8;
++    font-size: 10.5px;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++    font-weight: 600;
++    border-bottom: 1px solid #1e293b;
++  }
++  .audit-v2 .audit-table th:nth-child(1) { width: 90px; }
++  .audit-v2 .audit-table th:nth-child(2) { width: 180px; }
++  .audit-v2 .audit-table th:nth-child(3) { width: 180px; }
++  .audit-v2 .audit-table th:nth-child(4) { width: 220px; }
++  .audit-v2 .audit-table td {
++    padding: 8px 12px;
++    font-size: 12px;
++    color: #cbd5e1;
++    vertical-align: top;
++    border-bottom: 1px solid #111827;
++  }
++  .audit-v2 .audit-row:hover { background: #111827; }
++  .audit-v2 .audit-ts { color: #64748b; font-variant-numeric: tabular-nums; }
++  .audit-v2 .audit-actor { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11.5px; color: #a78bfa; }
++  .audit-v2 .audit-action-pill {
++    display: inline-block;
++    padding: 2px 8px;
++    border-radius: 4px;
++    background: rgba(45, 212, 191, 0.12);
++    color: #2dd4bf;
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
++    font-size: 11px;
++    font-weight: 600;
+   }
++  .audit-v2 .audit-target-type {
++    color: #64748b;
++    font-size: 10.5px;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++    margin-right: 4px;
++  }
++  .audit-v2 .audit-target-id { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; }
++  .audit-v2 .audit-json code {
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
++    font-size: 10.5px;
++    color: #cbd5e1;
++    word-break: break-all;
++    white-space: pre-wrap;
++  }
++  .audit-v2 .audit-empty { color: #475569; }
+ 
+-  /* Tabs */
+-  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
+-  .tab {
+-    padding: 8px 16px;
+-    font-size: 13px;
+-    color: #888;
++  /* Inline editable name (rename feature) */
++  .ag-name-edit {
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++  }
++  .ag-name-edit-btn {
++    background: transparent;
++    border: 0;
++    color: #64748b;
+     cursor: pointer;
+-    border-bottom: 2px solid transparent;
+-    transition: color 0.15s, border-color 0.15s;
++    padding: 2px 4px;
++    border-radius: 3px;
++    line-height: 1;
++    opacity: 0;
++    transition: opacity 0.12s, color 0.12s, background 0.12s;
++  }
++  .ag-name-edit:hover .ag-name-edit-btn { opacity: 1; }
++  .ag-name-edit-btn:hover { color: #2dd4bf; background: rgba(45, 212, 191, 0.08); }
++  .ag-name-edit-form {
++    display: inline-flex;
++    align-items: center;
++    gap: 4px;
++  }
++  .ag-name-edit-input {
++    background: #0a0e1a;
++    color: #e2e8f0;
++    border: 1px solid #2dd4bf;
++    border-radius: 4px;
++    padding: 2px 6px;
++    font-size: 13px;
++    font-family: inherit;
++    min-width: 120px;
++  }
++  .ag-name-edit-input:focus { outline: none; }
++  .ag-name-edit-status {
++    font-size: 11px;
++    color: #f87171;
++    margin-left: 6px;
+   }
+-  .tab:hover { color: #e0e0e0; }
+-  .tab.active { color: #7eb8da; border-bottom-color: #7eb8da; }
  `;
  export function layout(title, activePath, bodyHtml) {
      const token = getDashboardSecret() || '';
++    const csrf = getDashboardCsrfToken() || '';
 +    const NANOCLAW_ICON_DATA_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMzIwIiBmaWxsPSJub25lIiB2aWV3Qm94PSIxOTAgNjUgMzIwIDMyMCI+PHBhdGggZmlsbD0iIzEyMTcyOSIgZD0iTTM4MS41NTYgNzguNTgzYTEuNTQgMS41NCAwIDAgMSAxLjEzOS0uMjEyYy4zODkuMDgxLjczLjMxNS45NTkuNjUycy4zMjUuNzQ4LjI1OSAxLjE0M2ExMDYgMTA2IDAgMCAxLS42MyAzLjM5MWMtNC4wOTUgMTkuMjQtMTIuMTU2IDM3LjM4Ny0yMy44NzUgNTMuNjc1IDQuNTE1IDMuMzcgOC4zNzIgNy4yMSAxMS43OTggMTEuNDkgMTEuNDU0LTE2LjEyMSAxOS44MDctMzUuODM2IDI0LjM1NS01NS44LjI0My0xLjEyNS40NzMtMi4yNi42ODQtMy4zOS4wNzQtLjM5My4zMDUtLjc0Ny42MzUtLjk4M2ExLjU0IDEuNTQgMCAwIDEgMS4xMjctLjI3OGMuMzkzLjA1OS43NDguMjczLjk5Ni41OTYuMjQ3LjMyMy4zNjYuNzMuMzIyIDEuMTI3YTEyMyAxMjMgMCAwIDEtLjQ0MyAzLjUyNWMtMy4yNyAyMS4xMTktOS45NTggNDEuNDI0LTIxLjQyMSA2MC4zMTZhNDAgNDAgMCAwIDEtMS4yOTEgMS44MmMyLjI4MyAzLjU0NCA0LjM4OSA3LjMyNyA2LjQxIDExLjMzOCA2LjAyMiAxMS45MzMgOS4xMzkgMjUuMDU1IDEwLjEzNSAzOC4zMzguMDg3IDEuMTE4LjE0IDQuODcyLjk2NSA1LjUwNCAyLjA5Ni4xODMgMTAuMzczLTEwLjc0OCAxMS43MDQtMTIuNzIzIDEuMS0xLjYzMyAzLjk0Ni01Ljk3OCA0LjQ0Ni03LjgxNyAxLjc4OS02LjU5MyAyLjU2Ny0xMy41NDggMy4wNzgtMjAuMzYxIDEuMjA0LTEzLjgwMiA4LjUyMy0yNy4xMjEgMTkuNTgzLTM1LjM4IDQuNDY0LTMuMzM1IDEzLjQwNy04LjYzMiAxOC41NzMtMy4yNTQgNC41NDMgNC43My00LjQ4IDkuNjY5LTYuMTU2IDEzLjE4Ni0xLjA5IDIuMjg2LjI2NSA0LjkyLjY2NSA3LjE5My42NTMgMy43MTYtLjA4IDYuMzM3LTEuNTY2IDkuNjg1LS4zLjY3My0uNzA4IDEuNDQ0LS4zMjYgMi4xNjMgMi4wMzcgMS41MSA0LjM0My0zLjYyMSA1LjE5NS00LjgyNSAyLjY3LTMuOCA2LjQ5Ni02LjAyOCAxMC4wMzUtOC44NTcuNDItLjMzNi41OTQtLjg4Ny40ODctMS40MTYtLjc1My0zLjcwMS0xLjI0Ni0xMC45NjQuNTg2LTEzLjYyMSA2LjM0Ny05LjIxMyAxNS40NTYtLjEyIDE2Ljg0NCA3LjczOSAxLjM2NyA3LjQ4NiAxLjA1OSAxNS4wMzQtLjgzNSAyMi40MTktMy43NjcgMTQuNjc5LTExLjk1NiAyOC4yMDItMjQuMDc1IDM3LjM4LTQuNTQ4IDMuNDQ0LTguNzc0IDUuMzI3LTE0LjAzMyA2Ljc1MmEyLjg4IDIuODggMCAwIDAtMS42MSAxLjEzYy0xMy43NTIgMTkuNzI2LTM0Ljg4MiAzNC4xMzgtNTAuMjUzIDQwLjY1NS00LjIwNyAzLjkxOS03Ljc0IDkuMjYtMTEuNzQzIDEzLjUyNC0uNzI3Ljc3Ni0uNjU4IDIuMDI3LjIzOCAyLjU5OCAxLjkwNyAxLjIxNyAzLjg5NSAyLjE1IDUuODg2IDMuMzI4IDExLjkwNiA3LjA0IDE5LjQwOSAxOC4zNyAyMS4yMTQgMzIuMTY3YTc0LjIgNzQuMiAwIDAgMS0xLjcyMSAyOS4yNWMxMy4wMjggNC4wNDYgMzMuOSAyNS40MDUgMTQuODc5IDM1LjM4OS0xMy4wNjQgNi41Ny0zMi44IDUuNzktNDYuOTIgNi43MjItMzAuMDYyIDEuODI0LTYwLjQ2Ni44OTctOTAuNTEtMS40NjEtMy4zNDgtLjI0LTIwLjE4Mi0xLjA2NC0yMS43MzEtMy41OC0uMTUzLTQuNTExIDE5Ljk3NS00LjU3MyAyMy4zMjYtNS43NjYtMS43MTgtMS4xNjUtNC4zMy0yLjIyMy02LjI1My0zLjE5M2E1MyA1MyAwIDAgMS04Ljg0NC01LjcxM2MtNC4xNTUtMy4zMDItNi4wNTUtNi4yNi05LjE2Ny0xMC4zNDYtLjkyNS0xLjIxNC00LjU3My0yLjkyMS01Ljk5Ny00LjEzNS05LjI1NC03Ljg2My0xMy44MTUtMjAuNDg1LTE1LjAwNS0zMi4zMi0uMzY1LTMuNjMyLS43NjQtMy4xNy0yLjY5Mi02LjA0My04LjkzMy0xMy4zMDctNy42Ny0zOC40MjYtLjY2Ni01Mi4xNS0xMC43OC0zNi42MzcgMTUuNTM1LTkzLjQwNSA0Ni4zNjctMTEzLjc4NiAxOS4xOC0xMi44MzQgNDUuNjQzLTE1LjM1IDY3LjE5NC02LjczN2E3Mi41IDcyLjUgMCAwIDEgOC45NDMgNC4yOTJjMTIuMTYyLTE0LjIzNiAyMS44MDgtMzEuNzA3IDI3LjE4Ni01MC4xNjZxLjQ1Ni0xLjYwOC44NTktMy4yMzFjLjA5Ni0uMzg4LjM0OC0uNzI3LjY5LS45NDMiLz48ZyBmaWx0ZXI9InVybCgjYSkiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIxLjY3IC4xNTYpIj48cGF0aCBmaWxsPSIjNTZlZGQ2IiBkPSJNMjk3Ljc5MiAyODguMzg1YTEuMDA3IDEuMDA3IDAgMCAxLS40NTUtMS42NTVjMzAuODQxLTMyLjM5OSA3MS42Ni0xMy4yOTMgNzMuMTU1IDE5LjAxMyAxLjU1MyA2OC42ODQtODYuOTQyIDU0Ljc2OS05My4xNTYgNTMuMjA4IDIuMzQxLTIuMDk0IDkuNjMtMy41MDggMTEuODI0LTEwLjMxNC42NDMtMS45OTMgMi43NjMtMy41MTQgNC43ODItMi45NjIgOS4yMDkgMi41MTkgMjYuMzEgNC44NDUgMjcuOTM5LTUuMTQ4IDEuMTQyLTcuMDA4LTguMzI1LTkuNTAxLTEzLjM3Mi0xNC4zMDktMS42OTUtMS42MTUtLjUwMi0zLjk5NyAxLjgyOS0zLjc4IDcuNDkuNjk3IDE3LjQzNSA1LjM3NSAyMC45OTgtMS43OTIgNi42OC0xMy40MzctMTguNDExLTI3Ljk3OC0zMy41NDQtMzIuMjYxIi8+PC9nPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0yOTQuNDc2IDEzNi43YzE0LjEyNi02LjI3IDMxLjg0LTUuMDg4IDQ1Ljk4Ni4wOTUgMS41OTkuNTg1IDMuNDA1IDEuMzQgNC44MzMgMi40MjIuODU4LjY1IDEuMDE5IDEuODQ1LjQ0NCAyLjc1Ny0yLjY5NyA0LjI3Mi03LjQ3MyA2Ljc3Ni0xMC4wNTQgMTEuMDQ4LTEuNjA3IDIuNjYyLjE5OCA0LjggMi41NSA2LjAxNiA1Ljk3MiAyLjQwNyAxMC44MDYtNy4yNzIgMTQuNDI1LTEyLjEwNS43NTYtMS4wMSAyLjEzNS0xLjE5IDMuMTctLjQ3NiAxMS41MDkgNy45MyAxOC45MzkgMjIuODg2IDIyLjk5NyAzNS4yMDYgNi4xNzQgMTguNzM5IDEwLjExIDQzLjgwOS44OTYgNjIuMjA5LTQuMjA2IDguMzU0LTguNzQzIDE0LjYzOC0yMC41MTUgMTcuMjc2LTEyLjAzNyAyLjU5Ny0yNi44Mi0yLjEyMi0zOS40NDMgMTIuNTI4LTIuNDkxIDIuNjg1LTQuODcgNi42NDQtNy43MDEgOC41NzgtNC40NzEgMy4wNTMtOC44My0zLjAzLTExLjQzNS03Ljc3NC0zLjg3My03LjA1LTguODA1LTE1LjA1NC0xNC4yNDYtMTYuNjY1LTcuNTgxLTMuMjQ2LTEzLjY3MiAxLjc2Ny0xMi45OCAxMC44MTVzLTUuMjU2IDQuMjEzLTEzLjI2Ny0uMzk4Yy04LjAxMi00LjYxMS0xOC42NTUtMTQuMDc1LTIxLjY0My0yNS40NjQtOC41NTItMzIuODIyIDIyLjE4LTk1LjAyNSA1NS45ODMtMTA2LjA2NyIvPjxwYXRoIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjcxIiBkPSJNMjk0LjQ3NiAxMzYuN2M3LjcwNy0zLjQyIDE2LjQ4LTQuNjIyIDI1LjE2LTQuMTY4LTYuMzQ4LjM0My0xMi41ODIgMS42NTgtMTguMjQgNC4xNjktMzMuODAyIDExLjA0Mi02NC41MzUgNzMuMjQ1LTU1Ljk4NCAxMDYuMDY3IDIuOTg4IDExLjM4OSAxMy42MzIgMjAuODUzIDIxLjY0MyAyNS40NjQgMi4yNyAxLjMwNiA0LjM3NCAyLjYzIDYuMjA5IDMuNjUyLTEuMDYgNC4zMDMtNi4zNTYuMjQ2LTEzLjEyOC0zLjY1Mi04LjAxMi00LjYxMS0xOC42NTUtMTQuMDc1LTIxLjY0My0yNS40NjQtOC41NTItMzIuODIyIDIyLjE4LTk1LjAyNSA1NS45ODMtMTA2LjA2NyIvPjxwYXRoIGZpbGw9IiMxMjE3MjkiIGQ9Ik0yODQuOTM0IDE3Ni42NzNjOC4yNi0uNjY4IDE1LjQ5OSA1LjUxNyAxNi4xNzkgMTMuODIzcy01LjQ1MyAxNS42LTEzLjcxMSAxNi4zMDJjLTguMjgyLjcwNC0xNS41Ni01LjQ4OC0xNi4yNDItMTMuODItLjY4My04LjMzIDUuNDg5LTE1LjYzNiAxMy43NzQtMTYuMzA1Ii8+PHBhdGggZmlsbD0iI2ZlZmVmZSIgZD0iTTI4OS45MDcgMTgxLjQ1OGMxLjE3OC4wMTggMi4yMjMuMTggMy4yODMuNzMgMS40MS43MjYgMi40NiAyIDIuOTA3IDMuNTI1YTUgNSAwIDAgMS0uNTI2IDMuOTdjLS45ODMgMS42NS0yLjQzMyAyLjMwNy00LjE3NiAyLjc5Mi0xLjI5Ni4yMy0yLjQ5NS4xNDgtMy42OTUtLjQ0M2E0Ljk0IDQuOTQgMCAwIDEtMi42MDMtMy4wOTUgNS43NSA1Ljc1IDAgMCAxIC41MzItNC40MzVjLjkyMy0xLjU4OCAyLjUyNS0yLjYxNyA0LjI3OC0zLjA0NCIvPjxwYXRoIGZpbGw9IiMxMjE3MjkiIGQ9Ik0zNjQuODQ1IDE3NS4yMzdjOC42NTMtLjcgMTYuMjM1IDUuNzc5IDE2Ljk0OCAxNC40OC43MTMgOC43MDMtNS43MTIgMTYuMzQzLTE0LjM2MyAxNy4wNzgtOC42NzUuNzM3LTE2LjI5OC01Ljc1LTE3LjAxNC0xNC40NzYtLjcxNS04LjcyOCA1Ljc1LTE2LjM4MSAxNC40MjktMTcuMDgyIi8+PHBhdGggZmlsbD0iI2ZlZmVmZSIgZD0iTTM2OS4yNDggMTc5LjM3YzEuMjg1LjAxOSAyLjQyNS4xOTIgMy41OC43NzZBNi4yIDYuMiAwIDAgMSAzNzYgMTgzLjg5YTUuMiA1LjIgMCAwIDEtLjU3NCA0LjIxOWMtMS4wNzIgMS43NTMtMi42NTQgMi40NS00LjU1NiAyLjk2Ni0xLjQxMy4yNDUtMi43MjEuMTU3LTQuMDMxLS40NzFhNS4zIDUuMyAwIDAgMS0yLjgzOC0zLjI5IDUuOTYgNS45NiAwIDAgMSAuNTgtNC43MTFjMS4wMDYtMS42ODcgMi43NTQtMi43OCA0LjY2Ny0zLjIzMyIvPjxnIGZpbGw9IiM1NmVkZDYiIGZpbHRlcj0idXJsKCNiKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGQ9Ik0yNTAuMTUgMzA2LjU5OWMtMzcuNTYzIDYuNDg2LTQxLjczOC0yMC45MjgtMzguNTY3LTM5LjExLjI0LTEuMzczIDIuMTk1LTEuNjM4IDMuMDQyLS41MzEgNi4xOTMgOC4wOTQgMTkuNDIgMTQuNjQ3IDI4LjY3OCAxNy44MTcgNC40MjMgMS41MTUgOC45MTQgNi40MTcgMTAuMDQzIDEwLjk1My4zOTkgMS42MDEuODE2IDMuMjQgMS4xNDkgNC44MDcuNjIyIDIuOTE4LTEuNDA1IDUuNTU2LTQuMzQ1IDYuMDY0bTExLjIwOCAyMC4xOTNjLTI4LjI3NCAxOS44MzQtMzcuODQ5IDEuNTk3LTM5LjQwNy0xMi4wMjEtLjExOS0xLjA0Ljg5Ny0xLjgxMSAxLjg5OC0xLjUwMyAxNC4yNDQgNC4zNzYgMjYuOTkgNC4zMDkgMzMuMjU1IDMuNTMzIDEuMTg2LS4xNDcgMi4zNjcuMzUzIDIuOTYxIDEuMzlhMTE4IDExOCAwIDAgMSAyLjMzOSA0LjMyNSAzLjM1IDMuMzUgMCAwIDEtMS4wNDYgNC4yNzZtLTE1LjA5OSAxNi41N2M2LjMzLTEuNTY0IDEwLjc5Ni0zLjU4NyAxMy44MTYtNS41MDQgMy4zMzktMi4xMTkgOC4yMDktMy42MTIgMTEuODEzLTEuOTg1IDIuMDQ1LjkyMyA0LjIwMyAxLjk4MyA2LjQ3NSAzLjQgMS44OTEgMS4xOCAyLjQxMyAzLjY5NCAxLjExOCA1LjUwOS0xMi4wMTQgMTYuODQ2LTI4LjgyNCA2LjU1Ni0zNCAuNjUtLjY1OS0uNzUyLS4xOTMtMS44My43NzgtMi4wNyIvPjwvZz48cGF0aCBmaWxsPSIjMTIxNzI5IiBkPSJNMzA3LjMxOSAyMDMuNDgzYzEuMjUtLjQ3MSAyLjY0OC0uNDMxIDMuOTEzLjEgMS4yNjcuNTMgMi4yODMgMS41MTUgMi45NDkgMi42OS4yNS4zNTkuNTM1LjcyNS44NDcgMS4wODYgMy45MDMgNC42MjUgMTEuMjA2IDcuMjM4IDE0Ljc3MiA1Ljg4MyAxLjcyLS41MDIgMy43MzYtMS4zMTcgNi4zMTQtMy4yNy40NS0uMzQyLjktLjY5IDEuMzgtMS4xLjk0LS44OSAyLjA4My0xLjYwOCAzLjM2LTEuODk1IDEuMjc4LS4yODcgMi41NzItLjEyNSAzLjY1OC40ODJzMS45IDEuNjI2IDIuMzI1IDIuODY0Yy40MjUgMS4yMzkuNDEgMi41ODguMTQ1IDMuODU2YTIyIDIyIDAgMCAxLS44MyAyLjUxM2MtMS43ODcgNC42NDQtNi4wODQgOS40NTQtMTIuMDg0IDExLjE1OC0xMy42MDggMy4zOTgtMjQuNTQ2LTQuNzUtMjkuMTQtMTQuOTk0YTIwIDIwIDAgMCAxLS45Mi0yLjc0NmMtLjI3NS0xLjMyMi0uMTYyLTIuNzMzLjQzOS0zLjk2OC41OTktMS4yMzUgMS42MjItMi4xODcgMi44NzItMi42NiIvPjxnIGZpbHRlcj0idXJsKCNjKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0zNzIuNzAxIDM0NC4xMzJjMS4yMzctMi4wMSAzLjM1My0zLjQ1NiA1LjUzMy0yLjU1MiA2LjU3OCAyLjcyOSAxNS40MTkgMTEuMDc4IDkuOTQxIDE2LjgxMS00LjYyNCA0Ljg0Mi0yNi4zMjIgNS4xNDktMzUuNzI5IDQuMzU3LS45MjctLjA3OC0xLjE0NC0xLjIyOC0uMzM1LTEuNjg0IDYuNTk0LTMuNzE1IDE1LjYyLTguODUyIDIwLjU5LTE2LjkzMiIvPjwvZz48cGF0aCBmaWxsPSIjNTZlZGQ2IiBkPSJNMjkyLjUyOSAyOTQuMjI2YzcuMjc2LTIuNzQxIDE0LjMwNy0xLjMwNiAyMS41ODktLjEzNCAxOS40MSAzLjEyNCAzNC45NDIgMTguNzQzIDMyLjYxMyAyMy40MjktMzYuNTItOC45MjMtMjguNzcxIDExLjI4LTEzLjkyMiAxOS45NjQuOTA0LjUyOS41OTYgMi4wNDktLjQ1MiAyLjA1NS0yMy43MzguMTQ2LTM4LjAzMy0xMS42NzMtNDQuMDc4LTI1LjE1LTYuNDAxLTE0LjI2Ny0xLjY3NC0xNy45MzEgNC4yNS0yMC4xNjRtLTEwLjQ3Mi0yOS4wNzZjNi4wMTYtMS44NTUgOS41NDIgMTQuNzg0IDE1LjE5NyAxOS44MjIuMzU4LjMxOS4yIDEuMDI5LS4yNzEgMS4xMDktNC4zNzYuNzM4LTkuNDE3IDIuMzA2LTEyLjg2NCA1LjIyNi0uNzI4LjYxNi0yLjI0NS4xNDUtMi4zOTgtLjc5Ny0xLjIzNy03LjYtNS4xODctMjMuNjU3LjMzNi0yNS4zNiIvPjxnIGZpbHRlcj0idXJsKCNkKSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjEuNjcgLjE1NikiPjxwYXRoIGZpbGw9IiM1NmVkZDYiIGQ9Ik0zOTIuMTE0IDE5OC41MTRjLjUzLS45NjYgMS44OTItMS4wODEgMi42MDEtLjIzOSAzLjI1MyAzLjg2OSA2LjMzNCA1LjkxNiAxMC41MSA4LjMyMi43MDMuNDA1Ljk2NSAxLjI4Mi41MDkgMS45NTQtNi40MTYgOS40NS0zMy40NjUgMzMuNzg2LTM2LjA1IDI5LjI5NSAxLjAyNy0zLjUzNiAyLjIyMy04LjA2NiAyLjU5Mi0xMy41NTlhNy41IDcuNSAwIDAgMSAyLjg3LTUuNDA2YzguMDg2LTYuMjg2IDEzLjYzNi0xNC4yOTUgMTYuOTY4LTIwLjM2N201Mi42ODEtNjAuMTc5YzEyLjYyOSAxOC42MDgtMi45ODEgNDMuNDAxLTE3LjEwMSA1NS43OTItMTcuNTg3IDE1LjQzNS00Mi40MDgtNS4wMi0yNC4xNTYtMjAuMDYxIDcuMjgyLTYuMTA1IDE0LjctMi42NzYgMjIuNzMyLTQuODY2IDQuNDYyLTEuNDcgNS44NDktNy4wNDQgOS4xNTUtMTAuMTczIDIuMzgyLTIuMjU1IDguMzU2LTMuOTY3IDkuMTQ2LTcuMTY1Ljg3NS0zLjU0Mi0zLjU4MS0xMS43OTYuMjI0LTEzLjUyN20tMjIuNjYtMi43OTNjLTMuNDYgNC4xNzYtNi4wNTggMTAuNjE0LTQuMzI2IDE3LjkyMi0uODY4IDE2LjUyOS0xMy41NDEgOC4xNzctMjAuNTg3IDE5LjMxMi0yLjQyMiAzLjgyOC4zNDYtMTUuMTM2IDcuOTU4LTI0LjE4NCA3LjYxMS05LjA0OCAxMi45NzYtMTMuMDUgMTYuOTU1LTEzLjA1Ii8+PC9nPjxkZWZzPjxmaWx0ZXIgaWQ9ImEiIHdpZHRoPSI5My4xNzYiIGhlaWdodD0iOTEuMTYxIiB4PSIyNzcuMzM2IiB5PSIyNjkuOTc2IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSItOS4zODkiIGR5PSItMi40NzEiLz48ZmVDb21wb3NpdGUgaW4yPSJoYXJkQWxwaGEiIGsyPSItMSIgazM9IjEiIG9wZXJhdG9yPSJhcml0aG1ldGljIi8+PGZlQ29sb3JNYXRyaXggdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwLjE1IDAiLz48ZmVCbGVuZCBpbjI9InNoYXBlIiByZXN1bHQ9ImVmZmVjdDFfaW5uZXJTaGFkb3dfMzZfNjY1Ii8+PC9maWx0ZXI+PGZpbHRlciBpZD0iYiIgd2lkdGg9IjY5LjQ2NSIgaGVpZ2h0PSI4Ny43MjEiIHg9IjIxMC43MyIgeT0iMjY2LjI3IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSI2LjQyNCIgZHk9Ii02LjQyNCIvPjxmZUNvbXBvc2l0ZSBpbjI9ImhhcmRBbHBoYSIgazI9Ii0xIiBrMz0iMSIgb3BlcmF0b3I9ImFyaXRobWV0aWMiLz48ZmVDb2xvck1hdHJpeCB2YWx1ZXM9IjAgMCAwIDAgMSAwIDAgMCAwIDEgMCAwIDAgMCAxIDAgMCAwIDAuNzcgMCIvPjxmZUJsZW5kIGluMj0ic2hhcGUiIHJlc3VsdD0iZWZmZWN0MV9pbm5lclNoYWRvd18zNl82NjUiLz48L2ZpbHRlcj48ZmlsdGVyIGlkPSJjIiB3aWR0aD0iMzguMjc3IiBoZWlnaHQ9IjIxLjc3OCIgeD0iMzUxLjYwOSIgeT0iMzQxLjMwNSIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ii8+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIi8+PGZlQ29sb3JNYXRyaXggaW49IlNvdXJjZUFscGhhIiByZXN1bHQ9ImhhcmRBbHBoYSIgdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAxMjcgMCIvPjxmZU9mZnNldCBkeT0iNi40MjQiLz48ZmVDb21wb3NpdGUgaW4yPSJoYXJkQWxwaGEiIGsyPSItMSIgazM9IjEiIG9wZXJhdG9yPSJhcml0aG1ldGljIi8+PGZlQ29sb3JNYXRyaXggdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwLjI1IDAiLz48ZmVCbGVuZCBpbjI9InNoYXBlIiByZXN1bHQ9ImVmZmVjdDFfaW5uZXJTaGFkb3dfMzZfNjY1Ii8+PC9maWx0ZXI+PGZpbHRlciBpZD0iZCIgd2lkdGg9Ijc5Ljc1OCIgaGVpZ2h0PSIxMDIuODUxIiB4PSIzNjkuNjg0IiB5PSIxMzUuNTQyIiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHJlc3VsdD0iaGFyZEFscGhhIiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIi8+PGZlT2Zmc2V0IGR4PSI1LjQzNiIgZHk9IjQuNDQ3Ii8+PGZlQ29tcG9zaXRlIGluMj0iaGFyZEFscGhhIiBrMj0iLTEiIGszPSIxIiBvcGVyYXRvcj0iYXJpdGhtZXRpYyIvPjxmZUNvbG9yTWF0cml4IHZhbHVlcz0iMCAwIDAgMCAxIDAgMCAwIDAgMSAwIDAgMCAwIDEgMCAwIDAgMC4zNiAwIi8+PGZlQmxlbmQgaW4yPSJzaGFwZSIgcmVzdWx0PSJlZmZlY3QxX2lubmVyU2hhZG93XzM2XzY2NSIvPjwvZmlsdGVyPjwvZGVmcz48L3N2Zz4=';
      const navHtml = NAV_ITEMS.map((item) => `<a href="${item.href}" class="${item.href === activePath ? 'active' : ''}">
 -        <span class="icon">${item.icon}</span>${item.label}
@@ -2929,17 +3290,48 @@ index 36b9575..3edc17a 100644
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,7 +2710,8 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +2848,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
 -  <title>${title} — NanoClaw Dashboard</title>
++  <meta name="dashboard-csrf" content="${csrf}">
 +  <title>${title} — Dashboard Pro</title>
 +  <link rel="icon" type="image/svg+xml" href="${NANOCLAW_ICON_DATA_URL}">
    <style>${CSS}</style>
    <script>
      const TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
-@@ -207,9 +2743,15 @@ export function layout(title, activePath, bodyHtml) {
++    const CSRF  = document.querySelector('meta[name="dashboard-csrf"]')?.content || '';
+     async function api(path) {
+       const headers = {};
+       if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+@@ -186,6 +2862,25 @@ export function layout(title, activePath, bodyHtml) {
+       if (!res.ok) throw new Error('API error: ' + res.status);
+       return res.json();
+     }
++    /** Mutating fetch — bearer + CSRF header for write endpoints. */
++    async function mutate(method, path, body) {
++      const headers = { 'Content-Type': 'application/json' };
++      if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
++      if (CSRF)  headers['X-Dashboard-CSRF'] = CSRF;
++      const res = await fetch(path, {
++        method,
++        headers,
++        credentials: 'same-origin',
++        body: body == null ? undefined : JSON.stringify(body),
++      });
++      const json = await res.json().catch(() => ({}));
++      if (!res.ok) {
++        const err = new Error(json?.error || ('API error: ' + res.status));
++        err.status = res.status;
++        throw err;
++      }
++      return json;
++    }
+     function badge(text, color) {
+       return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
+     }
+@@ -207,9 +2902,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -2956,7 +3348,7 @@ index 36b9575..3edc17a 100644
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2764,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +2923,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -3010,7 +3402,7 @@ index 36b9575..3edc17a 100644
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db8..e19ef33 100644
+index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd8b75dcb2 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -3025,7 +3417,7 @@ index 0c33db8..e19ef33 100644
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,655 @@ export function agentGroupsPage() {
+@@ -16,112 +15,732 @@ export function agentGroupsPage() {
        }
      })();
  
@@ -3187,8 +3579,8 @@ index 0c33db8..e19ef33 100644
 +        : '<span class="ag-tag ag-tag-sub">SUB-AGENT</span>';
 +
 +      var nameCell = isSub
-+        ? '<span class="ag-arrow">↳</span><a class="ag-name-sub" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge
-+        : '<a class="ag-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge;
++        ? '<span class="ag-arrow">↳</span>' + renderEditableAgentName(g, 'ag-name-sub') + ' ' + leadBadge
++        : renderEditableAgentName(g, 'ag-name') + ' ' + leadBadge;
 +
 +      var modelCell = badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span>';
 +
@@ -3306,7 +3698,7 @@ index 0c33db8..e19ef33 100644
 +          '<div class="ag-card-head">' +
 +            avatarHtml(g) +
 +            '<div class="ag-card-titles">' +
-+              '<a class="ag-card-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
++              renderEditableAgentName(g, 'ag-card-name') +
 +              '<div class="ag-card-tag-row">' + roleTag +
 +                '<span class="ag-card-model">' + badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span></span>' +
 +              '</div>' +
@@ -3348,9 +3740,9 @@ index 0c33db8..e19ef33 100644
 +        var active = btns[j].dataset.agView === mode;
 +        btns[j].classList.toggle('ag-view-btn-active', active);
 +        btns[j].setAttribute('aria-selected', active ? 'true' : 'false');
-       }
-     }
- 
++      }
++    }
++
 +    function handleAgViewToggleClick(ev) {
 +      var viewBtn = ev.target.closest && ev.target.closest('[data-ag-view]');
 +      if (viewBtn) {
@@ -3439,7 +3831,7 @@ index 0c33db8..e19ef33 100644
 +          '<button class="ag-menu-item" data-ag-action="copy" data-ag-id="' + esc(id) + '">Copy ID</button>';
 +        menuBtn.parentElement.appendChild(pop);
 +        return;
-+      }
+       }
 +      var actionBtn = ev.target.closest && ev.target.closest('[data-ag-action]');
 +      if (actionBtn) {
 +        ev.preventDefault();
@@ -3467,8 +3859,8 @@ index 0c33db8..e19ef33 100644
 +      }
 +      // Click outside any menu — close
 +      closeAllMenus();
-+    }
-+
+     }
+ 
      async function loadDetail(id) {
 -      document.getElementById('content').innerHTML = '<a href="/dashboard/agent-groups">&larr; Back to list</a>';
 -      document.getElementById('detail').style.display = 'block';
@@ -3726,11 +4118,11 @@ index 0c33db8..e19ef33 100644
 +                }).join('') +
 +                '</tbody></table></div>') +
 +          '</section>';
-+
-+        document.getElementById('ag-detail').innerHTML =
-+          hero + infoRow + sessionsHtml + wiringsHtml + agentDestsHtml + channelDestsHtml + membersHtml;
  
 -        document.getElementById('detail').innerHTML = html;
++        document.getElementById('ag-detail').innerHTML =
++          hero + infoRow + sessionsHtml + wiringsHtml + agentDestsHtml + channelDestsHtml + membersHtml;
++
 +        // Re-wire ⋮ menu (delegated handler already bound from index, but
 +        // index might not have run when navigating direct to detail).
 +        document.removeEventListener('click', handleAgClick);
@@ -3762,11 +4154,213 @@ index 0c33db8..e19ef33 100644
 -      return '<div class="detail-row"><span class="detail-label">' + esc(label) + '</span><span class="detail-value">' + esc(String(value || '')) + '</span></div>';
 +      return '<div class="ad-detail-row"><dt class="ad-detail-label">' + esc(label) + '</dt>' +
 +        '<dd class="ad-detail-value">' + esc(String(value || '')) + '</dd></div>';
++    }
++
++    /**
++     * Render an agent group's name with a hover-revealed pencil button that
++     * activates an inline editor. Used for both card view, list view, and
++     * the Overview hierarchy. The pencil click is handled by the global
++     * delegated listener wired below.
++     */
++    function renderEditableAgentName(g, anchorClass) {
++      return '<span class="ag-name-edit" data-rename-wrap="' + esc(g.id) + '">' +
++        '<a class="' + esc(anchorClass) + '" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
++        ' <button class="ag-name-edit-btn" type="button" data-rename-id="' + esc(g.id) +
++          '" data-rename-current="' + esc(g.name) + '" data-rename-anchor="' + esc(anchorClass) + '" title="Rename" aria-label="Rename">&#x270E;</button>' +
++        '</span>';
++    }
++
++    document.addEventListener('click', function(ev) {
++      var btn = ev.target.closest && ev.target.closest('[data-rename-id]');
++      if (!btn) return;
++      ev.preventDefault();
++      activateRename(btn);
++    });
++
++    function activateRename(btn) {
++      var wrap = btn.closest('.ag-name-edit');
++      if (!wrap || wrap.dataset.editing === '1') return;
++      wrap.dataset.editing = '1';
++      var id = btn.dataset.renameId;
++      var current = btn.dataset.renameCurrent || '';
++      var anchorClass = btn.dataset.renameAnchor || 'ag-name';
++
++      wrap.innerHTML = '<form class="ag-name-edit-form" data-rename-form="' + esc(id) + '">' +
++          '<input class="ag-name-edit-input" type="text" maxlength="80" value="' + esc(current) + '">' +
++          '<button class="ag-name-edit-save" type="submit" title="Save">&#x2713;</button>' +
++          '<button class="ag-name-edit-cancel" type="button" title="Cancel">&#x2715;</button>' +
++          '<span class="ag-name-edit-status" data-rename-status></span>' +
++        '</form>';
++
++      var form   = wrap.querySelector('form');
++      var input  = wrap.querySelector('.ag-name-edit-input');
++      var status = wrap.querySelector('[data-rename-status]');
++      var cancel = wrap.querySelector('.ag-name-edit-cancel');
++      input.focus();
++      input.select();
++
++      function exit() {
++        wrap.dataset.editing = '';
++        wrap.innerHTML =
++          '<a class="' + esc(anchorClass) + '" href="/dashboard/agent-groups?id=' + esc(id) + '">' + esc(input.value || current) + '</a>' +
++          ' <button class="ag-name-edit-btn" type="button" data-rename-id="' + esc(id) +
++            '" data-rename-current="' + esc(input.value || current) + '" data-rename-anchor="' + esc(anchorClass) + '" title="Rename" aria-label="Rename">&#x270E;</button>';
++      }
++
++      cancel.addEventListener('click', function() { exit(); });
++      input.addEventListener('keydown', function(ev) {
++        if (ev.key === 'Escape') { ev.preventDefault(); exit(); }
++      });
++      form.addEventListener('submit', async function(ev) {
++        ev.preventDefault();
++        var newName = (input.value || '').trim();
++        if (!newName) { status.textContent = 'Name required'; return; }
++        if (newName === current) { exit(); return; }
++        status.textContent = 'Saving…';
++        status.style.color = '#94a3b8';
++        try {
++          var result = await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id), { name: newName });
++          input.value = (result && result.after && result.after.name) || newName;
++          // Brief success flash, then exit.
++          status.textContent = 'Saved';
++          status.style.color = '#34d399';
++          setTimeout(function() { exit(); }, 350);
++        }
++        catch (err) {
++          status.textContent = err && err.message ? err.message : 'Error';
++          status.style.color = '#f87171';
++        }
++      });
      }
      </script>
    `);
+diff --git a/dist/ui/pages/audit.d.ts b/dist/ui/pages/audit.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..aafb8fc3a07ef232f1ff65dafbf7ca8a5f429a03
+--- /dev/null
++++ b/dist/ui/pages/audit.d.ts
+@@ -0,0 +1 @@
++export declare function auditPage(): string;
+diff --git a/dist/ui/pages/audit.js b/dist/ui/pages/audit.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..9486e34005d56f52397af3c29867bd6fdd579b62
+--- /dev/null
++++ b/dist/ui/pages/audit.js
+@@ -0,0 +1,112 @@
++import { layout } from '../layout.js';
++export function auditPage() {
++    return layout('Audit', '/dashboard/audit', `
++    <div id="audit-page" class="audit-v2"><div class="ov-loading">Loading…</div></div>
++    <script>
++    (async () => {
++      try {
++        const rows = await api('/api/audit');
++        renderAudit(rows || []);
++      } catch (e) {
++        document.getElementById('audit-page').innerHTML = '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
++      }
++    })();
++
++    function renderAudit(rows) {
++      var actions = Array.from(new Set(rows.map(function(r){ return r.action; }))).sort();
++      var targets = Array.from(new Set(rows.map(function(r){ return r.target_type; }))).sort();
++
++      var headerHtml =
++        '<header class="ov-header">' +
++          '<div class="ov-header-title">' +
++            '<h2>Audit Log</h2>' +
++            '<p class="ov-subtitle">Every dashboard write — who, what, when, before → after</p>' +
++          '</div>' +
++        '</header>';
++
++      var toolbarHtml =
++        '<div class="audit-toolbar">' +
++          '<input type="search" id="audit-search" class="audit-search" placeholder="Search actor / target / action…" autocomplete="off">' +
++          '<select id="audit-filter-action" class="audit-filter">' +
++            '<option value="">All actions</option>' +
++            actions.map(function(a){ return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('') +
++          '</select>' +
++          '<select id="audit-filter-target" class="audit-filter">' +
++            '<option value="">All targets</option>' +
++            targets.map(function(t){ return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('') +
++          '</select>' +
++          '<span class="audit-count" id="audit-count">' + rows.length + ' rows</span>' +
++        '</div>';
++
++      if (rows.length === 0) {
++        document.getElementById('audit-page').innerHTML =
++          headerHtml + toolbarHtml + '<div class="ov-loading">No audit rows yet — dashboard writes will appear here.</div>';
++        return;
++      }
++
++      var tableHtml =
++        '<table class="audit-table">' +
++          '<thead><tr>' +
++            '<th>When</th>' +
++            '<th>Actor</th>' +
++            '<th>Action</th>' +
++            '<th>Target</th>' +
++            '<th>Before</th>' +
++            '<th>After</th>' +
++          '</tr></thead>' +
++          '<tbody id="audit-tbody">' +
++            rows.map(renderRow).join('') +
++          '</tbody>' +
++        '</table>';
++
++      document.getElementById('audit-page').innerHTML = headerHtml + toolbarHtml + tableHtml;
++      wireFilters(rows);
++    }
++
++    function renderRow(r) {
++      return '<tr class="audit-row" data-action="' + esc(r.action) + '" data-target="' + esc(r.target_type) + '" data-search="' +
++        esc((r.actor_user_id + ' ' + r.target_id + ' ' + r.action).toLowerCase()) + '">' +
++        '<td class="audit-ts" title="' + esc(r.ts) + '">' + esc(timeAgo(r.ts)) + '</td>' +
++        '<td class="audit-actor">' + esc(r.actor_user_id) + '</td>' +
++        '<td><span class="audit-action-pill">' + esc(r.action) + '</span></td>' +
++        '<td class="audit-target"><span class="audit-target-type">' + esc(r.target_type) + '</span> ' +
++          '<span class="audit-target-id">' + esc(r.target_id) + '</span></td>' +
++        '<td class="audit-json">' + renderJson(r.before_json) + '</td>' +
++        '<td class="audit-json">' + renderJson(r.after_json) + '</td>' +
++      '</tr>';
++    }
++
++    function renderJson(s) {
++      if (s == null) return '<span class="audit-empty">—</span>';
++      try { return '<code>' + esc(JSON.stringify(JSON.parse(s))) + '</code>'; }
++      catch (e) { return '<code>' + esc(String(s)) + '</code>'; }
++    }
++
++    function wireFilters() {
++      var search = document.getElementById('audit-search');
++      var actionSel = document.getElementById('audit-filter-action');
++      var targetSel = document.getElementById('audit-filter-target');
++      var count = document.getElementById('audit-count');
++      function apply() {
++        var q = (search.value || '').trim().toLowerCase();
++        var act = actionSel.value;
++        var tgt = targetSel.value;
++        var rows = document.querySelectorAll('#audit-tbody .audit-row');
++        var visible = 0;
++        rows.forEach(function(row) {
++          var rAct = row.getAttribute('data-action');
++          var rTgt = row.getAttribute('data-target');
++          var rSearch = row.getAttribute('data-search') || '';
++          var keep = (!act || rAct === act) && (!tgt || rTgt === tgt) && (!q || rSearch.indexOf(q) >= 0);
++          row.style.display = keep ? '' : 'none';
++          if (keep) visible++;
++        });
++        count.textContent = visible + (visible === rows.length ? ' rows' : ' of ' + rows.length + ' rows');
++      }
++      search.addEventListener('input', apply);
++      actionSel.addEventListener('change', apply);
++      targetSel.addEventListener('change', apply);
++    }
++    </script>
++  `);
++}
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a..e047d6b 100644
+index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -4024,7 +4618,7 @@ index 4433c2a..e047d6b 100644
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37a..6094425 100644
+index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -4266,7 +4860,7 @@ index 93fe37a..6094425 100644
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa022..517e1e2 100644
+index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -4671,10 +5265,10 @@ index 38aa022..517e1e2 100644
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e..6f779f2 100644
+index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b483356b20571 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,160 +1,296 @@
+@@ -1,165 +1,374 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -4985,8 +5579,8 @@ index 3e0cc9e..6f779f2 100644
 +                  : '<span class="ag-tag ag-tag-agent">AGENT</span>')
 +              : '<span class="ag-tag ag-tag-sub">SUB-AGENT</span>';
 +            var nameCell = isSub
-+              ? '<span class="ag-arrow">↳</span><a class="ag-name-sub" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge
-+              : '<a class="ag-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge;
++              ? '<span class="ag-arrow">↳</span>' + ovRenderEditableAgentName(g, 'ag-name-sub') + ' ' + leadBadge
++              : ovRenderEditableAgentName(g, 'ag-name') + ' ' + leadBadge;
 +            return '<tr class="ag-row' + (isSub ? ' ag-row-sub' : '') + '">' +
 +              '<td class="ag-cell-name">' + nameCell + '</td>' +
 +              '<td class="ag-cell-folder">' + esc(g.folder) + '</td>' +
@@ -5074,8 +5668,86 @@ index 3e0cc9e..6f779f2 100644
      function formatUptime(s) {
        var h = Math.floor(s / 3600);
        var m = Math.floor((s % 3600) / 60);
+       return h + 'h ' + m + 'm';
+     }
++
++    /** Inline rename affordance, mirrored from the Agent Groups page so the
++     * Overview hierarchy can rename agents/sub-agents without leaving the
++     * page. Same DOM contract — wired by the global click listener below. */
++    function ovRenderEditableAgentName(g, anchorClass) {
++      return '<span class="ag-name-edit" data-rename-wrap="' + esc(g.id) + '">' +
++        '<a class="' + esc(anchorClass) + '" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
++        ' <button class="ag-name-edit-btn" type="button" data-rename-id="' + esc(g.id) +
++          '" data-rename-current="' + esc(g.name) + '" data-rename-anchor="' + esc(anchorClass) + '" title="Rename" aria-label="Rename">&#x270E;</button>' +
++        '</span>';
++    }
++
++    document.addEventListener('click', function(ev) {
++      var btn = ev.target.closest && ev.target.closest('[data-rename-id]');
++      if (!btn) return;
++      ev.preventDefault();
++      ovActivateRename(btn);
++    });
++
++    function ovActivateRename(btn) {
++      var wrap = btn.closest('.ag-name-edit');
++      if (!wrap || wrap.dataset.editing === '1') return;
++      wrap.dataset.editing = '1';
++      var id = btn.dataset.renameId;
++      var current = btn.dataset.renameCurrent || '';
++      var anchorClass = btn.dataset.renameAnchor || 'ag-name';
++
++      wrap.innerHTML = '<form class="ag-name-edit-form">' +
++          '<input class="ag-name-edit-input" type="text" maxlength="80" value="' + esc(current) + '">' +
++          '<button class="ag-name-edit-save" type="submit" title="Save">&#x2713;</button>' +
++          '<button class="ag-name-edit-cancel" type="button" title="Cancel">&#x2715;</button>' +
++          '<span class="ag-name-edit-status" data-rename-status></span>' +
++        '</form>';
++
++      var form   = wrap.querySelector('form');
++      var input  = wrap.querySelector('.ag-name-edit-input');
++      var status = wrap.querySelector('[data-rename-status]');
++      var cancel = wrap.querySelector('.ag-name-edit-cancel');
++      input.focus();
++      input.select();
++
++      function exit() {
++        wrap.dataset.editing = '';
++        wrap.innerHTML =
++          '<a class="' + esc(anchorClass) + '" href="/dashboard/agent-groups?id=' + esc(id) + '">' + esc(input.value || current) + '</a>' +
++          ' <button class="ag-name-edit-btn" type="button" data-rename-id="' + esc(id) +
++            '" data-rename-current="' + esc(input.value || current) + '" data-rename-anchor="' + esc(anchorClass) + '" title="Rename" aria-label="Rename">&#x270E;</button>';
++      }
++
++      cancel.addEventListener('click', function() { exit(); });
++      input.addEventListener('keydown', function(ev) {
++        if (ev.key === 'Escape') { ev.preventDefault(); exit(); }
++      });
++      form.addEventListener('submit', async function(ev) {
++        ev.preventDefault();
++        var newName = (input.value || '').trim();
++        if (!newName) { status.textContent = 'Name required'; return; }
++        if (newName === current) { exit(); return; }
++        status.textContent = 'Saving…';
++        status.style.color = '#94a3b8';
++        try {
++          var result = await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id), { name: newName });
++          input.value = (result && result.after && result.after.name) || newName;
++          status.textContent = 'Saved';
++          status.style.color = '#34d399';
++          setTimeout(function() { exit(); }, 350);
++        }
++        catch (err) {
++          status.textContent = err && err.message ? err.message : 'Error';
++          status.style.color = '#f87171';
++        }
++      });
++    }
+     </script>
+   `);
+ }
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb..fbdf77f 100644
+index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052ee04684b9 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -5369,7 +6041,7 @@ index 7e438eb..fbdf77f 100644
    `);
  }
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe..f77712c 100644
+index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9de659d44 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -5707,7 +6379,7 @@ index ea390fe..f77712c 100644
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000..83eaee0
+index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d3912cdd3b5b
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,630 @@
@@ -6343,7 +7015,7 @@ index 0000000..83eaee0
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000..020f9ff
+index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,180 @@
@@ -6528,7 +7200,7 @@ index 0000000..020f9ff
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581b..5325aa6 100644
+index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5325aa6b39234a12e6e9b5cec731604d318f5028 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,9 @@
