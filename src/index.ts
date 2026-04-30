@@ -174,8 +174,21 @@ async function main(): Promise<void> {
     const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
     const { startDashboardPusher } = await import('./dashboard-pusher.js');
     const { buildDashboardMutatorContext } = await import('./dashboard-mutators.js');
+    const { canAccessAgentGroup } = await import('./modules/permissions/access.js');
     const { mutators, resolveActor } = buildDashboardMutatorContext();
-    startDashboard({ port: dashboardPort, secret: dashboardSecret, mutators, resolveActor });
+    startDashboard({
+      port: dashboardPort,
+      secret: dashboardSecret,
+      mutators,
+      resolveActor,
+      // Permissions bridge for /api/tasks. Boolean callback adapts the
+      // host's AccessDecision discriminated union to the simpler shape
+      // the dashboard package consumes.
+      permissions: {
+        canAccessAgentGroup: (userId, agentGroupId) =>
+          canAccessAgentGroup(userId, agentGroupId).allowed,
+      },
+    });
     startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });
   } else {
     log.info('Dashboard disabled (no DASHBOARD_SECRET)');
