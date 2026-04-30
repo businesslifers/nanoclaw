@@ -8,6 +8,7 @@ import http from 'http';
 import Database from 'better-sqlite3';
 
 import { getAllAgentGroups, getAgentGroup } from './db/agent-groups.js';
+import { getRecentAudit } from './db/dashboard-audit.js';
 import { listWikis } from './wiki/discovery.js';
 // Pricing table — USD per 1M tokens. Dashboard cost columns are
 // DEMONSTRATION ONLY: this install authenticates Claude via Claude Max/Pro
@@ -89,6 +90,7 @@ import { DATA_DIR, ASSISTANT_NAME } from './config.js';
 import { readContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
+import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
 
@@ -108,9 +110,11 @@ interface PusherConfig {
 let timer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setInterval> | null = null;
 let logOffset = 0;
+let activeConfig: PusherConfig | null = null;
 
 export function startDashboardPusher(config: PusherConfig): void {
   const interval = config.intervalMs || 60000;
+  activeConfig = config;
 
   // Push immediately on start, then on interval
   push(config).catch((err) => log.error('Dashboard push failed', { err }));
@@ -133,6 +137,23 @@ export function stopDashboardPusher(): void {
     clearInterval(logTimer);
     logTimer = null;
   }
+  activeConfig = null;
+}
+
+/**
+ * Trigger an immediate snapshot push and reset the interval. Called
+ * after a write mutator commits so the dashboard reflects the change
+ * within ~1s instead of waiting up to a full interval.
+ */
+export function nudgePusher(): void {
+  if (!activeConfig || !timer) return;
+  const config = activeConfig;
+  const interval = config.intervalMs || 60000;
+  clearInterval(timer);
+  push(config).catch((err) => log.error('Dashboard push failed', { err }));
+  timer = setInterval(() => {
+    push(config).catch((err) => log.error('Dashboard push failed', { err }));
+  }, interval);
 }
 
 /** Fire-and-forget POST to the dashboard. */
@@ -232,6 +253,17 @@ function collectSnapshot(): Record<string, unknown> {
 
   const pinned = cpuWatchdog.pinned();
 
+  // Build session refs from the already-decorated sessions array — no extra
+  // DB roundtrips. collectTasks() opens each session's inbound.db read-only.
+  const sessionRefs: SessionRef[] = sessions
+    .filter((s) => typeof s.id === 'string' && typeof s.agent_group_id === 'string')
+    .map((s) => ({
+      sessionId: s.id as string,
+      agentGroupId: s.agent_group_id as string,
+      agentGroupName: (s.agent_group_name as string | null) ?? '',
+    }));
+  const tasks = collectTasks(sessionRefs);
+
   return {
     timestamp: new Date().toISOString(),
     assistant_name: ASSISTANT_NAME,
@@ -245,8 +277,10 @@ function collectSnapshot(): Record<string, unknown> {
     activity: collectActivity(),
     messages: collectMessages(),
     wikis: collectWikis(),
+    tasks,
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
+    audit: getRecentAudit(200),
   };
 }
 
@@ -341,7 +375,7 @@ function collectAgentGroups() {
         ...d,
         target_name: t?.name ?? null,
         target_provider: t?.agent_provider ?? null,
-        target_model: t?.model ?? null,
+        target_model: null,
       };
     });
     const members = getMembers(g.id).map((m) => {
@@ -372,7 +406,7 @@ function collectAgentGroups() {
       name: g.name,
       folder: g.folder,
       agent_provider: g.agent_provider,
-      model: g.model,
+      model: null,
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
@@ -775,8 +809,10 @@ function collectContextWindows() {
           // context-1m beta. Otherwise standard 200K. Read from the DB rather
           // than the JSONL because the JSONL only records the full model id
           // (e.g. `claude-opus-4-7`) with no beta indicator.
-          const ag = getAgentGroup(agDir);
-          const max = ag?.model && /\[1m\]$/i.test(ag.model.trim()) ? 1_000_000 : 200_000;
+          // agent_groups schema in this fork has no `model` column, so we
+          // can't infer the 1M-context beta flag from the row. Default to
+          // 200K — the dashboard's percent gauge will read conservatively.
+          const max = 200_000;
           results.push({
             agentGroupId: agDir,
             agentGroupName: nameMap.get(agDir),

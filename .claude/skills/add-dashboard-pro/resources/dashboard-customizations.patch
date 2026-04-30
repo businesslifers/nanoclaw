@@ -1,34 +1,39 @@
 diff --git a/dist/router.d.ts b/dist/router.d.ts
-index ba5d8934236d9327cfc7e6b5a54100963109aa9b..e79004442919bcba67c07d9b7239ac84ae546360 100644
+index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11bfdffda6a 100644
 --- a/dist/router.d.ts
 +++ b/dist/router.d.ts
 @@ -3,4 +3,6 @@
   * All data comes from the in-memory store (populated via POST /api/ingest).
   */
  import type http from 'http';
+-export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse): Promise<void>;
 +import type { DashboardMutators } from './types.js';
- export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse): Promise<void>;
-+export declare function dispatchMutating(method: string, path: string, body: unknown, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
++export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse, req?: http.IncomingMessage): Promise<void>;
++export declare function dispatchMutating(method: string, path: string, body: any, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c69137d95f5c 100644
+index 326434d184af3d5496de61b07c79bca0ceff7e7f..782111c971660a78cb760dc936dd4089cc177b93 100644
 --- a/dist/router.js
 +++ b/dist/router.js
-@@ -6,6 +6,11 @@ import { channelsPage } from './ui/pages/channels.js';
+@@ -6,6 +6,14 @@ import { channelsPage } from './ui/pages/channels.js';
  import { messagesPage } from './ui/pages/messages.js';
  import { usersPage } from './ui/pages/users.js';
  import { logsPage } from './ui/pages/logs.js';
 +import { wikisPage } from './ui/pages/wikis.js';
 +import { auditPage } from './ui/pages/audit.js';
++import { tasksPage, cronDescribe } from './ui/pages/tasks.js';
 +import { renderWikiMarkdown } from './ui/wiki-render.js';
++import { getTasks } from './store.js';
++import { getDashboardPermissions, getDashboardResolveActor } from './server.js';
 +import { readFileSync, realpathSync } from 'node:fs';
 +import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from 'node:path';
  function json(res, data, status = 200) {
      res.writeHead(status, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify(data));
-@@ -14,6 +19,16 @@ function html(res, content) {
+@@ -14,7 +22,17 @@ function html(res, content) {
      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
      res.end(content);
  }
+-export async function dispatch(method, path, params, res) {
 +function safeResolveWikiPath(wikiRoot, relPath) {
 +    if (typeof relPath !== 'string' || relPath.length === 0) return null;
 +    const resolved = pathResolve(wikiRoot, relPath);
@@ -39,10 +44,11 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c691
 +    if (!resolved.endsWith('.md')) return null;
 +    return resolved;
 +}
- export async function dispatch(method, path, params, res) {
++export async function dispatch(method, path, params, res, req) {
      const s = getSnapshot();
      // --- API routes ---
-@@ -45,6 +60,7 @@ export async function dispatch(method, path, params, res) {
+     if (method === 'GET' && path === '/api/status') {
+@@ -45,6 +63,7 @@ export async function dispatch(method, path, params, res) {
                  owners: s.users.filter((u) => u.privilege === 'owner').length,
                  globalAdmins: s.users.filter((u) => u.privilege === 'global_admin').length,
              },
@@ -50,7 +56,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c691
              lastUpdated: getLastUpdated(),
          });
      }
-@@ -74,10 +90,66 @@ export async function dispatch(method, path, params, res) {
+@@ -74,10 +93,66 @@ export async function dispatch(method, path, params, res) {
              admins: group.admins,
          });
      }
@@ -118,7 +124,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c691
      }
      if (method === 'GET' && path === '/api/channels') {
          if (!s)
-@@ -114,6 +186,11 @@ export async function dispatch(method, path, params, res) {
+@@ -114,6 +189,32 @@ export async function dispatch(method, path, params, res) {
              return json(res, { error: 'No data yet' }, 503);
          return json(res, { sessions: s.context_windows });
      }
@@ -127,19 +133,41 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c691
 +            return json(res, { error: 'No data yet' }, 503);
 +        return json(res, s.audit || []);
 +    }
++    if (method === 'GET' && path === '/api/tasks') {
++        // Permission filter — defense in depth alongside the SSR layer.
++        // Snapshot bundles ALL tasks; filter per viewer here.
++        const resolveActor = getDashboardResolveActor();
++        const permissions = getDashboardPermissions();
++        const all = getTasks();
++        if (!resolveActor || !permissions) {
++            // Permissions not configured — refuse to leak, return empty.
++            return json(res, []);
++        }
++        const actor = req ? resolveActor(req) : null;
++        if (!actor) return json(res, { error: 'Unauthorized' }, 401);
++        const visible = all.filter((t) => permissions.canAccessAgentGroup(actor, t.agentGroupId));
++        return json(res, visible);
++    }
++    if (method === 'GET' && path === '/api/cron/describe') {
++        const expr = (params && params.get('expr')) || '';
++        const text = cronDescribe(expr);
++        if (text == null) return json(res, { error: 'invalid cron' }, 400);
++        return json(res, { expr, text });
++    }
      // --- HTML pages ---
      if (method === 'GET') {
          if (path === '/dashboard')
-@@ -130,6 +207,8 @@ export async function dispatch(method, path, params, res) {
+@@ -130,6 +231,9 @@ export async function dispatch(method, path, params, res) {
              return html(res, usersPage());
          if (path === '/dashboard/logs')
              return html(res, logsPage());
 +        if (path.startsWith('/dashboard/wikis')) return html(res, wikisPage());
 +        if (path === '/dashboard/audit') return html(res, auditPage());
++        if (path === '/dashboard/tasks') return html(res, tasksPage());
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +218,27 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +243,72 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -165,23 +193,71 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..6d8505d3db66c4efb7184ceace95c691
 +            return json(res, { error: err?.message || 'Internal Server Error' }, status);
 +        }
 +    }
++    // Task action: cancel / pause / resume.
++    if (method === 'POST' && /^\/api\/tasks\/[^/]+\/action$/.test(path)) {
++        const taskId = decodeURIComponent(path.split('/')[3]);
++        const action = body && typeof body.action === 'string' ? body.action : '';
++        const sessionId = body && typeof body.sessionId === 'string' ? body.sessionId : '';
++        if (!sessionId) return json(res, { error: 'sessionId is required' }, 400);
++        if (!['cancel', 'pause', 'resume'].includes(action)) {
++            return json(res, { error: 'invalid action; expected cancel, pause, or resume' }, 400);
++        }
++        const fnName = action === 'cancel' ? 'cancelTask' : (action === 'pause' ? 'pauseTask' : 'resumeTask');
++        const fn = mutators && mutators[fnName];
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator ' + fnName + ' not configured' }, 503);
++        }
++        try {
++            const result = fn({ taskId, sessionId }, actorUserId);
++            return json(res, result);
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
++    // Task update: prompt / recurrence / processAfter.
++    if (method === 'PATCH' && /^\/api\/tasks\/[^/]+$/.test(path)) {
++        const taskId = decodeURIComponent(path.split('/')[3]);
++        const sessionId = body && typeof body.sessionId === 'string' ? body.sessionId : '';
++        if (!sessionId) return json(res, { error: 'sessionId is required' }, 400);
++        const fn = mutators && mutators.updateTask;
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator updateTask not configured' }, 503);
++        }
++        const args = { taskId, sessionId };
++        if (Object.prototype.hasOwnProperty.call(body, 'prompt')) args.prompt = body.prompt;
++        if (Object.prototype.hasOwnProperty.call(body, 'recurrence')) args.recurrence = body.recurrence;
++        if (Object.prototype.hasOwnProperty.call(body, 'processAfter')) args.processAfter = body.processAfter;
++        try {
++            const result = fn(args, actorUserId);
++            return json(res, result);
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
 +    return json(res, { error: 'Not found' }, 404);
 +}
 diff --git a/dist/server.d.ts b/dist/server.d.ts
-index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..b0f6a1422cc234d4fc613e5406b4cf1eb2e54949 100644
+index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..9fb35fc9d225056695ff73399cdfd231ea4e0c6b 100644
 --- a/dist/server.d.ts
 +++ b/dist/server.d.ts
-@@ -1,4 +1,5 @@
- import type { DashboardConfig } from './types.js';
+@@ -1,4 +1,7 @@
+-import type { DashboardConfig } from './types.js';
++import type { DashboardConfig, DashboardPermissions, ResolveActor } from './types.js';
  export declare function getDashboardSecret(): string | null;
 +export declare function getDashboardCsrfToken(): string | null;
++export declare function getDashboardPermissions(): DashboardPermissions | null;
++export declare function getDashboardResolveActor(): ResolveActor | null;
  export declare function startDashboard(config?: DashboardConfig): void;
  export declare function stopDashboard(): Promise<void>;
 diff --git a/dist/server.js b/dist/server.js
-index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6ef6c10a45 100644
+index f616ef5adfe7763270aa56d9685c1843819202de..c5eede7982fdef00c4a8e3577462c16132ef6f74 100644
 --- a/dist/server.js
 +++ b/dist/server.js
-@@ -4,32 +4,73 @@
+@@ -4,32 +4,81 @@
   * Serves dashboard UI and API endpoints.
   */
  import http from 'http';
@@ -194,12 +270,19 @@ index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6e
  let dashboardSecret = null;
 +let dashboardMutators = null;
 +let dashboardResolveActor = null;
++let dashboardPermissions = null;
 +let csrfToken = null;
  export function getDashboardSecret() {
      return dashboardSecret;
  }
 +export function getDashboardCsrfToken() {
 +    return csrfToken;
++}
++export function getDashboardPermissions() {
++    return dashboardPermissions;
++}
++export function getDashboardResolveActor() {
++    return dashboardResolveActor;
 +}
 +function readCookie(req, name) {
 +    const raw = req.headers.cookie;
@@ -229,6 +312,7 @@ index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6e
      dashboardSecret = config.secret || null;
 +    dashboardMutators = config.mutators || null;
 +    dashboardResolveActor = config.resolveActor || null;
++    dashboardPermissions = config.permissions || null;
      if (!dashboardSecret) {
          console.warn('[dashboard] Starting without secret — endpoints are unauthenticated');
      }
@@ -257,7 +341,7 @@ index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6e
          // Auth check for /api/* routes (endpoints with their own auth are excluded)
          const selfAuthed = ['/api/ingest', '/api/logs', '/api/logs/push'];
          if (path.startsWith('/api/') && !selfAuthed.includes(path) && dashboardSecret) {
-@@ -55,6 +96,41 @@ export function startDashboard(config = {}) {
+@@ -55,8 +104,43 @@ export function startDashboard(config = {}) {
              handleLogStream(req, res);
              return;
          }
@@ -297,13 +381,84 @@ index f616ef5adfe7763270aa56d9685c1843819202de..4f62393890dd37e66d57ace9b4fe8c6e
 +            }
 +        }
          try {
-             await dispatch(method, path, url.searchParams, res);
+-            await dispatch(method, path, url.searchParams, res);
++            await dispatch(method, path, url.searchParams, res, req);
          }
+         catch (err) {
+             if (!res.headersSent) {
+diff --git a/dist/store.d.ts b/dist/store.d.ts
+index c7e717d5fc55e65cd6461e66df1ec931673e5698..1d2a6169c26ff771d97e3481ba297fba1bc5d522 100644
+--- a/dist/store.d.ts
++++ b/dist/store.d.ts
+@@ -3,10 +3,11 @@
+  * Holds the latest snapshot pushed by NanoClaw.
+  * Can be swapped for Vercel KV later.
+  */
+-import type { DashboardSnapshot } from './types.js';
++import type { DashboardSnapshot, TaskSummary } from './types.js';
+ export declare function setSnapshot(data: DashboardSnapshot): void;
+ export declare function getSnapshot(): DashboardSnapshot | null;
+ export declare function getLastUpdated(): string | null;
++export declare function getTasks(): TaskSummary[];
+ import type http from 'http';
+ export declare function getLogBuffer(): string[];
+ export declare function addLogClient(res: http.ServerResponse): void;
+diff --git a/dist/store.js b/dist/store.js
+index b12b787287c1cc6389280fc422b2dcba69697559..697c55eaba9c457997c501394018bda603b899fe 100644
+--- a/dist/store.js
++++ b/dist/store.js
+@@ -1,7 +1,9 @@
+ let snapshot = null;
+ let lastUpdated = null;
++let tasks = [];
+ export function setSnapshot(data) {
+     snapshot = data;
++    tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
+     lastUpdated = new Date().toISOString();
+ }
+ export function getSnapshot() {
+@@ -10,6 +12,9 @@ export function getSnapshot() {
+ export function getLastUpdated() {
+     return lastUpdated;
+ }
++export function getTasks() {
++    return tasks;
++}
+ const logClients = new Set();
+ const LOG_BUFFER_MAX = 500;
+ const logBuffer = [];
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..8a6cb478de4f21c8a39ecf71ba9e74a62afd2023 100644
+index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcbedf1e7db 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
-@@ -139,7 +139,31 @@ export interface ActivityBucket {
+@@ -16,6 +16,26 @@ export interface DashboardSnapshot {
+     tokens: TokenSummary;
+     context_windows: ContextWindowInfo[];
+     activity: ActivityBucket[];
++    tasks?: TaskSummary[];
++}
++/**
++ * Per-task summary surfaced on /dashboard/tasks. Mirrors the host's
++ * `TaskSummary` interface in src/dashboard-tasks.ts — keep them in sync.
++ */
++export interface TaskSummary {
++    id: string;
++    sessionId: string;
++    agentGroupId: string;
++    agentGroupName: string;
++    status: 'pending' | 'processing' | 'paused';
++    promptPreview: string;
++    scriptPresent: boolean;
++    recurrence: string | null;
++    processAfter: string | null;
++    nextRun: string | null;
++    seriesId: string;
++    createdAt: string;
++    tries: number;
+ }
+ export interface AgentGroupInfo {
+     id: string;
+@@ -139,7 +159,68 @@ export interface ActivityBucket {
      inbound: number;
      outbound: number;
  }
@@ -315,8 +470,44 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..8a6cb478de4f21c8a39ecf71ba9e74a6
 +    id: string;
 +    name: string;
 +}
++export interface TaskMutatorArgs {
++    taskId: string;
++    sessionId: string;
++}
++export interface TaskUpdateArgs extends TaskMutatorArgs {
++    prompt?: string;
++    recurrence?: string | null;
++    processAfter?: string;
++}
++export interface TaskRowSummary {
++    id: string;
++    status: string;
++    content: string;
++    process_after: string | null;
++    recurrence: string | null;
++    series_id: string;
++    timestamp: string;
++    tries: number;
++}
++export interface TaskMutatorResult {
++    ok: true;
++    task: TaskRowSummary | null;
++}
 +export interface DashboardMutators {
 +    renameAgentGroup(args: AgentGroupRenameArgs, actorUserId: string): AgentGroupRenameResult;
++    cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
++    pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
++    resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
++    updateTask(args: TaskUpdateArgs, actorUserId: string): TaskMutatorResult;
++}
++/**
++ * Dashboard permissions bridge — host-supplied callbacks. Used by
++ * /api/tasks to filter the snapshot per viewer. Boolean callback,
++ * not an `AccessDecision`-style discriminated union, to keep the
++ * dashboard package's surface minimal.
++ */
++export interface DashboardPermissions {
++    canAccessAgentGroup(userId: string, agentGroupId: string): boolean;
 +}
 +export type ResolveActor = (req: import('http').IncomingMessage) => string | undefined;
 +export interface AuditRow {
@@ -334,12 +525,13 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..8a6cb478de4f21c8a39ecf71ba9e74a6
      secret?: string;
 +    mutators?: DashboardMutators;
 +    resolveActor?: ResolveActor;
++    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e578a85145 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..64661eac57539523cd1d0aa5cd04f6148096ddbc 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,2878 @@
+@@ -2,172 +2,3253 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -352,6 +544,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 -    { href: '/dashboard/channels', label: 'Channels', icon: '&#8644;' },
 +    { href: '/dashboard/agent-groups', label: 'Agent Groups', icon: '&#9654;', countKey: 'agentGroups' },
 +    { href: '/dashboard/sessions', label: 'Sessions', icon: '&#8635;', countKey: 'sessions' },
++    { href: '/dashboard/tasks', label: 'Tasks', icon: '&#9202;' },
 +    { href: '/dashboard/channels', label: 'Channels', icon: '&#8644;', countKey: 'channels' },
      { href: '/dashboard/messages', label: 'Messages', icon: '&#9993;' },
 -    { href: '/dashboard/users', label: 'Users', icon: '&#9679;' },
@@ -2376,13 +2569,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 12px;
 +    cursor: pointer;
 +    font-family: inherit;
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
--    margin-bottom: 8px;
++  }
 +  .users-v2 .us-menu-item:hover { background: rgba(45, 212, 191, 0.10); color: var(--us-cyan); }
 +
 +  /* Footer */
@@ -2391,8 +2578,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 12px;
 +    color: var(--us-text-dim);
 +    text-align: right;
-   }
--  .sidebar nav a {
++  }
 +
 +  /* ─────────────────────────────────────────────────────────
 +   * .logs-v2 — scoped redesign for the Logs page
@@ -2451,9 +2637,9 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +
 +  /* Toolbar */
 +  .logs-v2 .lg-toolbar {
-     display: flex;
++    display: flex;
 +    justify-content: space-between;
-     align-items: center;
++    align-items: center;
 +    gap: 12px;
 +    margin-bottom: 12px;
 +    flex-wrap: wrap;
@@ -2461,16 +2647,9 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  .logs-v2 .lg-toolbar-left,
 +  .logs-v2 .lg-toolbar-right {
 +    display: flex;
-     gap: 10px;
--    padding: 10px 20px;
--    color: #999;
--    font-size: 14px;
--    transition: background 0.15s, color 0.15s;
++    gap: 10px;
 +    align-items: center;
-   }
--  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
--  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
--  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
++  }
 +  .logs-v2 .lg-select,
 +  .logs-v2 .lg-search {
 +    background: var(--lg-surface);
@@ -2516,13 +2695,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    transition: color 0.15s, border-color 0.15s;
 +  }
 +  .logs-v2 .lg-clear-btn:hover { color: var(--lg-red); border-color: rgba(248, 113, 113, 0.40); }
- 
--  /* Main */
--  .main {
--    margin-left: 220px;
--    padding: 24px 32px;
--    flex: 1;
--    min-width: 0;
++
 +  /* Log viewer panel */
 +  .logs-v2 .lg-viewer {
 +    background: var(--lg-bg);
@@ -2536,12 +2709,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 11.5px;
 +    line-height: 1.7;
 +    position: relative;
-   }
--  .page-title {
--    font-size: 22px;
--    font-weight: 600;
--    margin-bottom: 20px;
--    color: #fff;
++  }
 +  .logs-v2 .lg-viewer::before {
 +    content: '';
 +    position: absolute;
@@ -2561,16 +2729,11 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    display: inline-block;
 +    min-width: 50px;
 +    font-weight: 700;
-   }
++  }
 +  .logs-v2 .lg-msg-text { color: var(--lg-text); }
 +  .logs-v2 .lg-kv-key { color: #94a3b8; }
 +  .logs-v2 .lg-kv-val { color: var(--lg-text-label); }
- 
--  /* Cards */
--  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
--  .card {
--    background: #1a1a1a;
--    border: 1px solid #2a2a2a;
++
 +  /* Per-level coloring (whole line tint for prominence) */
 +  .logs-v2 .lg-lvl-info  .lg-level { color: #67e8f9; }
 +  .logs-v2 .lg-lvl-warn  .lg-level { color: var(--lg-amber); }
@@ -2670,7 +2833,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 18px;
 +    line-height: 1;
 +    padding: 6px 12px;
-     border-radius: 8px;
++    border-radius: 8px;
 +    transition: background 0.15s, color 0.15s, border-color 0.15s;
 +  }
 +  .agent-groups-v2 .ad-menu-btn:hover {
@@ -2779,7 +2942,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  .agent-groups-v2 .ad-section { margin-bottom: 24px; }
 +  .agent-groups-v2 .ad-section-head { margin-bottom: 8px; }
 +  .agent-groups-v2 .ad-empty {
-     padding: 16px;
++    padding: 16px;
 +    color: var(--ag-text-dim);
 +    font-size: 12px;
 +    background: var(--ag-surface);
@@ -2813,7 +2976,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    color: var(--ag-text-label);
 +    border-bottom: 1px solid var(--ag-border);
 +    background: var(--ag-surface-2);
-+  }
+   }
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
+-    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
+-    margin-bottom: 8px;
 +  .agent-groups-v2 .ad-table tbody td {
 +    padding: 10px 14px;
 +    font-size: 12.5px;
@@ -2821,9 +2990,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    color: var(--ag-text);
 +    vertical-align: middle;
    }
--  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
--  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
--  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
+-  .sidebar nav a {
 +  .agent-groups-v2 .ad-table tbody tr:last-child td { border-bottom: none; }
 +  .agent-groups-v2 .ad-table tbody tr:hover td { background: rgba(45, 212, 191, 0.04); }
 +  .agent-groups-v2 .ad-num { text-align: center; }
@@ -2834,12 +3001,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  .agent-groups-v2 .ad-cell-name-text { color: #f1f5f9; font-weight: 500; }
 +  .agent-groups-v2 .ad-cell-name-id { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: var(--ag-text-dim); }
 +  .agent-groups-v2 .ad-id-hint { font-size: 11px; color: var(--ag-text-dim); }
- 
--  /* Tables */
--  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
--  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
--  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
--  tr:hover td { background: #151515; }
++
 +  /* Pills */
 +  .agent-groups-v2 .ad-pill {
 +    display: inline-flex;
@@ -2865,13 +3027,11 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  .agent-groups-v2 .ad-pill-idle     { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border-color: rgba(251, 191, 36, 0.30); }
 +  .agent-groups-v2 .ad-pill-stopped  { background: rgba(100, 116, 139, 0.10); color: #94a3b8; border-color: rgba(100, 116, 139, 0.20); }
 +  .agent-groups-v2 .ad-pill-crashed  { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.30); }
- 
--  /* Badges */
--  .badge {
++
 +  .agent-groups-v2 .ad-tag {
-     display: inline-block;
-     padding: 2px 8px;
-     border-radius: 4px;
++    display: inline-block;
++    padding: 2px 8px;
++    border-radius: 4px;
 +    font-size: 10px;
 +    font-weight: 700;
 +    letter-spacing: 0.6px;
@@ -2903,15 +3063,23 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +
 +  .messages-v2 .mdt-header { margin-bottom: 16px; }
 +  .messages-v2 .mdt-title-row {
-+    display: flex;
-+    align-items: center;
+     display: flex;
+     align-items: center;
+-    gap: 10px;
+-    padding: 10px 20px;
+-    color: #999;
+-    font-size: 14px;
+-    transition: background 0.15s, color 0.15s;
 +    gap: 12px;
 +    flex-wrap: wrap;
-+  }
+   }
+-  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
+-  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
+-  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
 +  .messages-v2 .mdt-title-row h2 { font-size: 22px; font-weight: 700; color: #f1f5f9; }
 +  .messages-v2 .mdt-id-chip {
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
-     font-size: 11px;
++    font-size: 11px;
 +    background: var(--msg-surface);
 +    color: var(--msg-text-label);
 +    padding: 4px 10px;
@@ -2931,14 +3099,22 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  }
 +  .messages-v2 .mdt-copy-btn:hover { color: var(--msg-cyan); border-color: var(--msg-cyan); }
 +  .messages-v2 .mdt-copy-btn.mdt-copied { color: var(--msg-green); border-color: var(--msg-green); font-weight: 700; }
-+
+ 
+-  /* Main */
+-  .main {
+-    margin-left: 220px;
+-    padding: 24px 32px;
+-    flex: 1;
+-    min-width: 0;
 +  /* KPI strip */
 +  .messages-v2 .mdt-kpi-grid {
 +    display: grid;
 +    grid-template-columns: repeat(4, 1fr);
 +    gap: 12px;
 +    margin-bottom: 20px;
-+  }
+   }
+-  .page-title {
+-    font-size: 22px;
 +  @media (max-width: 1100px) { .messages-v2 .mdt-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
 +  .messages-v2 .mdt-kpi-cell {
 +    background: var(--msg-surface);
@@ -2957,6 +3133,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 14px;
 +    color: #f1f5f9;
      font-weight: 600;
+-    margin-bottom: 20px;
+-    color: #fff;
 +    word-break: break-all;
 +  }
 +  .messages-v2 .mdt-pill {
@@ -2982,8 +3160,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    background: rgba(125, 211, 252, 0.10);
 +    color: #7dd3fc;
 +    border: 1px solid rgba(125, 211, 252, 0.25);
-+  }
-+
+   }
+ 
+-  /* Cards */
+-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+-  .card {
+-    background: #1a1a1a;
+-    border: 1px solid #2a2a2a;
 +  /* Content + Context two-col */
 +  .messages-v2 .mdt-content-row {
 +    display: grid;
@@ -3000,8 +3183,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    word-break: break-word;
 +    background: var(--msg-surface-2);
 +    padding: 14px 16px;
-+    border-radius: 8px;
-+  }
+     border-radius: 8px;
+-    padding: 16px;
+   }
+-  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+-  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
+-  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
 +  .messages-v2 .mdt-meta-list { display: flex; flex-direction: column; gap: 8px; }
 +  .messages-v2 .mdt-meta-row {
 +    display: grid;
@@ -3011,7 +3198,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  }
 +  .messages-v2 .mdt-meta-label {
 +    font-size: 10px;
-     text-transform: uppercase;
++    text-transform: uppercase;
 +    letter-spacing: 0.7px;
 +    color: var(--msg-text-dim);
 +  }
@@ -3020,16 +3207,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    color: var(--msg-text);
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    overflow-wrap: anywhere;
-   }
--  .badge-green { background: #1a3a1a; color: #4ade80; }
--  .badge-yellow { background: #3a3a1a; color: #facc15; }
--  .badge-red { background: #3a1a1a; color: #f87171; }
--  .badge-blue { background: #1a2a3a; color: #7eb8da; }
--  .badge-gray { background: #2a2a2a; color: #999; }
--  .badge-purple { background: #2a1a3a; color: #c084fc; }
++  }
  
--  /* Section headers */
--  .section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #ccc; }
+-  /* Tables */
+-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+-  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
+-  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
+-  tr:hover td { background: #151515; }
 +  /* Bottom row: thread + raw */
 +  .messages-v2 .mdt-bottom-row {
 +    display: grid;
@@ -3039,14 +3223,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  }
 +  @media (max-width: 1100px) { .messages-v2 .mdt-bottom-row { grid-template-columns: minmax(0, 1fr); } }
  
--  /* Chart container */
--  .chart-container { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
--  .chart-bar-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
--  .chart-label { width: 40px; font-size: 11px; color: #888; text-align: right; }
--  .chart-bar { height: 20px; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
--  .chart-bar-in { background: #3b82f6; }
--  .chart-bar-out { background: #22c55e; }
--  .chart-value { font-size: 11px; color: #666; }
+-  /* Badges */
+-  .badge {
 +  .messages-v2 .mdt-thread-item {
 +    border-left: 3px solid transparent;
 +    padding: 8px 12px;
@@ -3084,12 +3262,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    white-space: pre-wrap;
 +    word-break: break-word;
 +  }
- 
--  /* Log viewer */
--  .log-container {
--    background: #0a0a0a;
--    border: 1px solid #2a2a2a;
--    border-radius: 8px;
++
 +  /* Raw JSON viewer */
 +  .messages-v2 .mdt-raw-head {
 +    display: flex;
@@ -3101,39 +3274,17 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    margin-top: 10px;
 +    background: #0a0e1a;
 +    color: #cbd5e1;
-     padding: 12px;
++    padding: 12px;
 +    border-radius: 8px;
 +    border: 1px solid var(--msg-border);
-     font-family: 'Cascadia Code', 'Fira Code', monospace;
--    font-size: 12px;
--    height: calc(100vh - 140px);
--    overflow-y: auto;
--    line-height: 1.6;
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    font-size: 11.5px;
 +    line-height: 1.55;
 +    max-height: 360px;
 +    overflow: auto;
 +    white-space: pre;
-   }
--  .log-line { white-space: pre-wrap; word-break: break-all; }
--  .log-line:hover { background: #151515; }
--
--  /* Detail panel */
--  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
--  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
--  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
--  .detail-value { color: #e0e0e0; font-size: 13px; }
- 
--  /* Loading */
--  .loading { color: #666; font-style: italic; padding: 20px; }
--
--  /* Select */
--  select {
--    background: #1a1a1a;
--    color: #e0e0e0;
--    border: 1px solid #2a2a2a;
--    border-radius: 4px;
--    padding: 6px 10px;
++  }
++
 +  /* Audit page */
 +  .audit-v2 .audit-toolbar {
 +    display: flex;
@@ -3149,7 +3300,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    border: 1px solid #1e293b;
 +    border-radius: 6px;
 +    padding: 8px 12px;
-     font-size: 13px;
++    font-size: 13px;
 +    font-family: inherit;
 +  }
 +  .audit-v2 .audit-search:focus { outline: none; border-color: #2dd4bf; }
@@ -3203,22 +3354,28 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  .audit-v2 .audit-ts { color: #64748b; font-variant-numeric: tabular-nums; }
 +  .audit-v2 .audit-actor { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11.5px; color: #a78bfa; }
 +  .audit-v2 .audit-action-pill {
-+    display: inline-block;
-+    padding: 2px 8px;
-+    border-radius: 4px;
+     display: inline-block;
+     padding: 2px 8px;
+     border-radius: 4px;
 +    background: rgba(45, 212, 191, 0.12);
 +    color: #2dd4bf;
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
-+    font-size: 11px;
-+    font-weight: 600;
+     font-size: 11px;
+     font-weight: 600;
 +  }
 +  .audit-v2 .audit-target-type {
 +    color: #64748b;
 +    font-size: 10.5px;
-+    text-transform: uppercase;
+     text-transform: uppercase;
 +    letter-spacing: 0.5px;
 +    margin-right: 4px;
    }
+-  .badge-green { background: #1a3a1a; color: #4ade80; }
+-  .badge-yellow { background: #3a3a1a; color: #facc15; }
+-  .badge-red { background: #3a1a1a; color: #f87171; }
+-  .badge-blue { background: #1a2a3a; color: #7eb8da; }
+-  .badge-gray { background: #2a2a2a; color: #999; }
+-  .badge-purple { background: #2a1a3a; color: #c084fc; }
 +  .audit-v2 .audit-target-id { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; }
 +  .audit-v2 .audit-json code {
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
@@ -3229,10 +3386,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +  }
 +  .audit-v2 .audit-empty { color: #475569; }
  
--  /* Tabs */
--  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
--  .tab {
--    padding: 8px 16px;
+-  /* Section headers */
+-  .section-title { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #ccc; }
 +  /* Inline editable name (rename feature) */
 +  .ag-name-edit {
 +    display: inline-flex;
@@ -3263,8 +3418,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    border: 1px solid #2dd4bf;
 +    border-radius: 4px;
 +    padding: 2px 6px;
-     font-size: 13px;
--    color: #888;
++    font-size: 13px;
 +    font-family: inherit;
 +    min-width: 120px;
 +  }
@@ -3274,9 +3428,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    background: transparent;
 +    border: 1px solid transparent;
 +    color: #94a3b8;
-     cursor: pointer;
--    border-bottom: 2px solid transparent;
--    transition: color 0.15s, border-color 0.15s;
++    cursor: pointer;
 +    padding: 0;
 +    width: 22px;
 +    height: 22px;
@@ -3308,6 +3460,423 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
 +    font-size: 11px;
 +    color: #f87171;
 +    margin-left: 6px;
++  }
+ 
+-  /* Chart container */
+-  .chart-container { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+-  .chart-bar-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+-  .chart-label { width: 40px; font-size: 11px; color: #888; text-align: right; }
+-  .chart-bar { height: 20px; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+-  .chart-bar-in { background: #3b82f6; }
+-  .chart-bar-out { background: #22c55e; }
+-  .chart-value { font-size: 11px; color: #666; }
++  /* Tasks page */
++  .tasks-v2 .ov-header {
++    display: flex;
++    justify-content: space-between;
++    align-items: center;
++    margin-bottom: 20px;
++    flex-wrap: wrap;
++    gap: 12px;
++  }
++  .tasks-v2 .ov-header-title h2 { font-size: 24px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.3px; }
++  .tasks-v2 .ov-subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
++  .tasks-v2 .tasks-toolbar {
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    margin-top: 8px;
++    margin-bottom: 16px;
++    flex-wrap: wrap;
++  }
++  .tasks-v2 .tasks-search {
++    flex: 1;
++    min-width: 240px;
++    background: #0f172a;
++    color: #e2e8f0;
++    border: 1px solid #1e293b;
++    border-radius: 6px;
++    padding: 8px 12px;
++    font-size: 13px;
++    font-family: inherit;
++  }
++  .tasks-v2 .tasks-search:focus { outline: none; border-color: #2dd4bf; }
++  .tasks-v2 .tasks-chips { display: inline-flex; gap: 6px; }
++  .tasks-v2 .tasks-chip {
++    background: #0f172a;
++    color: #94a3b8;
++    border: 1px solid #1e293b;
++    border-radius: 999px;
++    padding: 5px 12px;
++    font-size: 11.5px;
++    font-family: inherit;
++    cursor: pointer;
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++    transition: color 0.12s, background 0.12s, border-color 0.12s;
++  }
++  .tasks-v2 .tasks-chip:hover { border-color: #334155; color: #cbd5e1; }
++  .tasks-v2 .tasks-chip-dot {
++    width: 7px; height: 7px; border-radius: 50%;
++    background: #475569;
++    transition: background 0.12s;
++  }
++  .tasks-v2 .tasks-chip.active { color: #e2e8f0; background: rgba(45, 212, 191, 0.08); border-color: rgba(45, 212, 191, 0.4); }
++  .tasks-v2 .tasks-chip-pending.active .tasks-chip-dot     { background: #2dd4bf; }
++  .tasks-v2 .tasks-chip-processing.active .tasks-chip-dot  { background: #fbbf24; box-shadow: 0 0 6px #fbbf24aa; }
++  .tasks-v2 .tasks-chip-paused.active .tasks-chip-dot      { background: #94a3b8; }
++  .tasks-v2 .tasks-count {
++    margin-left: auto;
++    font-size: 11.5px;
++    color: #64748b;
++    font-variant-numeric: tabular-nums;
++  }
++  .tasks-v2 .tasks-empty { font-size: 13px; }
+ 
+-  /* Log viewer */
+-  .log-container {
+-    background: #0a0a0a;
+-    border: 1px solid #2a2a2a;
++  .tasks-v2 .tasks-group {
++    background: #0f172a;
++    border: 1px solid #1e293b;
+     border-radius: 8px;
+-    padding: 12px;
+-    font-family: 'Cascadia Code', 'Fira Code', monospace;
+-    font-size: 12px;
+-    height: calc(100vh - 140px);
+-    overflow-y: auto;
+-    line-height: 1.6;
++    margin-bottom: 14px;
++    overflow: hidden;
+   }
+-  .log-line { white-space: pre-wrap; word-break: break-all; }
+-  .log-line:hover { background: #151515; }
+-
+-  /* Detail panel */
+-  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+-  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
+-  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
+-  .detail-value { color: #e0e0e0; font-size: 13px; }
+-
+-  /* Loading */
+-  .loading { color: #666; font-style: italic; padding: 20px; }
++  .tasks-v2 .tasks-group-header {
++    display: flex;
++    align-items: center;
++    gap: 10px;
++    padding: 12px 14px;
++    cursor: pointer;
++    user-select: none;
++    background: #111827;
++    border-bottom: 1px solid #1e293b;
++  }
++  .tasks-v2 .tasks-group.collapsed .tasks-group-header { border-bottom-color: transparent; }
++  .tasks-v2 .tasks-group-header:hover { background: #18223a; }
++  .tasks-v2 .tasks-group-arrow { color: #64748b; font-size: 11px; min-width: 12px; }
++  .tasks-v2 .tasks-group-name {
++    font-size: 13.5px;
++    font-weight: 600;
++    color: #e2e8f0;
++    margin: 0;
++  }
++  .tasks-v2 .tasks-group-counts { margin-left: auto; display: inline-flex; gap: 6px; }
++  .tasks-v2 .tasks-group-count {
++    display: inline-block;
++    padding: 2px 8px;
++    border-radius: 4px;
++    font-size: 10.5px;
++    font-weight: 600;
++    text-transform: uppercase;
++    letter-spacing: 0.4px;
++  }
++  .tasks-v2 .tasks-count-pending    { color: #2dd4bf; background: rgba(45, 212, 191, 0.12); }
++  .tasks-v2 .tasks-count-processing { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
++  .tasks-v2 .tasks-count-paused     { color: #94a3b8; background: rgba(148, 163, 184, 0.12); }
++  .tasks-v2 .tasks-group.collapsed .tasks-group-body { display: none; }
+ 
+-  /* Select */
+-  select {
+-    background: #1a1a1a;
+-    color: #e0e0e0;
+-    border: 1px solid #2a2a2a;
++  .tasks-v2 .tasks-table {
++    width: 100%;
++    border-collapse: collapse;
++    table-layout: fixed;
++  }
++  .tasks-v2 .tasks-table th {
++    text-align: left;
++    padding: 10px 12px;
++    background: #0d1426;
++    color: #94a3b8;
++    font-size: 10.5px;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++    font-weight: 600;
++    border-bottom: 1px solid #1e293b;
++  }
++  .tasks-v2 .tasks-table th:nth-child(1) { width: 110px; }
++  .tasks-v2 .tasks-table th:nth-child(3) { width: 200px; }
++  .tasks-v2 .tasks-table th:nth-child(4) { width: 140px; }
++  .tasks-v2 .tasks-actions-col { width: 200px; text-align: right; }
++  .tasks-v2 .tasks-table td {
++    padding: 10px 12px;
++    font-size: 12px;
++    color: #cbd5e1;
++    vertical-align: middle;
++    border-bottom: 1px solid #111827;
++  }
++  .tasks-v2 .task-row { cursor: pointer; }
++  .tasks-v2 .task-row:hover { background: #18223a; }
++  .tasks-v2 .task-row:focus { outline: 2px solid #2dd4bf; outline-offset: -2px; }
++  .tasks-v2 .task-prompt {
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++    color: #e2e8f0;
++  }
++  .tasks-v2 .task-status-badge {
++    display: inline-block;
++    padding: 2px 8px;
+     border-radius: 4px;
+-    padding: 6px 10px;
+-    font-size: 13px;
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
++    font-size: 11px;
++    font-weight: 600;
++    text-transform: uppercase;
++    letter-spacing: 0.4px;
++  }
++  .tasks-v2 .task-status-pending    { color: #2dd4bf; background: rgba(45, 212, 191, 0.12); }
++  .tasks-v2 .task-status-processing { color: #fbbf24; background: rgba(251, 191, 36, 0.16); }
++  .tasks-v2 .task-status-paused     { color: #94a3b8; background: rgba(148, 163, 184, 0.12); }
++  .tasks-v2 .task-badge {
++    display: inline-block;
++    padding: 1px 7px;
++    border-radius: 4px;
++    font-size: 10.5px;
++    color: #94a3b8;
++    background: rgba(148, 163, 184, 0.12);
++  }
++  .tasks-v2 .task-badge-oneshot { color: #818cf8; background: rgba(129, 140, 248, 0.12); }
++  .tasks-v2 .task-badge-script  { color: #f0abfc; background: rgba(240, 171, 252, 0.1); }
++  .tasks-v2 .task-schedule { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11.5px; }
++  .tasks-v2 .task-next-run { font-variant-numeric: tabular-nums; color: #cbd5e1; }
++  .tasks-v2 .task-next-run-empty { color: #475569; }
++  .tasks-v2 .task-actions { text-align: right; white-space: nowrap; }
++  .tasks-v2 .task-action-btn {
++    background: transparent;
++    border: 1px solid #1e293b;
++    color: #94a3b8;
++    cursor: pointer;
++    padding: 4px 8px;
++    margin-left: 4px;
++    border-radius: 4px;
++    font-family: inherit;
++    font-size: 11px;
++    display: inline-flex;
++    align-items: center;
++    gap: 5px;
++    transition: color 0.12s, background 0.12s, border-color 0.12s;
++  }
++  .tasks-v2 .task-action-btn:hover { color: #2dd4bf; border-color: #2dd4bf; background: rgba(45, 212, 191, 0.08); }
++  .tasks-v2 .task-action-cancel:hover { color: #f87171; border-color: #f87171; background: rgba(248, 113, 113, 0.08); }
++  .tasks-v2 .task-action-icon { font-size: 11px; line-height: 1; }
++  .tasks-v2 .task-action-running {
++    color: #fbbf24;
++    font-size: 10.5px;
++    text-transform: uppercase;
++    letter-spacing: 0.4px;
+   }
+ 
+-  /* Tabs */
+-  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
+-  .tab {
+-    padding: 8px 16px;
++  /* Tasks drawer */
++  .tasks-v2 .task-drawer-backdrop {
++    position: fixed;
++    inset: 0;
++    background: rgba(8, 12, 24, 0.55);
++    z-index: 50;
++    opacity: 0;
++    transition: opacity 0.2s ease;
++  }
++  .tasks-v2 .task-drawer-backdrop.open { opacity: 1; }
++  .tasks-v2 .task-drawer {
++    position: fixed;
++    top: 0;
++    right: 0;
++    bottom: 0;
++    width: 360px;
++    max-width: 100%;
++    background: #0d1426;
++    border-left: 1px solid #1f2944;
++    z-index: 51;
++    display: flex;
++    flex-direction: column;
++    transform: translateX(100%);
++    transition: transform 0.24s cubic-bezier(.4, 0, .2, 1);
++    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
++  }
++  .tasks-v2 .task-drawer.open { transform: translateX(0); }
++  .tasks-v2 .task-drawer:focus { outline: none; }
++  .tasks-v2 .task-drawer-header {
++    display: flex;
++    align-items: center;
++    gap: 10px;
++    padding: 16px 18px;
++    border-bottom: 1px solid #1f2944;
++  }
++  .tasks-v2 .task-drawer-header h3 {
++    font-size: 14px;
++    font-weight: 600;
++    color: #f1f5f9;
++    margin: 0;
++    flex: 1;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .tasks-v2 .task-drawer-close {
++    background: transparent;
++    border: 0;
++    color: #64748b;
++    cursor: pointer;
++    font-size: 14px;
++    padding: 4px;
++  }
++  .tasks-v2 .task-drawer-close:hover { color: #f87171; }
++  .tasks-v2 .task-drawer-body {
++    flex: 1;
++    overflow-y: auto;
++    padding: 16px 18px;
++  }
++  .tasks-v2 .task-drawer-section {
++    margin-bottom: 18px;
++    position: relative;
++  }
++  .tasks-v2 .task-drawer-running-note {
++    background: rgba(251, 191, 36, 0.08);
++    border: 1px solid rgba(251, 191, 36, 0.25);
++    color: #fbbf24;
++    padding: 10px 12px;
++    border-radius: 6px;
++    font-size: 12px;
++    margin-bottom: 18px;
++  }
++  .tasks-v2 .task-drawer-field { position: relative; }
++  .tasks-v2 .task-drawer-label {
++    display: block;
++    font-size: 10.5px;
++    color: #64748b;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++    font-weight: 600;
++    margin-bottom: 6px;
++  }
++  .tasks-v2 .task-drawer-value {
++    color: #e2e8f0;
++    font-size: 12.5px;
++    line-height: 1.5;
++    word-break: break-word;
++  }
++  .tasks-v2 .task-drawer-rel { color: #64748b; font-size: 11px; }
++  .tasks-v2 .task-drawer-cron-raw {
++    font-family: 'Cascadia Code', 'Fira Code', monospace;
++    font-size: 11.5px;
++    color: #67e8f9;
++  }
++  .tasks-v2 .task-drawer-cron-readable { color: #94a3b8; font-size: 11.5px; }
++  .tasks-v2 .task-drawer-edit-btn {
++    position: absolute;
++    top: 0;
++    right: 0;
++    background: transparent;
++    border: 0;
++    color: #64748b;
++    cursor: pointer;
++    padding: 2px 6px;
++    border-radius: 3px;
++    line-height: 1;
+     font-size: 13px;
+-    color: #888;
++    opacity: 0;
++    transition: opacity 0.12s, color 0.12s;
++  }
++  .tasks-v2 .task-drawer-field:hover .task-drawer-edit-btn { opacity: 1; }
++  .tasks-v2 .task-drawer-edit-btn:hover { color: #2dd4bf; }
++  .tasks-v2 .task-drawer-textarea,
++  .tasks-v2 .task-drawer-input {
++    width: 100%;
++    background: #0a0e1a;
++    color: #e2e8f0;
++    border: 1px solid #2dd4bf;
++    border-radius: 4px;
++    padding: 6px 8px;
++    font-size: 12.5px;
++    font-family: inherit;
++    box-sizing: border-box;
++  }
++  .tasks-v2 .task-drawer-textarea { resize: vertical; }
++  .tasks-v2 .task-drawer-input { font-family: 'Cascadia Code', 'Fira Code', monospace; }
++  .tasks-v2 .task-drawer-cron-preview {
++    margin-top: 6px;
++    font-size: 11.5px;
++    color: #94a3b8;
++    font-style: italic;
++  }
++  .tasks-v2 .task-drawer-cron-preview.error { color: #f87171; font-style: normal; }
++  .tasks-v2 .task-drawer-edit-actions {
++    margin-top: 6px;
++    display: flex;
++    gap: 6px;
++    align-items: center;
++  }
++  .tasks-v2 .task-drawer-save,
++  .tasks-v2 .task-drawer-cancel-edit,
++  .tasks-v2 .task-drawer-btn {
++    background: transparent;
++    border: 1px solid #1e293b;
++    color: #94a3b8;
+     cursor: pointer;
+-    border-bottom: 2px solid transparent;
+-    transition: color 0.15s, border-color 0.15s;
++    padding: 4px 10px;
++    border-radius: 4px;
++    font-family: inherit;
++    font-size: 11.5px;
++    transition: color 0.12s, background 0.12s, border-color 0.12s;
++  }
++  .tasks-v2 .task-drawer-save {
++    color: #2dd4bf;
++    border-color: rgba(45, 212, 191, 0.4);
++    background: rgba(45, 212, 191, 0.08);
++  }
++  .tasks-v2 .task-drawer-save:hover { background: rgba(45, 212, 191, 0.18); }
++  .tasks-v2 .task-drawer-cancel-edit:hover { color: #cbd5e1; border-color: #334155; }
++  .tasks-v2 .task-drawer-error {
++    color: #f87171;
++    font-size: 11px;
++    margin-left: auto;
++  }
++  .tasks-v2 .task-drawer-footer {
++    border-top: 1px solid #1f2944;
++    padding: 14px 18px;
++    display: flex;
++    gap: 8px;
++    flex-wrap: wrap;
++    justify-content: flex-end;
++  }
++  .tasks-v2 .task-drawer-btn:hover { color: #2dd4bf; border-color: #2dd4bf; background: rgba(45, 212, 191, 0.08); }
++  .tasks-v2 .task-drawer-btn-cancel { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
++  .tasks-v2 .task-drawer-btn-cancel:hover { background: rgba(248, 113, 113, 0.12); border-color: #f87171; }
++  .tasks-v2 .task-drawer-running { color: #fbbf24; font-size: 12px; padding: 4px 0; }
++
++  @media (max-width: 600px) {
++    .tasks-v2 .task-drawer { width: 100%; }
    }
 -  .tab:hover { color: #e0e0e0; }
 -  .tab.active { color: #7eb8da; border-bottom-color: #7eb8da; }
@@ -3322,7 +3891,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +2881,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3256,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -3337,7 +3906,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +2895,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3270,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -3363,7 +3932,26 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -207,9 +2935,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3296,17 @@ export function layout(title, activePath, bodyHtml) {
+       if (s == null) return '';
+       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+     }
+-    function timeAgo(ts) {
++    function timeAgo(ts, allowFuture) {
+       if (!ts) return 'never';
+       const d = new Date(ts);
+       const s = Math.floor((Date.now() - d.getTime()) / 1000);
++      if (allowFuture && s < 0) {
++        const f = -s;
++        if (f < 60) return 'in ' + f + 's';
++        if (f < 3600) return 'in ' + Math.floor(f/60) + 'm';
++        if (f < 86400) return 'in ' + Math.floor(f/3600) + 'h';
++        return 'in ' + Math.floor(f/86400) + 'd';
++      }
+       if (s < 60) return s + 's ago';
+       if (s < 3600) return Math.floor(s/60) + 'm ago';
+       if (s < 86400) return Math.floor(s/3600) + 'h ago';
+@@ -207,9 +3317,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -3380,7 +3968,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e5
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2956,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3338,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -6072,6 +6660,654 @@ index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052e
      </script>
    `);
  }
+diff --git a/dist/ui/pages/tasks.d.ts b/dist/ui/pages/tasks.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec57f8e02eb
+--- /dev/null
++++ b/dist/ui/pages/tasks.d.ts
+@@ -0,0 +1,3 @@
++export declare function tasksPage(): string;
++/** Server-side cronstrue helper used by /api/cron/describe. */
++export declare function cronDescribe(expr: string): string | null;
+diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf667d7da2b8
+--- /dev/null
++++ b/dist/ui/pages/tasks.js
+@@ -0,0 +1,633 @@
++import { layout } from '../layout.js';
++/**
++ * /dashboard/tasks — every active scheduled task across all sessions.
++ *
++ * Shell renders client-side. The shell calls /api/tasks (already
++ * permission-filtered server-side via canAccessAgentGroup) to get its
++ * data, groups by agentGroupId, and presents collapsible sections
++ * with toolbars + a side drawer for inline edit.
++ *
++ * cronstrue is loaded server-side and exposed to the client via a
++ * pre-rendered <script> tag (no separate bundle / no dynamic import
++ * — fits the existing dashboard's single-file SSR style). The page
++ * uses cronstrue for human-readable cron text in both the table cell
++ * and the drawer's live preview.
++ */
++import cronstrue from 'cronstrue';
++export function tasksPage() {
++    // Fetch /api/cronstrue isn't a thing; instead the cronstrue helper is
++    // loaded as a serializable module. The trick is that cronstrue ships an
++    // ESM build the dashboard server-side imports, but we need a client-side
++    // form. We solve this by exposing a small JS function which calls the
++    // dashboard's own /api/cron/parse — actually simpler: ship cronstrue's
++    // logic via a JSON-encoded helper. But the spec is clear: render with
++    // cronstrue. Here we lean on the server already having cronstrue, and
++    // expose a `/api/cron/describe?expr=...` route for the client to call.
++    // The toString result is also cached client-side per expression.
++    return layout('Tasks', '/dashboard/tasks', `
++    <div id="tasks-page" class="tasks-v2"><div class="ov-loading">Loading…</div></div>
++    <script>
++    (async () => {
++      try {
++        const data = await api('/api/tasks');
++        renderTasks(Array.isArray(data) ? data : (data && data.tasks) || []);
++      } catch (e) {
++        document.getElementById('tasks-page').innerHTML =
++          '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
++      }
++    })();
++
++    // Client-side cronstrue cache: one network round-trip per unique expr.
++    var cronCache = Object.create(null);
++    var cronInflight = Object.create(null);
++    async function cronDescribe(expr) {
++      if (!expr) return null;
++      if (cronCache[expr] !== undefined) return cronCache[expr];
++      if (cronInflight[expr]) return cronInflight[expr];
++      cronInflight[expr] = (async () => {
++        try {
++          var res = await api('/api/cron/describe?expr=' + encodeURIComponent(expr));
++          var text = (res && typeof res.text === 'string') ? res.text : null;
++          cronCache[expr] = text;
++          return text;
++        } catch (e) {
++          cronCache[expr] = null;
++          return null;
++        } finally {
++          delete cronInflight[expr];
++        }
++      })();
++      return cronInflight[expr];
++    }
++
++    var STATUSES = ['pending', 'processing', 'paused'];
++    var state = {
++      tasks: [],
++      filter: { search: '', statuses: { pending: true, processing: true, paused: true } },
++      collapsed: Object.create(null),
++      drawerTaskId: null,
++    };
++
++    async function renderTasks(rows) {
++      state.tasks = rows;
++
++      var headerHtml =
++        '<header class="ov-header">' +
++          '<div class="ov-header-title">' +
++            '<h2>Scheduled Tasks</h2>' +
++            '<p class="ov-subtitle">' +
++              'Every active task across every session — pause, resume, cancel, or edit prompt and schedule.' +
++            '</p>' +
++          '</div>' +
++        '</header>';
++
++      var toolbarHtml =
++        '<div class="tasks-toolbar">' +
++          '<input type="search" id="tasks-search" class="tasks-search"' +
++            ' placeholder="Search prompt…" autocomplete="off">' +
++          '<div class="tasks-chips" id="tasks-chips">' +
++            STATUSES.map(function(s) {
++              return '<button type="button" class="tasks-chip tasks-chip-' + s +
++                ' active" data-status="' + s + '">' +
++                '<span class="tasks-chip-dot"></span>' + s.charAt(0).toUpperCase() + s.slice(1) +
++                '</button>';
++            }).join('') +
++          '</div>' +
++          '<span class="tasks-count" id="tasks-count">' + rows.length + ' tasks</span>' +
++        '</div>';
++
++      var bodyEl = document.getElementById('tasks-page');
++      if (rows.length === 0) {
++        bodyEl.innerHTML = headerHtml + toolbarHtml +
++          '<div class="ov-loading tasks-empty">' +
++            'No scheduled tasks. Tasks are created when an agent calls ' +
++            '<code>schedule_task</code> from chat — try asking your agent to schedule something.' +
++          '</div>';
++        wireToolbar();
++        return;
++      }
++
++      bodyEl.innerHTML = headerHtml + toolbarHtml +
++        '<div id="tasks-groups">' + renderGroups(rows) + '</div>' +
++        renderDrawerScaffold();
++
++      wireToolbar();
++      wireGroups();
++      wireDrawer();
++      // Best-effort hydrate cron descriptions in already-rendered rows.
++      hydrateCronCells();
++    }
++
++    function renderGroups(rows) {
++      // Apply filters first.
++      var filtered = applyFilter(rows);
++      // Group by agentGroupId, alphabetical by agentGroupName.
++      var groupsMap = Object.create(null);
++      filtered.forEach(function(t) {
++        if (!groupsMap[t.agentGroupId]) {
++          groupsMap[t.agentGroupId] = { id: t.agentGroupId, name: t.agentGroupName, tasks: [] };
++        }
++        groupsMap[t.agentGroupId].tasks.push(t);
++      });
++      var groups = Object.keys(groupsMap).map(function(k) { return groupsMap[k]; });
++      groups.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
++      if (groups.length === 0) {
++        return '<div class="ov-loading">No tasks match the current filters.</div>';
++      }
++      return groups.map(renderGroup).join('');
++    }
++
++    function renderGroup(g) {
++      var counts = countByStatus(g.tasks);
++      var hasLive = (counts.pending || 0) + (counts.processing || 0) > 0;
++      var collapsedDefault = !hasLive;
++      var collapsed = state.collapsed[g.id];
++      if (collapsed === undefined) collapsed = collapsedDefault;
++      var arrow = collapsed ? '&#9656;' : '&#9662;';
++      return '<section class="tasks-group ' + (collapsed ? 'collapsed' : '') + '" data-group-id="' +
++          esc(g.id) + '">' +
++        '<header class="tasks-group-header" tabindex="0" role="button" aria-expanded="' +
++            (collapsed ? 'false' : 'true') + '">' +
++          '<span class="tasks-group-arrow">' + arrow + '</span>' +
++          '<h3 class="tasks-group-name">' + esc(g.name) + '</h3>' +
++          '<span class="tasks-group-counts">' + renderCounts(counts) + '</span>' +
++        '</header>' +
++        '<div class="tasks-group-body">' +
++          '<table class="tasks-table">' +
++            '<thead><tr>' +
++              '<th>Status</th><th>Prompt</th><th>Schedule</th><th>Next run</th><th class="tasks-actions-col">Actions</th>' +
++            '</tr></thead>' +
++            '<tbody>' + g.tasks.map(renderRow).join('') + '</tbody>' +
++          '</table>' +
++        '</div>' +
++      '</section>';
++    }
++
++    function renderCounts(counts) {
++      var parts = [];
++      if (counts.pending)    parts.push('<span class="tasks-group-count tasks-count-pending">'    + counts.pending    + ' pending</span>');
++      if (counts.processing) parts.push('<span class="tasks-group-count tasks-count-processing">' + counts.processing + ' running</span>');
++      if (counts.paused)     parts.push('<span class="tasks-group-count tasks-count-paused">'     + counts.paused     + ' paused</span>');
++      return parts.join(' ');
++    }
++
++    function countByStatus(tasks) {
++      var c = { pending: 0, processing: 0, paused: 0 };
++      tasks.forEach(function(t) { if (c[t.status] !== undefined) c[t.status]++; });
++      return c;
++    }
++
++    function renderRow(t) {
++      var sched = t.recurrence
++        ? '<span class="task-schedule" title="' + esc(t.recurrence) +
++            '" data-cron="' + esc(t.recurrence) + '">' + esc(t.recurrence) + '</span>'
++        : '<span class="task-badge task-badge-oneshot">one-shot</span>';
++      var nextRun = t.nextRun
++        ? '<span class="task-next-run" title="' + esc(t.nextRun) + '">' + esc(timeAgo(t.nextRun, true)) + '</span>'
++        : '<span class="task-next-run-empty">—</span>';
++      return '<tr class="task-row" data-task-id="' + esc(t.id) + '"' +
++          ' data-session-id="' + esc(t.sessionId) + '"' +
++          ' data-status="' + esc(t.status) + '"' +
++          ' data-search="' + esc((t.promptPreview || '').toLowerCase()) + '"' +
++          ' tabindex="0">' +
++        '<td><span class="task-status-badge task-status-' + esc(t.status) + '">' +
++          esc(t.status) + '</span></td>' +
++        '<td class="task-prompt" title="' + esc(t.promptPreview) + '">' + esc(t.promptPreview || '(empty)') + '</td>' +
++        '<td>' + sched + '</td>' +
++        '<td>' + nextRun + '</td>' +
++        '<td class="task-actions">' + renderActions(t) + '</td>' +
++      '</tr>';
++    }
++
++    function renderActions(t) {
++      if (t.status === 'pending') {
++        return actionBtn('pause', 'Pause', '&#10074;&#10074;') +
++          actionBtn('cancel', 'Cancel', '&#10005;', 'task-action-cancel');
++      }
++      if (t.status === 'paused') {
++        return actionBtn('resume', 'Resume', '&#9658;') +
++          actionBtn('cancel', 'Cancel', '&#10005;', 'task-action-cancel');
++      }
++      return '<span class="task-action-running" title="' +
++        'Currently running. Actions available again after the turn completes.">running</span>';
++    }
++
++    function actionBtn(action, label, icon, extraCls) {
++      return '<button type="button" class="task-action-btn ' + (extraCls || '') +
++        '" data-action="' + esc(action) + '" title="' + esc(label) + '" aria-label="' + esc(label) + '">' +
++        '<span class="task-action-icon">' + icon + '</span>' +
++        '<span class="task-action-label">' + esc(label) + '</span>' +
++        '</button>';
++    }
++
++    function applyFilter(tasks) {
++      var q = state.filter.search.trim().toLowerCase();
++      return tasks.filter(function(t) {
++        if (!state.filter.statuses[t.status]) return false;
++        if (q && (t.promptPreview || '').toLowerCase().indexOf(q) < 0) return false;
++        return true;
++      });
++    }
++
++    function rerenderGroups() {
++      var el = document.getElementById('tasks-groups');
++      if (!el) return;
++      el.innerHTML = renderGroups(state.tasks);
++      wireGroups();
++      hydrateCronCells();
++      var visible = applyFilter(state.tasks).length;
++      var countEl = document.getElementById('tasks-count');
++      if (countEl) {
++        countEl.textContent = visible + (visible === state.tasks.length ? ' tasks' : ' of ' + state.tasks.length + ' tasks');
++      }
++    }
++
++    function wireToolbar() {
++      var search = document.getElementById('tasks-search');
++      if (search) {
++        search.addEventListener('input', function() {
++          state.filter.search = search.value || '';
++          rerenderGroups();
++        });
++      }
++      var chipBox = document.getElementById('tasks-chips');
++      if (chipBox) {
++        chipBox.addEventListener('click', function(ev) {
++          var btn = ev.target.closest('.tasks-chip');
++          if (!btn) return;
++          var s = btn.getAttribute('data-status');
++          state.filter.statuses[s] = !state.filter.statuses[s];
++          btn.classList.toggle('active', !!state.filter.statuses[s]);
++          rerenderGroups();
++        });
++      }
++    }
++
++    function wireGroups() {
++      var groups = document.querySelectorAll('.tasks-group-header');
++      groups.forEach(function(h) {
++        h.addEventListener('click', function() { toggleGroup(h.parentElement); });
++        h.addEventListener('keydown', function(ev) {
++          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleGroup(h.parentElement); }
++        });
++      });
++      var rows = document.querySelectorAll('.task-row');
++      rows.forEach(function(row) {
++        row.addEventListener('click', function(ev) {
++          var btn = ev.target.closest('.task-action-btn');
++          if (btn) {
++            ev.stopPropagation();
++            var action = btn.getAttribute('data-action');
++            handleRowAction(row, action);
++            return;
++          }
++          openDrawer(row.getAttribute('data-task-id'));
++        });
++        row.addEventListener('keydown', function(ev) {
++          if (ev.key === 'Enter') openDrawer(row.getAttribute('data-task-id'));
++        });
++      });
++    }
++
++    function toggleGroup(section) {
++      if (!section) return;
++      var id = section.getAttribute('data-group-id');
++      var collapsed = section.classList.toggle('collapsed');
++      state.collapsed[id] = collapsed;
++      var arrow = section.querySelector('.tasks-group-arrow');
++      if (arrow) arrow.innerHTML = collapsed ? '&#9656;' : '&#9662;';
++      var header = section.querySelector('.tasks-group-header');
++      if (header) header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
++    }
++
++    async function hydrateCronCells() {
++      var cells = document.querySelectorAll('.task-schedule[data-cron]');
++      var seen = new Set();
++      cells.forEach(function(cell) {
++        var expr = cell.getAttribute('data-cron');
++        if (!expr || seen.has(expr)) return;
++        seen.add(expr);
++        cronDescribe(expr).then(function(text) {
++          if (!text) return;
++          var sameExprCells = document.querySelectorAll('.task-schedule[data-cron="' + cssEsc(expr) + '"]');
++          sameExprCells.forEach(function(c) {
++            // Keep the raw expression in the title attribute, swap displayed text.
++            c.textContent = text;
++            c.setAttribute('title', expr);
++          });
++        });
++      });
++    }
++
++    function cssEsc(s) { return String(s).replace(/(["\\\\])/g, '\\\\$1'); }
++
++    async function handleRowAction(row, action) {
++      var taskId = row.getAttribute('data-task-id');
++      var sessionId = row.getAttribute('data-session-id');
++      if (action === 'cancel') {
++        if (!confirm('Cancel task? This cannot be undone — for recurring tasks, future occurrences also stop.')) return;
++      }
++      try {
++        await mutate('POST', '/api/tasks/' + encodeURIComponent(taskId) + '/action', { sessionId: sessionId, action: action });
++        await refreshTasks();
++      } catch (e) {
++        alert('Action failed: ' + e.message);
++      }
++    }
++
++    async function refreshTasks() {
++      try {
++        var data = await api('/api/tasks');
++        var rows = Array.isArray(data) ? data : (data && data.tasks) || [];
++        state.tasks = rows;
++        rerenderGroups();
++        // If a drawer is open, refresh it from the new data.
++        if (state.drawerTaskId) refreshDrawer();
++      } catch (e) {
++        // leave state alone — next snapshot will be along in <60s.
++      }
++    }
++
++    function findTask(taskId) {
++      for (var i = 0; i < state.tasks.length; i++) {
++        if (state.tasks[i].id === taskId) return state.tasks[i];
++      }
++      return null;
++    }
++
++    // ── Drawer ────────────────────────────────────────────────────────
++
++    function renderDrawerScaffold() {
++      return '<div class="task-drawer-backdrop" id="task-drawer-backdrop" hidden></div>' +
++        '<aside class="task-drawer" id="task-drawer" hidden aria-modal="true" role="dialog" tabindex="-1">' +
++          '<header class="task-drawer-header">' +
++            '<h3 id="task-drawer-title">Task</h3>' +
++            '<button type="button" class="task-drawer-close" id="task-drawer-close" aria-label="Close">&#10005;</button>' +
++          '</header>' +
++          '<div class="task-drawer-body" id="task-drawer-body"></div>' +
++          '<footer class="task-drawer-footer" id="task-drawer-footer"></footer>' +
++        '</aside>';
++    }
++
++    function wireDrawer() {
++      var close = document.getElementById('task-drawer-close');
++      var bd = document.getElementById('task-drawer-backdrop');
++      if (close) close.addEventListener('click', closeDrawer);
++      if (bd) bd.addEventListener('click', closeDrawer);
++      document.addEventListener('keydown', function(ev) {
++        if (ev.key === 'Escape' && state.drawerTaskId) closeDrawer();
++      });
++    }
++
++    function openDrawer(taskId) {
++      var t = findTask(taskId);
++      if (!t) return;
++      state.drawerTaskId = taskId;
++      var drawer = document.getElementById('task-drawer');
++      var bd = document.getElementById('task-drawer-backdrop');
++      drawer.hidden = false;
++      bd.hidden = false;
++      // Force layout then add the open class so the slide-in transition runs.
++      requestAnimationFrame(function() {
++        drawer.classList.add('open');
++        bd.classList.add('open');
++      });
++      paintDrawer(t);
++      setTimeout(function() { drawer.focus(); }, 50);
++    }
++
++    function refreshDrawer() {
++      if (!state.drawerTaskId) return;
++      var t = findTask(state.drawerTaskId);
++      if (!t) { closeDrawer(); return; }
++      paintDrawer(t);
++    }
++
++    function paintDrawer(t) {
++      var titleEl = document.getElementById('task-drawer-title');
++      var bodyEl = document.getElementById('task-drawer-body');
++      var footEl = document.getElementById('task-drawer-footer');
++      var readonly = t.status === 'processing';
++
++      titleEl.textContent = (t.promptPreview || 'Task').slice(0, 60) + (t.promptPreview && t.promptPreview.length > 60 ? '…' : '');
++
++      bodyEl.innerHTML =
++        '<div class="task-drawer-section">' +
++          '<span class="task-status-badge task-status-' + esc(t.status) + '">' + esc(t.status) + '</span>' +
++          (t.recurrence ? '' : '<span class="task-badge task-badge-oneshot" style="margin-left:8px">one-shot</span>') +
++          (t.scriptPresent ? '<span class="task-badge task-badge-script" style="margin-left:8px">has script</span>' : '') +
++        '</div>' +
++        (readonly ? '<div class="task-drawer-running-note">Currently running. Actions and edits available again after the turn completes.</div>' : '') +
++        '<div class="task-drawer-section">' +
++          '<div class="task-drawer-field">' +
++            '<label class="task-drawer-label">Prompt</label>' +
++            '<div class="task-drawer-value" id="task-drawer-prompt-value"></div>' +
++            (readonly ? '' : '<button type="button" class="task-drawer-edit-btn" id="task-drawer-prompt-edit" title="Edit prompt" aria-label="Edit prompt">&#9998;</button>') +
++          '</div>' +
++        '</div>' +
++        '<div class="task-drawer-section">' +
++          '<div class="task-drawer-field">' +
++            '<label class="task-drawer-label">Schedule</label>' +
++            '<div class="task-drawer-value" id="task-drawer-cron-value"></div>' +
++            (readonly || !t.recurrence ? '' : '<button type="button" class="task-drawer-edit-btn" id="task-drawer-cron-edit" title="Edit schedule" aria-label="Edit schedule">&#9998;</button>') +
++          '</div>' +
++        '</div>' +
++        '<div class="task-drawer-section">' +
++          '<label class="task-drawer-label">Next run</label>' +
++          '<div class="task-drawer-value">' + (t.nextRun ? esc(t.nextRun) + ' <span class="task-drawer-rel">(' + esc(timeAgo(t.nextRun, true)) + ')</span>' : '—') + '</div>' +
++        '</div>' +
++        '<div class="task-drawer-section">' +
++          '<label class="task-drawer-label">Agent group</label>' +
++          '<div class="task-drawer-value">' + esc(t.agentGroupName) + '</div>' +
++        '</div>' +
++        '<div class="task-drawer-section">' +
++          '<label class="task-drawer-label">Created</label>' +
++          '<div class="task-drawer-value">' + esc(t.createdAt) + '</div>' +
++        '</div>' +
++        '<div class="task-drawer-section">' +
++          '<label class="task-drawer-label">Tries</label>' +
++          '<div class="task-drawer-value">' + (t.tries || 0) + '</div>' +
++        '</div>';
++
++      // Fill in the prompt and cron values (avoids HTML-injection by setting textContent).
++      var promptVal = document.getElementById('task-drawer-prompt-value');
++      if (promptVal) promptVal.textContent = t.promptPreview || '(empty)';
++      var cronVal = document.getElementById('task-drawer-cron-value');
++      if (cronVal) {
++        if (t.recurrence) {
++          cronVal.innerHTML = '<code class="task-drawer-cron-raw">' + esc(t.recurrence) + '</code>' +
++            ' <span class="task-drawer-cron-readable" id="task-drawer-cron-readable">…</span>';
++          cronDescribe(t.recurrence).then(function(text) {
++            var rEl = document.getElementById('task-drawer-cron-readable');
++            if (rEl) rEl.textContent = text || '';
++          });
++        } else {
++          cronVal.textContent = 'one-shot' + (t.processAfter ? ' @ ' + t.processAfter : '');
++        }
++      }
++
++      // Wire edit pencils.
++      var pe = document.getElementById('task-drawer-prompt-edit');
++      if (pe) pe.addEventListener('click', function() { editPrompt(t); });
++      var ce = document.getElementById('task-drawer-cron-edit');
++      if (ce) ce.addEventListener('click', function() { editCron(t); });
++
++      // Footer actions.
++      footEl.innerHTML = renderDrawerFooter(t);
++      var pauseBtn = document.getElementById('task-drawer-pause');
++      var resumeBtn = document.getElementById('task-drawer-resume');
++      var cancelBtn = document.getElementById('task-drawer-cancel');
++      if (pauseBtn) pauseBtn.addEventListener('click', function() { drawerAction('pause', t); });
++      if (resumeBtn) resumeBtn.addEventListener('click', function() { drawerAction('resume', t); });
++      if (cancelBtn) cancelBtn.addEventListener('click', function() {
++        if (!confirm('Cancel task? This cannot be undone — for recurring tasks, future occurrences also stop.')) return;
++        drawerAction('cancel', t);
++      });
++    }
++
++    function renderDrawerFooter(t) {
++      if (t.status === 'processing') {
++        return '<span class="task-drawer-running">Currently running.</span>';
++      }
++      var parts = [];
++      if (t.status === 'pending') parts.push('<button type="button" class="task-drawer-btn" id="task-drawer-pause">Pause</button>');
++      if (t.status === 'paused')  parts.push('<button type="button" class="task-drawer-btn" id="task-drawer-resume">Resume</button>');
++      parts.push('<button type="button" class="task-drawer-btn task-drawer-btn-cancel" id="task-drawer-cancel">Cancel task</button>');
++      return parts.join('');
++    }
++
++    async function drawerAction(action, t) {
++      try {
++        var result = await mutate('POST', '/api/tasks/' + encodeURIComponent(t.id) + '/action', {
++          sessionId: t.sessionId,
++          action: action,
++        });
++        if (action === 'cancel') closeDrawer();
++        if (result && result.task) {
++          // Optimistic patch.
++          for (var i = 0; i < state.tasks.length; i++) {
++            if (state.tasks[i].id === t.id) {
++              if (action !== 'cancel') {
++                state.tasks[i] = Object.assign({}, state.tasks[i], { status: result.task.status });
++              }
++            }
++          }
++        }
++        await refreshTasks();
++      } catch (e) {
++        alert('Action failed: ' + e.message);
++      }
++    }
++
++    function editPrompt(t) {
++      var fieldEl = document.getElementById('task-drawer-prompt-value');
++      if (!fieldEl) return;
++      var existing = t.promptPreview || '';
++      fieldEl.innerHTML =
++        '<textarea class="task-drawer-textarea" id="task-drawer-prompt-input" rows="4">' + esc(existing) + '</textarea>' +
++        '<div class="task-drawer-edit-actions">' +
++          '<button type="button" class="task-drawer-save" id="task-drawer-prompt-save">Save</button>' +
++          '<button type="button" class="task-drawer-cancel-edit" id="task-drawer-prompt-cancel">Cancel</button>' +
++          '<span class="task-drawer-error" id="task-drawer-prompt-error"></span>' +
++        '</div>';
++      var input = document.getElementById('task-drawer-prompt-input');
++      if (input) input.focus();
++      var pe = document.getElementById('task-drawer-prompt-edit');
++      if (pe) pe.style.display = 'none';
++      document.getElementById('task-drawer-prompt-save').addEventListener('click', async function() {
++        var newPrompt = input.value;
++        try {
++          await mutate('PATCH', '/api/tasks/' + encodeURIComponent(t.id), { sessionId: t.sessionId, prompt: newPrompt });
++          await refreshTasks();
++        } catch (e) {
++          var err = document.getElementById('task-drawer-prompt-error');
++          if (err) err.textContent = e.message;
++        }
++      });
++      document.getElementById('task-drawer-prompt-cancel').addEventListener('click', function() {
++        paintDrawer(t);
++      });
++    }
++
++    function editCron(t) {
++      var fieldEl = document.getElementById('task-drawer-cron-value');
++      if (!fieldEl) return;
++      var existing = t.recurrence || '';
++      fieldEl.innerHTML =
++        '<input type="text" class="task-drawer-input" id="task-drawer-cron-input" value="' + esc(existing) + '" placeholder="0 9 * * *">' +
++        '<div class="task-drawer-cron-preview" id="task-drawer-cron-preview"></div>' +
++        '<div class="task-drawer-edit-actions">' +
++          '<button type="button" class="task-drawer-save" id="task-drawer-cron-save">Save</button>' +
++          '<button type="button" class="task-drawer-cancel-edit" id="task-drawer-cron-cancel">Cancel</button>' +
++          '<span class="task-drawer-error" id="task-drawer-cron-error"></span>' +
++        '</div>';
++      var input = document.getElementById('task-drawer-cron-input');
++      var preview = document.getElementById('task-drawer-cron-preview');
++      var debounceTimer = null;
++      function updatePreview() {
++        var expr = input.value.trim();
++        if (!expr) { preview.textContent = '(no schedule)'; preview.classList.remove('error'); return; }
++        cronDescribe(expr).then(function(text) {
++          if (text) {
++            preview.textContent = text;
++            preview.classList.remove('error');
++          } else {
++            preview.textContent = 'invalid cron expression';
++            preview.classList.add('error');
++          }
++        });
++      }
++      input.addEventListener('input', function() {
++        if (debounceTimer) clearTimeout(debounceTimer);
++        debounceTimer = setTimeout(updatePreview, 150);
++      });
++      updatePreview();
++      input.focus();
++      var ce = document.getElementById('task-drawer-cron-edit');
++      if (ce) ce.style.display = 'none';
++      document.getElementById('task-drawer-cron-save').addEventListener('click', async function() {
++        var newCron = input.value.trim();
++        try {
++          await mutate('PATCH', '/api/tasks/' + encodeURIComponent(t.id), {
++            sessionId: t.sessionId,
++            recurrence: newCron === '' ? null : newCron,
++          });
++          await refreshTasks();
++        } catch (e) {
++          var err = document.getElementById('task-drawer-cron-error');
++          if (err) err.textContent = e.message;
++        }
++      });
++      document.getElementById('task-drawer-cron-cancel').addEventListener('click', function() {
++        paintDrawer(t);
++      });
++    }
++
++    function closeDrawer() {
++      state.drawerTaskId = null;
++      var drawer = document.getElementById('task-drawer');
++      var bd = document.getElementById('task-drawer-backdrop');
++      if (drawer) {
++        drawer.classList.remove('open');
++        setTimeout(function() { drawer.hidden = true; }, 240);
++      }
++      if (bd) {
++        bd.classList.remove('open');
++        setTimeout(function() { bd.hidden = true; }, 240);
++      }
++    }
++    </script>
++  `);
++}
++/**
++ * Server-side cron describer used by /api/cron/describe.
++ * Returns a human-readable string or null on parse failure.
++ */
++export function cronDescribe(expr) {
++    if (typeof expr !== 'string' || expr.length === 0) return null;
++    try {
++        return cronstrue.toString(expr);
++    } catch {
++        return null;
++    }
++}
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
 index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9de659d44 100644
 --- a/dist/ui/pages/users.js
@@ -7232,14 +8468,15 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5325aa6b39234a12e6e9b5cec731604d318f5028 100644
+index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5d6a76e243b21fbde07dbe495537523ec0d90ed3 100644
 --- a/package.json
 +++ b/package.json
-@@ -26,6 +26,9 @@
+@@ -26,6 +26,10 @@
    "files": [
      "dist/**/*"
    ],
 +  "dependencies": {
++    "cronstrue": "2.50.0",
 +    "marked": "14.1.4"
 +  },
    "devDependencies": {

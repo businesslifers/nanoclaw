@@ -1,11 +1,11 @@
 ---
 name: add-dashboard-pro
-description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, list/card view toggle on Agent Groups, agent/sub-agent rename with audit log, and a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes. Requires /add-dashboard to have been run first.
+description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, list/card view toggle on Agent Groups, agent/sub-agent rename with audit log, a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes, and a /dashboard/tasks page with cancel/pause/resume/edit actions for scheduled tasks. Requires /add-dashboard to have been run first.
 ---
 
 # /add-dashboard-pro — businesslifers dashboard customizations
 
-Adds eight things on top of the base `/add-dashboard` install:
+Adds nine things on top of the base `/add-dashboard` install:
 
 1. **Wiki page redesign** — restyles the dashboard's `/dashboard/wikis` route (markdown rendering, sidebar layout). Surfaces YAML frontmatter as a metadata bar above the article — `verdict:` (worth-exploring / interesting-but-not-now / pass) as a colored badge, `evaluated:` and `updated:` dates, a clickable source link (preferring `url:` for the href, with `source:` as label fallback), and `tags:` as pills. Code blocks get a hover-revealed copy-to-clipboard button.
 2. **Per-container CPU + memory columns** on the `/dashboard/sessions` table, with bar visualisations and color thresholds.
@@ -15,6 +15,7 @@ Adds eight things on top of the base `/add-dashboard` install:
 6. **Branding** — sidebar header reads "Dashboard Pro" with the NanoClaw icon next to it, and the same SVG serves as the browser favicon. The icon is inlined into the layout as a base64 data URL (no separate static asset to host or route). Source SVG ships in `resources/nanoclaw-icon.svg`; if it changes, re-run svgo and re-encode the `data:image/svg+xml;base64,…` string in the patch.
 7. **CRUD foundation + agent/sub-agent rename** — first write capability on the dashboard. Hover any agent (card view, list view, and the Overview hierarchy) and a pencil button activates an inline editor; submit `PATCH /api/agent-groups/:id` with `{ name }` and the host validates, authorizes via `canAccessAgentGroup`/`hasAdminPrivilege`, runs `updateAgentGroup` + audit row in a single transaction, then nudges the pusher so the new name appears in <1s. The `id` and `folder` are immutable; `groups/<folder>/container.json` `groupName`/`assistantName` re-sync on the next container spawn (`src/container-runner.ts:423-428`); OneCLI display name re-applies on the next session via the existing `ensureAgent` call. No container restart required. Foundation pieces also added so future write features layer on cleanly: `mutators` + `resolveActor` options on `startDashboard`, double-submit `nc-csrf` cookie + `X-Dashboard-CSRF` header, and `dispatchMutating` for non-GET routes.
 8. **Audit log + page** — a new `dashboard_audit` table (migration `014-dashboard-audit`) records every mutator call (`actor_user_id`, `action`, `target_type`, `target_id`, before/after JSON, ts). The `/dashboard/audit` page renders the latest rows with action + target filters and search. Visible immediately after the first dashboard write so operators can audit changes without grepping logs.
+9. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
 
 ## What this skill is NOT
 
@@ -34,6 +35,7 @@ grep -q '@nanoco/nanoclaw-dashboard' package.json 2>/dev/null \
 [ -f src/dashboard-pusher.ts ] || problems+=("src/dashboard-pusher.ts missing — run /add-dashboard first")
 [ -f src/container-runner.ts ] || problems+=("src/container-runner.ts missing")
 [ ! -f src/container-stats.ts ] || problems+=("src/container-stats.ts already exists — skill may already be applied")
+[ ! -f src/dashboard-tasks.ts ] || problems+=("src/dashboard-tasks.ts already exists — skill may already be applied")
 [ ! -f patches/@nanoco__nanoclaw-dashboard@0.3.0.patch ] \
   || problems+=("patches/@nanoco__nanoclaw-dashboard@0.3.0.patch already exists — skill may already be applied")
 if [ ${#problems[@]} -gt 0 ]; then
@@ -85,6 +87,24 @@ cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.ts            s
 cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.test.ts       src/db/dashboard-audit.test.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.ts            src/dashboard-mutators.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts       src/dashboard-mutators.test.ts
+
+# Tasks-page collector helper (consumed by the customised pusher) + tests
+cp .claude/skills/add-dashboard-pro/resources/dashboard-tasks.ts               src/dashboard-tasks.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-tasks.test.ts          src/dashboard-tasks.test.ts
+```
+
+The tasks page also requires a host wiring change: extend the `startDashboard(...)` call in `src/index.ts` to pass a `permissions: { canAccessAgentGroup }` callback so the dashboard's `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package:
+
+```ts
+// src/index.ts — alongside the existing startDashboard call
+import { canAccessAgentGroup } from './modules/permissions/access.js';
+// ...
+startDashboard({
+  // ...existing fields (mutators, resolveActor, etc.)
+  permissions: {
+    canAccessAgentGroup: (userId, agentGroupId) => canAccessAgentGroup(userId, agentGroupId).allowed,
+  },
+});
 ```
 
 Then edit `src/db/migrations/index.ts` to register `migration014`, edit `src/dashboard-pusher.ts` to import `getRecentAudit` + export `nudgePusher` + include `audit: getRecentAudit(200)` in the snapshot, and edit `src/index.ts` to pass `mutators` + `resolveActor` into `startDashboard` via `buildDashboardMutatorContext()`. The skill ships these snippets in `resources/` for copy/paste:
@@ -154,10 +174,10 @@ If `pnpm install` complains about `minimumReleaseAge` or `onlyBuiltDependencies`
 ### Tests
 
 ```bash
-pnpm exec vitest run src/container-stats.test.ts
+pnpm exec vitest run src/container-stats.test.ts src/dashboard-tasks.test.ts src/dashboard-mutators.test.ts
 ```
 
-Expect 20 tests passing.
+Expect: container-stats 20 tests, dashboard-tasks 9 tests, dashboard-mutators 37 tests — all passing.
 
 ### Restart and check the dashboard
 
@@ -177,14 +197,20 @@ On **Agent Groups**, the toolbar shows a list/card toggle (rightmost control, af
 
 The wiki redesign is visible at `/dashboard/wikis`.
 
+On **Tasks** (new nav entry between Sessions and Audit), the toolbar shows a search box and status chips (Pending / Processing / Paused). Below it, sections per agent group containing live scheduled tasks. Click a row to open the side drawer; edit prompt or cron and Save — the row updates in <1s via `nudgePusher`. Cancel (with confirmation) removes the task from the page; the audit log on `/dashboard/audit` shows a `task.cancel` row immediately. For `processing` tasks, the drawer is read-only and shows "Currently running" — actions reactivate when the turn completes. Cron expressions render human-readable; raw cron is in the schedule cell's tooltip and the drawer's edit input. A non-admin member of an agent group only sees that group's tasks; owners and global admins see everything.
+
 ## Rollback
 
 ```bash
 rm src/container-stats.ts src/container-stats.test.ts
+rm src/dashboard-tasks.ts src/dashboard-tasks.test.ts
 rm patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
 # Remove the patchedDependencies entry from pnpm-workspace.yaml
 # Manually revert src/dashboard-pusher.ts (re-run /add-dashboard's pusher copy step)
 # Manually remove the getActiveContainerNames export from src/container-runner.ts
+# Manually remove the tasks mutators from src/dashboard-mutators.ts (the cancelTask/pauseTask/resumeTask/updateTask exports + the helpers under the "Task mutators" header)
+# Manually remove the permissions callback from the startDashboard call in src/index.ts
+# Manually remove cronstrue from package.json then re-pin via pnpm install
 pnpm install
 pnpm run build
 ```
