@@ -46,7 +46,5 @@ export function appendAudit(input: AppendAuditInput, db: Database.Database = get
 }
 
 export function getRecentAudit(limit = 200): DashboardAuditRow[] {
-  return getDb()
-    .prepare('SELECT * FROM dashboard_audit ORDER BY id DESC LIMIT ?')
-    .all(limit) as DashboardAuditRow[];
+  return getDb().prepare('SELECT * FROM dashboard_audit ORDER BY id DESC LIMIT ?').all(limit) as DashboardAuditRow[];
 }
