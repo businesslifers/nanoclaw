@@ -9,11 +9,11 @@
  * DB; negligible at install sizes we care about.
  */
 import Database from 'better-sqlite3';
-import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, TIMEZONE } from './config.js';
+import { TIMEZONE } from './config.js';
 import { log } from './log.js';
+import { inboundDbPath } from './session-manager.js';
 
 export interface TaskSummary {
   id: string;
@@ -51,7 +51,7 @@ interface TaskRow {
 }
 
 export function collectTasksForSession(sessionRef: SessionRef): TaskSummary[] {
-  const dbPath = path.join(DATA_DIR, 'v2-sessions', sessionRef.sessionId, 'inbound.db');
+  const dbPath = inboundDbPath(sessionRef.agentGroupId, sessionRef.sessionId);
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true, fileMustExist: true });

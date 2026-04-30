@@ -78,7 +78,7 @@ function seedSessionWithTasks(
     created_at: now(),
   } as never);
 
-  const dir = path.join(TEST_DATA_DIR, 'v2-sessions', sessionId);
+  const dir = path.join(TEST_DATA_DIR, 'v2-sessions', agentGroupId, sessionId);
   fs.mkdirSync(dir, { recursive: true });
   const dbPath = path.join(dir, 'inbound.db');
   ensureSchema(dbPath, 'inbound');

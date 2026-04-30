@@ -8,12 +8,10 @@
  * pusher to push immediately so the UI refreshes within ~1s.
  */
 import type { IncomingMessage } from 'http';
-import path from 'path';
 import Database from 'better-sqlite3';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR } from './config.js';
 import { appendAudit } from './db/dashboard-audit.js';
 import { getAgentGroup, updateAgentGroup } from './db/agent-groups.js';
 import { getDb } from './db/connection.js';
@@ -28,6 +26,7 @@ import {
   updateTask as updateTaskPrim,
   type TaskUpdate,
 } from './modules/scheduling/db.js';
+import { inboundDbPath } from './session-manager.js';
 import { nudgePusher } from './dashboard-pusher.js';
 
 export class MutatorAuthError extends Error {
@@ -182,9 +181,8 @@ export interface TaskMutatorResult {
   task: TaskRowSummary | null;
 }
 
-function openSessionInboundDb(sessionId: string): Database.Database {
-  const dbPath = path.join(DATA_DIR, 'v2-sessions', sessionId, 'inbound.db');
-  return new Database(dbPath);
+function openSessionInboundDb(agentGroupId: string, sessionId: string): Database.Database {
+  return new Database(inboundDbPath(agentGroupId, sessionId));
 }
 
 function readTaskRow(db: Database.Database, taskId: string): TaskRowSummary | undefined {
@@ -221,7 +219,7 @@ export function cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMuta
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
-  const inDb = openSessionInboundDb(args.sessionId);
+  const inDb = openSessionInboundDb(session.agent_group_id, args.sessionId);
   try {
     const before = readTaskRow(inDb, args.taskId);
     if (!before) throw new MutatorNotFoundError(`task ${args.taskId} not found`);
@@ -261,7 +259,7 @@ export function pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutat
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
-  const inDb = openSessionInboundDb(args.sessionId);
+  const inDb = openSessionInboundDb(session.agent_group_id, args.sessionId);
   try {
     const before = readTaskRow(inDb, args.taskId);
     if (!before) throw new MutatorNotFoundError(`task ${args.taskId} not found`);
@@ -301,7 +299,7 @@ export function resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMuta
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
-  const inDb = openSessionInboundDb(args.sessionId);
+  const inDb = openSessionInboundDb(session.agent_group_id, args.sessionId);
   try {
     const before = readTaskRow(inDb, args.taskId);
     if (!before) throw new MutatorNotFoundError(`task ${args.taskId} not found`);
@@ -353,7 +351,7 @@ export function updateTask(args: UpdateTaskMutatorArgs, actorUserId: string): Ta
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
-  const inDb = openSessionInboundDb(args.sessionId);
+  const inDb = openSessionInboundDb(session.agent_group_id, args.sessionId);
   try {
     const before = readTaskRow(inDb, args.taskId);
     if (!before) throw new MutatorNotFoundError(`task ${args.taskId} not found`);

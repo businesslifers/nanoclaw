@@ -29,8 +29,8 @@ interface SeedRow {
   timestamp?: string;
 }
 
-function seedSession(sessionId: string, rows: SeedRow[]): void {
-  const dir = path.join(TEST_DIR, 'v2-sessions', sessionId);
+function seedSession(agentGroupId: string, sessionId: string, rows: SeedRow[]): void {
+  const dir = path.join(TEST_DIR, 'v2-sessions', agentGroupId, sessionId);
   fs.mkdirSync(dir, { recursive: true });
   const dbPath = path.join(dir, 'inbound.db');
   ensureSchema(dbPath, 'inbound');
@@ -75,7 +75,7 @@ describe('collectTasks', () => {
   });
 
   it("includes only kind='task' rows in live statuses", () => {
-    seedSession('s1', [
+    seedSession('ag1', 's1', [
       { id: 't1', kind: 'task', status: 'pending', content: JSON.stringify({ prompt: 'A' }) },
       { id: 't2', kind: 'task', status: 'completed', content: JSON.stringify({ prompt: 'B' }) },
       { id: 't3', kind: 'chat', status: 'pending', content: JSON.stringify({ text: 'hi' }) },
@@ -89,7 +89,7 @@ describe('collectTasks', () => {
 
   it('decorates rows with prompt preview, script flag, and next run', () => {
     const longPrompt = 'x'.repeat(200);
-    seedSession('s1', [
+    seedSession('ag1', 's1', [
       {
         id: 't1',
         status: 'pending',
@@ -111,7 +111,7 @@ describe('collectTasks', () => {
   });
 
   it('uses process_after as nextRun for one-shot tasks', () => {
-    seedSession('s1', [
+    seedSession('ag1', 's1', [
       {
         id: 't1',
         status: 'pending',
@@ -126,7 +126,7 @@ describe('collectTasks', () => {
   });
 
   it('falls back to process_after when recurrence is malformed', () => {
-    seedSession('s1', [
+    seedSession('ag1', 's1', [
       {
         id: 't1',
         status: 'pending',
@@ -145,7 +145,7 @@ describe('collectTasks', () => {
   });
 
   it('survives a malformed content JSON without throwing', () => {
-    seedSession('s1', [{ id: 't1', status: 'pending', content: 'not json' }]);
+    seedSession('ag1', 's1', [{ id: 't1', status: 'pending', content: 'not json' }]);
     const [task] = collectTasksForSession(refA);
     expect(task.id).toBe('t1');
     expect(task.promptPreview).toBe('');
@@ -153,8 +153,8 @@ describe('collectTasks', () => {
   });
 
   it('aggregates tasks across multiple sessions in input order', () => {
-    seedSession('s1', [{ id: 't-a', status: 'pending' }]);
-    seedSession('s2', [{ id: 't-b', status: 'pending' }]);
+    seedSession('ag1', 's1', [{ id: 't-a', status: 'pending' }]);
+    seedSession('ag2', 's2', [{ id: 't-b', status: 'pending' }]);
     const tasks = collectTasks([refA, refB]);
     expect(tasks.map((t) => t.id)).toEqual(['t-a', 't-b']);
     expect(tasks[0].agentGroupName).toBe('Group A');
@@ -162,7 +162,7 @@ describe('collectTasks', () => {
   });
 
   it('keeps short prompts intact (no ellipsis)', () => {
-    seedSession('s1', [{ id: 't1', status: 'pending', content: JSON.stringify({ prompt: 'short' }) }]);
+    seedSession('ag1', 's1', [{ id: 't1', status: 'pending', content: JSON.stringify({ prompt: 'short' }) }]);
     const [task] = collectTasksForSession(refA);
     expect(task.promptPreview).toBe('short');
   });
