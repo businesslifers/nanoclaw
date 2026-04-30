@@ -56,9 +56,10 @@ The host's existing dashboard pusher already iterates database state every 60 s 
    ```sql
    SELECT id, status, content, process_after, recurrence, series_id, timestamp, tries
    FROM messages_in
-   WHERE (process_after IS NOT NULL OR recurrence IS NOT NULL)
+   WHERE kind = 'task'
      AND status IN ('pending','processing','paused')
    ```
+   `kind='task'` is the canonical filter — `insertTask` in `src/modules/scheduling/db.ts` writes that literal. Filtering on `process_after IS NOT NULL` would miss paused tasks (whose `process_after` may be null) and would catch non-task rows that happen to use that column.
 4. Decorate each row with: `sessionId`, `agentGroupId`, `agentGroupName`, `nextRun` (computed: for one-shot tasks `process_after`; for recurring tasks the next firing per `cron-parser`), `promptPreview` (first 80 chars of parsed `content.prompt`), `scriptPresent` (boolean from `content.script != null`).
 5. Bundle as `tasks: TaskSummary[]` in the snapshot payload.
 
@@ -85,11 +86,12 @@ Each mutator:
 2. Authorizes via `canAccessAgentGroup(actor, session.agent_group_id)`. Returns 403 if denied.
 3. Opens the session's `inbound.db`.
 4. **Reads the task row pre-mutation** (for the audit `before` blob).
-5. Calls the corresponding primitive in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`).
-6. **Reads the task row post-mutation** (for `after` — null for cancel since the row is hard-deleted).
-7. Writes a `dashboard_audit` row.
-8. Calls `nudgePusher()` so the next snapshot includes the change within ~1 s.
-9. Returns `{ ok: true, task: <after-row-or-null> }`.
+5. Calls the corresponding primitive in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`). Each primitive matches by `id OR series_id` so it operates on the *live* row in a recurring chain rather than the historical row the agent originally saw — so the dashboard mutator passes only `taskId` and trusts the primitive's matching logic.
+6. **Reads the task row post-mutation** for the audit `after` blob. For `cancel`, this is the row in its new `completed` state with `recurrence=NULL`, not null.
+7. Computes `touched` (e.g., `cancelTask` is void, but the mutator can compare row state pre/post; `updateTask` already returns the count). When `touched=0`, returns 404 — the task either vanished or was already in a status the primitive ignores (cancel and pause both refuse to act on `processing` rows by design).
+8. Writes a `dashboard_audit` row.
+9. Calls `nudgePusher()` so the next snapshot includes the change within ~1 s.
+10. Returns `{ ok: true, task: <after-row> }`.
 
 ### Routes (in the dashboard package patch)
 
@@ -143,8 +145,16 @@ Triggered by clicking a task row (or the prompt cell). Slides in from the right 
 Each editable field has a pencil icon on hover. Click flips that field into edit mode, surfaces inline Save / Cancel buttons. Save calls `PATCH /api/tasks/:taskId`. The drawer stays open after save; the row in the table updates from the next push.
 
 **Drawer footer (sticky):**
-- `Cancel task` — destructive, red, behind a confirm dialog ("Cancel task X? This cannot be undone.").
-- `Pause` (when status is `pending` or `processing`) **or** `Resume` (when status is `paused`).
+
+Action visibility follows the underlying primitive's accepted statuses (defined in `src/modules/scheduling/db.ts`):
+
+| Status | Visible actions |
+|--------|-----------------|
+| `pending` | Pause + Cancel |
+| `paused` | Resume + Cancel |
+| `processing` | None — agent is actively running this turn; the row will transition naturally. (Editing is also locked out for `processing`.) A subdued informational note appears: "Currently running. Actions available again after the turn completes." |
+
+`Cancel task` is destructive (red) and behind a confirm dialog: "Cancel task X? This cannot be undone." After confirm, the row is set to `status='completed'` with cleared `recurrence` — for recurring tasks this means future occurrences stop; the chain is severed.
 
 ### Cron display
 
@@ -167,7 +177,7 @@ Every mutator writes a row to `dashboard_audit` (existing table, migration `014`
 | `target_type` | `task` |
 | `target_id` | `<sessionId>:<taskId>` (composite, since `taskId` alone isn't globally unique) |
 | `before` | full task row JSON (pre-mutation) |
-| `after` | full task row JSON (post-mutation), or `null` for `cancel` (row deleted) |
+| `after` | full task row JSON (post-mutation). For `cancel`, the row is *not* deleted — it transitions to `status='completed'` with `recurrence=NULL`, so `after` reflects that state. |
 | `ts` | now |
 
 Action filter chips on `/dashboard/audit` already accept arbitrary action strings; the new actions appear automatically. No migration needed.
