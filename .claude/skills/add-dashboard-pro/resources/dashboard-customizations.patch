@@ -4671,10 +4671,10 @@ index 38aa022..517e1e2 100644
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e..fa6ecd3 100644
+index 3e0cc9e..6f779f2 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,160 +1,269 @@
+@@ -1,160 +1,296 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -4924,8 +4924,17 @@ index 3e0cc9e..fa6ecd3 100644
 +            '</div>';
 +          }).join('') + '</div>';
 +          document.getElementById('ov-chart').innerHTML = chartHtml;
-+        }
-+
+         }
+ 
+-        // Groups list
+-        var groupsList = data.agentGroups.list || [];
+-        document.getElementById('groups').innerHTML = groupsList.length === 0
+-          ? '<div class="loading">No agent groups</div>'
+-          : '<table><tr><th>Name</th><th>Folder</th></tr>' +
+-            groupsList.map(function(g) {
+-              return '<tr><td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
+-              '<td>' + esc(g.folder) + '</td></tr>';
+-            }).join('') + '</table>';
 +        var totalSessions = data.sessions.active || 0;
 +        var runningSessions = data.sessions.running || 0;
 +        var registeredChannels = data.channels.registered || [];
@@ -4939,33 +4948,51 @@ index 3e0cc9e..fa6ecd3 100644
 +          infraHtml += '<div class="ov-infra-warn">' +
 +            health.reasons.map(function(r){ return esc(r); }).join(' · ') +
 +            '</div>';
-         }
++        }
 +        document.getElementById('ov-infra').innerHTML = infraHtml;
- 
--        // Groups list
--        var groupsList = data.agentGroups.list || [];
--        document.getElementById('groups').innerHTML = groupsList.length === 0
--          ? '<div class="loading">No agent groups</div>'
--          : '<table><tr><th>Name</th><th>Folder</th></tr>' +
--            groupsList.map(function(g) {
--              return '<tr><td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
--              '<td>' + esc(g.folder) + '</td></tr>';
--            }).join('') + '</table>';
++
 +        var agentGroupsList = Array.isArray(agentGroups) ? agentGroups : [];
 +        if (agentGroupsList.length === 0) {
 +          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No agent groups</div>';
 +        } else {
-+          var groupsHtml = '<div class="ov-panel"><table class="ov-table"><thead><tr><th>Name</th><th>Folder</th><th>Model</th></tr></thead><tbody>';
-+          groupsHtml += agentGroupsList.map(function(g) {
++          // Order leads first, with sub-agents immediately under their lead, mirroring
++          // the Agent Groups page list view. Reuses the .agent-groups-v2 CSS scope so
++          // tags, indent and link styling stay in lockstep.
++          var byId = {};
++          agentGroupsList.forEach(function(g){ byId[g.id] = g; });
++          var leads = agentGroupsList.filter(function(g){ return !g.parentId || !byId[g.parentId]; });
++          var childrenOf = {};
++          agentGroupsList.forEach(function(g){
++            if (g.parentId && byId[g.parentId]) {
++              (childrenOf[g.parentId] = childrenOf[g.parentId] || []).push(g);
++            }
++          });
++          var ordered = [];
++          leads.forEach(function(lead){
++            ordered.push({ g: lead, isSub: false });
++            (childrenOf[lead.id] || []).forEach(function(c){ ordered.push({ g: c, isSub: true }); });
++          });
++
++          var groupsHtml = '<div class="agent-groups-v2 ov-groups-embed"><div class="ov-panel ag-table-panel"><table class="ag-table"><thead><tr><th>Name</th><th>Folder</th><th>Model</th></tr></thead><tbody>';
++          groupsHtml += ordered.map(function(item) {
++            var g = item.g, isSub = item.isSub;
 +            var provider = (g.agent_provider || 'claude').toLowerCase();
 +            var model = g.model || 'default';
 +            var providerColor = provider === 'codex' ? 'green' : provider === 'opencode' ? 'yellow' : 'purple';
-+            return '<tr>' +
-+              '<td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
-+              '<td class="ov-text-dim">' + esc(g.folder) + '</td>' +
-+              '<td>' + badge(provider, providerColor) + ' <span class="ov-text-dim">' + esc(model) + '</span></td>' +
++            var leadBadge = !isSub
++              ? (g.subAgentCount > 0
++                  ? '<span class="ag-tag ag-tag-lead">LEAD</span>'
++                  : '<span class="ag-tag ag-tag-agent">AGENT</span>')
++              : '<span class="ag-tag ag-tag-sub">SUB-AGENT</span>';
++            var nameCell = isSub
++              ? '<span class="ag-arrow">↳</span><a class="ag-name-sub" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge
++              : '<a class="ag-name" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a> ' + leadBadge;
++            return '<tr class="ag-row' + (isSub ? ' ag-row-sub' : '') + '">' +
++              '<td class="ag-cell-name">' + nameCell + '</td>' +
++              '<td class="ag-cell-folder">' + esc(g.folder) + '</td>' +
++              '<td class="ag-cell-model">' + badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span></td>' +
 +              '</tr>';
-+          }).join('') + '</tbody></table></div>';
++          }).join('') + '</tbody></table></div></div>';
 +          document.getElementById('ov-groups').innerHTML = groupsHtml;
 +        }
  
