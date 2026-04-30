@@ -6411,7 +6411,7 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d3912cdd3b5b
+index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa53ce9376
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,630 @@
@@ -6722,7 +6722,7 @@ index 0000000000000000000000000000000000000000..83eaee0e75eb3e87a52ae7b359a6d391
 +      btn.addEventListener('click', (function (target, button) {
 +        return function () {
 +          var code = target.querySelector('code');
-+          var text = (code ? code.innerText : target.innerText).replace(/\n$/, '');
++          var text = (code ? code.innerText : target.innerText).replace(/\\n$/, '');
 +          var done = function () {
 +            button.textContent = 'Copied!';
 +            button.classList.add('wk-copy-btn-done');
