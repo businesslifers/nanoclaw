@@ -105,6 +105,8 @@ describe('collectTasks', () => {
     expect(task.sessionId).toBe('s1');
     expect(task.promptPreview.length).toBe(78);
     expect(task.promptPreview.endsWith('…')).toBe(true);
+    expect(task.prompt).toBe(longPrompt);
+    expect(task.prompt.length).toBe(200);
     expect(task.scriptPresent).toBe(true);
     expect(task.recurrence).toBe('0 9 * * *');
     expect(task.nextRun).toMatch(/^\d{4}-\d{2}-\d{2}T09:00:00/);
@@ -148,6 +150,7 @@ describe('collectTasks', () => {
     seedSession('ag1', 's1', [{ id: 't1', status: 'pending', content: 'not json' }]);
     const [task] = collectTasksForSession(refA);
     expect(task.id).toBe('t1');
+    expect(task.prompt).toBe('');
     expect(task.promptPreview).toBe('');
     expect(task.scriptPresent).toBe(false);
   });
@@ -164,6 +167,7 @@ describe('collectTasks', () => {
   it('keeps short prompts intact (no ellipsis)', () => {
     seedSession('ag1', 's1', [{ id: 't1', status: 'pending', content: JSON.stringify({ prompt: 'short' }) }]);
     const [task] = collectTasksForSession(refA);
+    expect(task.prompt).toBe('short');
     expect(task.promptPreview).toBe('short');
   });
 });
