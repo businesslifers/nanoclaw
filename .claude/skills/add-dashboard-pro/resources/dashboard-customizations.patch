@@ -6671,10 +6671,10 @@ index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf667d7da2b8
+index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb396706a6
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
-@@ -0,0 +1,633 @@
+@@ -0,0 +1,634 @@
 +import { layout } from '../layout.js';
 +/**
 + * /dashboard/tasks — every active scheduled task across all sessions.
@@ -6865,11 +6865,11 @@ index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf66
 +      return '<tr class="task-row" data-task-id="' + esc(t.id) + '"' +
 +          ' data-session-id="' + esc(t.sessionId) + '"' +
 +          ' data-status="' + esc(t.status) + '"' +
-+          ' data-search="' + esc((t.promptPreview || '').toLowerCase()) + '"' +
++          ' data-search="' + esc((t.prompt || t.promptPreview || '').toLowerCase()) + '"' +
 +          ' tabindex="0">' +
 +        '<td><span class="task-status-badge task-status-' + esc(t.status) + '">' +
 +          esc(t.status) + '</span></td>' +
-+        '<td class="task-prompt" title="' + esc(t.promptPreview) + '">' + esc(t.promptPreview || '(empty)') + '</td>' +
++        '<td class="task-prompt" title="' + esc(t.prompt || t.promptPreview) + '">' + esc(t.promptPreview || '(empty)') + '</td>' +
 +        '<td>' + sched + '</td>' +
 +        '<td>' + nextRun + '</td>' +
 +        '<td class="task-actions">' + renderActions(t) + '</td>' +
@@ -6901,7 +6901,7 @@ index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf66
 +      var q = state.filter.search.trim().toLowerCase();
 +      return tasks.filter(function(t) {
 +        if (!state.filter.statuses[t.status]) return false;
-+        if (q && (t.promptPreview || '').toLowerCase().indexOf(q) < 0) return false;
++        if (q && (t.prompt || t.promptPreview || '').toLowerCase().indexOf(q) < 0) return false;
 +        return true;
 +      });
 +    }
@@ -7086,7 +7086,8 @@ index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf66
 +      var footEl = document.getElementById('task-drawer-footer');
 +      var readonly = t.status === 'processing';
 +
-+      titleEl.textContent = (t.promptPreview || 'Task').slice(0, 60) + (t.promptPreview && t.promptPreview.length > 60 ? '…' : '');
++      var fullPrompt = t.prompt || t.promptPreview || '';
++      titleEl.textContent = (fullPrompt || 'Task').slice(0, 60) + (fullPrompt.length > 60 ? '…' : '');
 +
 +      bodyEl.innerHTML =
 +        '<div class="task-drawer-section">' +
@@ -7128,7 +7129,7 @@ index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf66
 +
 +      // Fill in the prompt and cron values (avoids HTML-injection by setting textContent).
 +      var promptVal = document.getElementById('task-drawer-prompt-value');
-+      if (promptVal) promptVal.textContent = t.promptPreview || '(empty)';
++      if (promptVal) promptVal.textContent = fullPrompt || '(empty)';
 +      var cronVal = document.getElementById('task-drawer-cron-value');
 +      if (cronVal) {
 +        if (t.recurrence) {
@@ -7199,9 +7200,9 @@ index 0000000000000000000000000000000000000000..794536990fc8028430fb15e04f96bf66
 +    function editPrompt(t) {
 +      var fieldEl = document.getElementById('task-drawer-prompt-value');
 +      if (!fieldEl) return;
-+      var existing = t.promptPreview || '';
++      var existing = t.prompt || t.promptPreview || '';
 +      fieldEl.innerHTML =
-+        '<textarea class="task-drawer-textarea" id="task-drawer-prompt-input" rows="4">' + esc(existing) + '</textarea>' +
++        '<textarea class="task-drawer-textarea" id="task-drawer-prompt-input" rows="6">' + esc(existing) + '</textarea>' +
 +        '<div class="task-drawer-edit-actions">' +
 +          '<button type="button" class="task-drawer-save" id="task-drawer-prompt-save">Save</button>' +
 +          '<button type="button" class="task-drawer-cancel-edit" id="task-drawer-prompt-cancel">Cancel</button>' +
