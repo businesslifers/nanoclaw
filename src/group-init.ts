@@ -81,6 +81,27 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
     initialized.push('skills/');
   }
 
+  // 3. groups/<folder>/wiki/ + sources/ — Karpathy-style persistent wiki.
+  // The wiki container skill (container/skills/wiki/) drives ingest/query/lint;
+  // here we just guarantee the on-disk skeleton exists so the agent has
+  // somewhere to file knowledge from day one.
+  const sourcesDir = path.join(groupDir, 'sources');
+  if (!fs.existsSync(sourcesDir)) {
+    fs.mkdirSync(sourcesDir, { recursive: true });
+    initialized.push('sources/');
+  }
+
+  const wikiDir = path.join(groupDir, 'wiki');
+  if (!fs.existsSync(wikiDir)) {
+    fs.mkdirSync(wikiDir, { recursive: true });
+    fs.mkdirSync(path.join(wikiDir, 'entities'), { recursive: true });
+    fs.mkdirSync(path.join(wikiDir, 'concepts'), { recursive: true });
+    fs.mkdirSync(path.join(wikiDir, 'topics'), { recursive: true });
+    fs.writeFileSync(path.join(wikiDir, 'index.md'), renderWikiIndex(group));
+    fs.writeFileSync(path.join(wikiDir, 'log.md'), renderWikiLog(group));
+    initialized.push('wiki/');
+  }
+
   if (initialized.length > 0) {
     log.info('Initialized group filesystem', {
       group: group.name,
@@ -89,4 +110,74 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
       steps: initialized,
     });
   }
+}
+
+function renderWikiIndex(group: AgentGroup): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `---
+scope: group
+group: ${group.folder}
+title: ${group.name}
+description: ${group.name} wiki — agent-maintained persistent knowledge base.
+updated: ${today}
+---
+
+# ${group.name} Wiki — Index
+
+Knowledge base for the **${group.name}** agent group. Read this file FIRST on any query so you can pull from existing pages instead of re-deriving from raw sources.
+
+## How to use this index
+
+Every wiki page should be linked here under its category with a one-line summary. New ingests append entries here AND to \`log.md\`. Stale or orphan pages are pruned during periodic lint passes.
+
+## Categories
+
+### Entities
+*People, places, organisations, products, projects.*
+
+_(none yet)_
+
+### Concepts
+*Ideas, frameworks, definitions.*
+
+_(none yet)_
+
+### Topics
+*Threads spanning multiple sources — investigations, recurring reports, ongoing themes._
+
+_(none yet)_
+
+## Cross-wiki links
+
+- Global wiki: \`/workspace/global/wiki/index.md\` (read-only from non-main groups; promote pages there when they become useful cross-group).
+`;
+}
+
+function renderWikiLog(group: AgentGroup): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `---
+scope: group
+group: ${group.folder}
+---
+
+# ${group.name} Wiki — Log
+
+Append-only chronological record of ingest, query, lint, and promotion events. One entry per operation. Format:
+
+\`\`\`
+## [YYYY-MM-DD] <event-type> | <one-line summary>
+
+<details>
+\`\`\`
+
+Where \`<event-type>\` is \`ingest\`, \`query\`, \`lint\`, \`promote\`, or \`prune\`.
+
+Recent entries are tail-readable: \`tail -50 log.md\` or \`grep "^## \\[" log.md | tail -10\`.
+
+---
+
+## [${today}] init | Wiki scaffolded at group creation
+
+Empty skeleton created by \`initGroupFilesystem\`. No sources ingested yet.
+`;
 }
