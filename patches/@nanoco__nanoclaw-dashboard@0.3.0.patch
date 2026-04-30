@@ -336,10 +336,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..8a6cb478de4f21c8a39ecf71ba9e74a6
 +    resolveActor?: ResolveActor;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e4073d851 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..3f12206fb360b8daa96fba0e365775e578a85145 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,2845 @@
+@@ -2,172 +2,2878 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -2345,19 +2345,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    padding: 4px 8px;
 +    border-radius: 6px;
 +    transition: background 0.15s, color 0.15s, border-color 0.15s;
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
--    margin-bottom: 8px;
++  }
 +  .users-v2 .us-menu-btn:hover {
 +    background: rgba(45, 212, 191, 0.08);
 +    color: var(--us-cyan);
 +    border-color: var(--us-border);
-   }
--  .sidebar nav a {
++  }
 +  .users-v2 .us-menu-popover {
 +    position: absolute;
 +    top: 100%;
@@ -2383,7 +2376,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    font-size: 12px;
 +    cursor: pointer;
 +    font-family: inherit;
-+  }
+   }
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
+-    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
+-    margin-bottom: 8px;
 +  .users-v2 .us-menu-item:hover { background: rgba(45, 212, 191, 0.10); color: var(--us-cyan); }
 +
 +  /* Footer */
@@ -2392,7 +2391,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    font-size: 12px;
 +    color: var(--us-text-dim);
 +    text-align: right;
-+  }
+   }
+-  .sidebar nav a {
 +
 +  /* ─────────────────────────────────────────────────────────
 +   * .logs-v2 — scoped redesign for the Logs page
@@ -2554,14 +2554,14 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    white-space: pre-wrap;
 +    word-break: break-all;
 +    color: var(--lg-text);
-   }
++  }
 +  .logs-v2 .lg-line:hover { background: rgba(45, 212, 191, 0.04); }
 +  .logs-v2 .lg-time { color: var(--lg-cyan); }
 +  .logs-v2 .lg-level {
 +    display: inline-block;
 +    min-width: 50px;
 +    font-weight: 700;
-+  }
+   }
 +  .logs-v2 .lg-msg-text { color: var(--lg-text); }
 +  .logs-v2 .lg-kv-key { color: #94a3b8; }
 +  .logs-v2 .lg-kv-val { color: var(--lg-text-label); }
@@ -2956,7 +2956,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    margin-top: 6px;
 +    font-size: 14px;
 +    color: #f1f5f9;
-+    font-weight: 600;
+     font-weight: 600;
 +    word-break: break-all;
 +  }
 +  .messages-v2 .mdt-pill {
@@ -2964,7 +2964,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    padding: 2px 9px;
 +    border-radius: 999px;
 +    font-size: 10.5px;
-     font-weight: 600;
++    font-weight: 600;
 +    text-transform: lowercase;
 +    border: 1px solid transparent;
 +  }
@@ -3123,10 +3123,10 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 -  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
 -  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
 -  .detail-value { color: #e0e0e0; font-size: 13px; }
--
+ 
 -  /* Loading */
 -  .loading { color: #666; font-style: italic; padding: 20px; }
- 
+-
 -  /* Select */
 -  select {
 -    background: #1a1a1a;
@@ -3211,14 +3211,14 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    font-size: 11px;
 +    font-weight: 600;
-   }
++  }
 +  .audit-v2 .audit-target-type {
 +    color: #64748b;
 +    font-size: 10.5px;
 +    text-transform: uppercase;
 +    letter-spacing: 0.5px;
 +    margin-right: 4px;
-+  }
+   }
 +  .audit-v2 .audit-target-id { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; }
 +  .audit-v2 .audit-json code {
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
@@ -3233,8 +3233,6 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 -  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
 -  .tab {
 -    padding: 8px 16px;
--    font-size: 13px;
--    color: #888;
 +  /* Inline editable name (rename feature) */
 +  .ag-name-edit {
 +    display: inline-flex;
@@ -3245,9 +3243,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    background: transparent;
 +    border: 0;
 +    color: #64748b;
-     cursor: pointer;
--    border-bottom: 2px solid transparent;
--    transition: color 0.15s, border-color 0.15s;
++    cursor: pointer;
 +    padding: 2px 4px;
 +    border-radius: 3px;
 +    line-height: 1;
@@ -3267,11 +3263,47 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
 +    border: 1px solid #2dd4bf;
 +    border-radius: 4px;
 +    padding: 2px 6px;
-+    font-size: 13px;
+     font-size: 13px;
+-    color: #888;
 +    font-family: inherit;
 +    min-width: 120px;
 +  }
 +  .ag-name-edit-input:focus { outline: none; }
++  .ag-name-edit-save,
++  .ag-name-edit-cancel {
++    background: transparent;
++    border: 1px solid transparent;
++    color: #94a3b8;
+     cursor: pointer;
+-    border-bottom: 2px solid transparent;
+-    transition: color 0.15s, border-color 0.15s;
++    padding: 0;
++    width: 22px;
++    height: 22px;
++    border-radius: 4px;
++    font-family: inherit;
++    font-size: 11px;
++    line-height: 1;
++    display: inline-flex;
++    align-items: center;
++    justify-content: center;
++    transition: color 0.12s, background 0.12s, border-color 0.12s;
++  }
++  .ag-name-edit-save {
++    color: #2dd4bf;
++    border-color: rgba(45, 212, 191, 0.35);
++    background: rgba(45, 212, 191, 0.1);
++  }
++  .ag-name-edit-save:hover {
++    color: #5eead4;
++    border-color: #2dd4bf;
++    background: rgba(45, 212, 191, 0.2);
++  }
++  .ag-name-edit-cancel:hover {
++    color: #f87171;
++    border-color: rgba(248, 113, 113, 0.35);
++    background: rgba(248, 113, 113, 0.1);
++  }
 +  .ag-name-edit-status {
 +    font-size: 11px;
 +    color: #f87171;
@@ -3290,7 +3322,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +2848,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +2881,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -3305,7 +3337,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +2862,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +2895,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -3331,7 +3363,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -207,9 +2902,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +2935,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -3348,7 +3380,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..6f5e83d35cb8fce8e7dc1c76873acf6e
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +2923,51 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +2956,51 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
