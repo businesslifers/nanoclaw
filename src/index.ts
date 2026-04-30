@@ -173,7 +173,9 @@ async function main(): Promise<void> {
   if (dashboardSecret) {
     const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
     const { startDashboardPusher } = await import('./dashboard-pusher.js');
-    startDashboard({ port: dashboardPort, secret: dashboardSecret });
+    const { buildDashboardMutatorContext } = await import('./dashboard-mutators.js');
+    const { mutators, resolveActor } = buildDashboardMutatorContext();
+    startDashboard({ port: dashboardPort, secret: dashboardSecret, mutators, resolveActor });
     startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });
   } else {
     log.info('Dashboard disabled (no DASHBOARD_SECRET)');

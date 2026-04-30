@@ -8,6 +8,7 @@ import http from 'http';
 import Database from 'better-sqlite3';
 
 import { getAllAgentGroups, getAgentGroup } from './db/agent-groups.js';
+import { getRecentAudit } from './db/dashboard-audit.js';
 import { listWikis } from './wiki/discovery.js';
 // Pricing table — USD per 1M tokens. Dashboard cost columns are
 // DEMONSTRATION ONLY: this install authenticates Claude via Claude Max/Pro
@@ -108,9 +109,11 @@ interface PusherConfig {
 let timer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setInterval> | null = null;
 let logOffset = 0;
+let activeConfig: PusherConfig | null = null;
 
 export function startDashboardPusher(config: PusherConfig): void {
   const interval = config.intervalMs || 60000;
+  activeConfig = config;
 
   // Push immediately on start, then on interval
   push(config).catch((err) => log.error('Dashboard push failed', { err }));
@@ -133,6 +136,23 @@ export function stopDashboardPusher(): void {
     clearInterval(logTimer);
     logTimer = null;
   }
+  activeConfig = null;
+}
+
+/**
+ * Trigger an immediate snapshot push and reset the interval. Called
+ * after a write mutator commits so the dashboard reflects the change
+ * within ~1s instead of waiting up to a full interval.
+ */
+export function nudgePusher(): void {
+  if (!activeConfig || !timer) return;
+  const config = activeConfig;
+  const interval = config.intervalMs || 60000;
+  clearInterval(timer);
+  push(config).catch((err) => log.error('Dashboard push failed', { err }));
+  timer = setInterval(() => {
+    push(config).catch((err) => log.error('Dashboard push failed', { err }));
+  }, interval);
 }
 
 /** Fire-and-forget POST to the dashboard. */
@@ -247,6 +267,7 @@ function collectSnapshot(): Record<string, unknown> {
     wikis: collectWikis(),
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
+    audit: getRecentAudit(200),
   };
 }
 

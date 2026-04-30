@@ -1,11 +1,11 @@
 ---
 name: add-dashboard-pro
-description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, list/card view toggle on Agent Groups, and a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes. Requires /add-dashboard to have been run first.
+description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, list/card view toggle on Agent Groups, agent/sub-agent rename with audit log, and a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes. Requires /add-dashboard to have been run first.
 ---
 
 # /add-dashboard-pro — businesslifers dashboard customizations
 
-Adds six things on top of the base `/add-dashboard` install:
+Adds eight things on top of the base `/add-dashboard` install:
 
 1. **Wiki page redesign** — restyles the dashboard's `/dashboard/wikis` route (markdown rendering, sidebar layout). Surfaces YAML frontmatter as a metadata bar above the article — `verdict:` (worth-exploring / interesting-but-not-now / pass) as a colored badge, `evaluated:` and `updated:` dates, a clickable source link (preferring `url:` for the href, with `source:` as label fallback), and `tags:` as pills. Code blocks get a hover-revealed copy-to-clipboard button.
 2. **Per-container CPU + memory columns** on the `/dashboard/sessions` table, with bar visualisations and color thresholds.
@@ -13,6 +13,8 @@ Adds six things on top of the base `/add-dashboard` install:
 4. **List / card view toggle on Agent Groups** — segmented control in the toolbar (next to Search + Models filter) flips between the existing dense table and a card grid. Cards group lead + sub-agents under collapsible team headers (LEAD/SUB-AGENT/AGENT tags, deterministic gradient avatars from agent id, sessions/running/folder stats, a pulsing dot when any session is running, optional usage badge). The current mode persists in `localStorage` under key `ag-view`; default is `cards`. Search and Model filters apply to both views simultaneously and hide group sections that end up empty after filtering. The **Overview page's Agent Groups section** mirrors the list view's hierarchy: leads first, sub-agents indented underneath with `↳`, same LEAD/AGENT/SUB-AGENT tags — reusing the `.agent-groups-v2` CSS scope so styling stays in lockstep.
 5. **CPU-pinned watchdog** — the host pusher tracks each container's CPU over a rolling 5-snapshot window (~5 minutes) and appends a reason to `health.reasons` for any container holding ≥80% CPU. The dashboard's existing health pill turns "degraded" automatically. Built after a v1 install once spent days at 98% CPU silently.
 6. **Branding** — sidebar header reads "Dashboard Pro" with the NanoClaw icon next to it, and the same SVG serves as the browser favicon. The icon is inlined into the layout as a base64 data URL (no separate static asset to host or route). Source SVG ships in `resources/nanoclaw-icon.svg`; if it changes, re-run svgo and re-encode the `data:image/svg+xml;base64,…` string in the patch.
+7. **CRUD foundation + agent/sub-agent rename** — first write capability on the dashboard. Hover any agent (card view, list view, and the Overview hierarchy) and a pencil button activates an inline editor; submit `PATCH /api/agent-groups/:id` with `{ name }` and the host validates, authorizes via `canAccessAgentGroup`/`hasAdminPrivilege`, runs `updateAgentGroup` + audit row in a single transaction, then nudges the pusher so the new name appears in <1s. The `id` and `folder` are immutable; `groups/<folder>/container.json` `groupName`/`assistantName` re-sync on the next container spawn (`src/container-runner.ts:423-428`); OneCLI display name re-applies on the next session via the existing `ensureAgent` call. No container restart required. Foundation pieces also added so future write features layer on cleanly: `mutators` + `resolveActor` options on `startDashboard`, double-submit `nc-csrf` cookie + `X-Dashboard-CSRF` header, and `dispatchMutating` for non-GET routes.
+8. **Audit log + page** — a new `dashboard_audit` table (migration `014-dashboard-audit`) records every mutator call (`actor_user_id`, `action`, `target_type`, `target_id`, before/after JSON, ts). The `/dashboard/audit` page renders the latest rows with action + target filters and search. Visible immediately after the first dashboard write so operators can audit changes without grepping logs.
 
 ## What this skill is NOT
 
@@ -71,6 +73,36 @@ The replacement adds:
 - Pinned-CPU reasons appended to `health.reasons` (which the dashboard's overview already renders).
 
 If the operator has previously customized `src/dashboard-pusher.ts` themselves, those edits will be lost. The operator should diff before/after and re-apply any local-only changes on top.
+
+### 3a. Add the dashboard CRUD foundation to the host
+
+Three host files come from upstream — copy them into place and wire them into `src/index.ts`:
+
+```bash
+# DB migration + helpers + mutators (skill resources track upstream copies)
+cp .claude/skills/add-dashboard-pro/resources/migrations-014-dashboard-audit.ts src/db/migrations/014-dashboard-audit.ts
+cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.ts            src/db/dashboard-audit.ts
+cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.test.ts       src/db/dashboard-audit.test.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.ts            src/dashboard-mutators.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts       src/dashboard-mutators.test.ts
+```
+
+Then edit `src/db/migrations/index.ts` to register `migration014`, edit `src/dashboard-pusher.ts` to import `getRecentAudit` + export `nudgePusher` + include `audit: getRecentAudit(200)` in the snapshot, and edit `src/index.ts` to pass `mutators` + `resolveActor` into `startDashboard` via `buildDashboardMutatorContext()`. The skill ships these snippets in `resources/` for copy/paste:
+
+```bash
+# index.ts wiring
+cp .claude/skills/add-dashboard-pro/resources/index-snippet.ts /tmp/index-snippet.ts  # human-applied
+```
+
+These are manual edits because `src/index.ts`, `src/dashboard-pusher.ts`, and `src/db/migrations/index.ts` are core code that other skills also touch — patching via sed risks future merge conflicts.
+
+Verify after editing:
+
+```bash
+grep -q 'buildDashboardMutatorContext' src/index.ts && \
+  grep -q 'nudgePusher' src/dashboard-pusher.ts && \
+  grep -q 'migration014' src/db/migrations/index.ts && echo OK
+```
 
 ### 3. Add the `getActiveContainerNames()` export to `src/container-runner.ts`
 
