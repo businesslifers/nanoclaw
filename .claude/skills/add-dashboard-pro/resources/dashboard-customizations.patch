@@ -3711,7 +3711,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    top: 0;
 +    right: 0;
 +    bottom: 0;
-+    width: 360px;
++    width: 720px;
 +    max-width: 100%;
 +    background: #0d1426;
 +    border-left: 1px solid #1f2944;
@@ -7204,7 +7204,7 @@ index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb
 +      if (!fieldEl) return;
 +      var existing = t.prompt || t.promptPreview || '';
 +      fieldEl.innerHTML =
-+        '<textarea class="task-drawer-textarea" id="task-drawer-prompt-input" rows="6">' + esc(existing) + '</textarea>' +
++        '<textarea class="task-drawer-textarea" id="task-drawer-prompt-input" rows="12">' + esc(existing) + '</textarea>' +
 +        '<div class="task-drawer-edit-actions">' +
 +          '<button type="button" class="task-drawer-save" id="task-drawer-prompt-save">Save</button>' +
 +          '<button type="button" class="task-drawer-cancel-edit" id="task-drawer-prompt-cancel">Cancel</button>' +
