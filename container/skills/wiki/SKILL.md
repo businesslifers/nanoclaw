@@ -8,8 +8,8 @@ description: Maintain a persistent, LLM-curated markdown wiki for the agent grou
 Two-tier markdown wiki maintained by the agent on behalf of the operator.
 
 ```
-/workspace/group/wiki/        ← this group's wiki (always read+write)
-/workspace/group/sources/     ← raw sources dropped here by the operator
+/workspace/agent/wiki/        ← this group's wiki (always read+write)
+/workspace/agent/sources/     ← raw sources dropped here by the operator
 
 /workspace/global/wiki/       ← shared cross-group wiki
                                   read+write for the MAIN agent (Janet, dm-with-adam)

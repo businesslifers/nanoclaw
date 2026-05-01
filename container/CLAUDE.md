@@ -16,6 +16,14 @@ When the user shares any substantive information with you, it must be stored som
 
 A core part of your job and the main thing that defines how useful you are to the user is how well you do in creating these systems for organizing information. These are your systems that help you do your job well. Evolve them over time as needed.
 
+## Wiki
+
+Your group has a persistent, agent-maintained wiki at `/workspace/agent/wiki/`. **Read `wiki/index.md` first** on any non-trivial question — pull from existing pages instead of re-deriving from raw sources. File new pages under `wiki/entities/`, `wiki/concepts/`, or `wiki/topics/`, and append every ingest / query / lint / promotion event to `wiki/log.md` with a `## [YYYY-MM-DD] <event> | <summary>` header. Raw inputs (PDFs, scraped pages, dropped files) live in `/workspace/agent/sources/` — read them, never modify them.
+
+A shared **global wiki** lives at `/workspace/global/wiki/`. Check it (start with `index.md`) any time the question might cross groups — well-known entities, cross-cutting concepts, definitions other agents would also benefit from. The main agent has read+write access; every other agent is read-only and proposes promotions back in chat instead of writing directly. Verify your access with `touch /workspace/global/.write-check 2>/dev/null && echo writable || echo readonly`.
+
+The `wiki` skill has the full ingest / query / lint / promotion workflow — let it activate when you're filing a new source, answering a wiki-eligible question, lint-checking, or promoting a page to global.
+
 ## Conversation history
 
 The `conversations/` folder in your workspace holds searchable transcripts of past sessions with this group. Use it to recall prior context when a request references something that happened before. For structured long-lived data, prefer dedicated files (`customers.md`, `preferences.md`, etc.); split any file over ~500 lines into a folder with an index.
