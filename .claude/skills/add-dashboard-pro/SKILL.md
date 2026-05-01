@@ -12,7 +12,7 @@ Adds nine things on top of the base `/add-dashboard` install:
 3. **Usage ($) column on the Agent Groups table** — sits between Model and Sessions, shows cumulative API-equivalent USD cost per agent group sourced from `/api/tokens/summary` (`tokens.byGroup[id].costUsd`). Useful for spotting which agents are chewing the most context. Empty rows show "—" instead of "$0.00" so they don't visually compete with active ones; values <$0.01 show as "<$0.01"; the cell `title` attribute carries the full 4-decimal value for hover.
 4. **List / card view toggle on Agent Groups** — segmented control in the toolbar (next to Search + Models filter) flips between the existing dense table and a card grid. Cards group lead + sub-agents under collapsible team headers (LEAD/SUB-AGENT/AGENT tags, deterministic gradient avatars from agent id, sessions/running/folder stats, a pulsing dot when any session is running, optional usage badge). The current mode persists in `localStorage` under key `ag-view`; default is `cards`. Search and Model filters apply to both views simultaneously and hide group sections that end up empty after filtering. The **Overview page's Agent Groups section** mirrors the list view's hierarchy: leads first, sub-agents indented underneath with `↳`, same LEAD/AGENT/SUB-AGENT tags — reusing the `.agent-groups-v2` CSS scope so styling stays in lockstep.
 5. **CPU-pinned watchdog** — the host pusher tracks each container's CPU over a rolling 5-snapshot window (~5 minutes) and appends a reason to `health.reasons` for any container holding ≥80% CPU. The dashboard's existing health pill turns "degraded" automatically. Built after a v1 install once spent days at 98% CPU silently.
-6. **Branding** — sidebar header reads "Dashboard Pro" with the NanoClaw icon next to it, and the same SVG serves as the browser favicon. The icon is inlined into the layout as a base64 data URL (no separate static asset to host or route). Source SVG ships in `resources/nanoclaw-icon.svg`; if it changes, re-run svgo and re-encode the `data:image/svg+xml;base64,…` string in the patch.
+6. **Branding** — sidebar header reads "Dashboard Pro" with a logo above it, and the same image serves as the browser favicon. The logo is inlined into the layout as a base64 data URL (no separate static asset to host or route). Defaults to the NanoClaw icon (`resources/nanoclaw-icon.svg`); operators can override per-install by dropping a `dashboard-logo.{svg,png,webp,jpg}` file at the install root before running step 4, or by setting `DASHBOARD_LOGO_PATH=path/to/logo.svg`. The skill bakes the chosen image into the patch at install time. Sidebar slot is 80×80 — square assets render best.
 7. **CRUD foundation + agent/sub-agent rename** — first write capability on the dashboard. Hover any agent (card view, list view, and the Overview hierarchy) and a pencil button activates an inline editor; submit `PATCH /api/agent-groups/:id` with `{ name }` and the host validates, authorizes via `canAccessAgentGroup`/`hasAdminPrivilege`, runs `updateAgentGroup` + audit row in a single transaction, then nudges the pusher so the new name appears in <1s. The `id` and `folder` are immutable; `groups/<folder>/container.json` `groupName`/`assistantName` re-sync on the next container spawn (`src/container-runner.ts:423-428`); OneCLI display name re-applies on the next session via the existing `ensureAgent` call. No container restart required. Foundation pieces also added so future write features layer on cleanly: `mutators` + `resolveActor` options on `startDashboard`, double-submit `nc-csrf` cookie + `X-Dashboard-CSRF` header, and `dispatchMutating` for non-GET routes.
 8. **Audit log + page** — a new `dashboard_audit` table (migration `014-dashboard-audit`) records every mutator call (`actor_user_id`, `action`, `target_type`, `target_id`, before/after JSON, ts). The `/dashboard/audit` page renders the latest rows with action + target filters and search. Visible immediately after the first dashboard write so operators can audit changes without grepping logs.
 9. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
@@ -143,13 +143,56 @@ This is a manual edit because `container-runner.ts` is core code, not a skill re
 grep -q 'getActiveContainerNames' src/container-runner.ts && echo OK
 ```
 
-### 4. Install the dashboard patch
+### 4. Install the dashboard patch (with optional custom logo)
+
+By default the patch ships with the NanoClaw icon as the sidebar logo and favicon. To use a custom logo, do either of:
+
+- Drop a file at the install root named `dashboard-logo.svg` (or `.png`, `.webp`, `.jpg`) before running this step — the skill auto-detects it.
+- Set `DASHBOARD_LOGO_PATH=path/to/your-logo.svg` to point at a file elsewhere (overrides the auto-detected one).
+
+The sidebar slot is 80×80 px, so square assets render best. SVG is recommended (sharp at any size + small payload). The chosen file is base64-encoded and baked into the patch — no separate asset is hosted, no runtime read.
 
 ```bash
+LOGO_PATH="${DASHBOARD_LOGO_PATH:-}"
+if [ -z "$LOGO_PATH" ]; then
+  for ext in svg png webp jpg jpeg; do
+    [ -f "dashboard-logo.$ext" ] && { LOGO_PATH="dashboard-logo.$ext"; break; }
+  done
+fi
+
 mkdir -p patches
-cp .claude/skills/add-dashboard-pro/resources/dashboard-customizations.patch \
-   patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
+SRC=.claude/skills/add-dashboard-pro/resources/dashboard-customizations.patch
+DST=patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
+
+if [ -n "$LOGO_PATH" ]; then
+  [ -f "$LOGO_PATH" ] || { echo "Logo file not found: $LOGO_PATH" >&2; exit 1; }
+  LOGO_PATH="$LOGO_PATH" SRC="$SRC" DST="$DST" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const ext = path.extname(process.env.LOGO_PATH).toLowerCase();
+    const mime = {
+      ".svg": "image/svg+xml",
+      ".png": "image/png",
+      ".webp": "image/webp",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+    }[ext];
+    if (!mime) { console.error("Unsupported logo format: " + ext); process.exit(1); }
+    const data = fs.readFileSync(process.env.LOGO_PATH).toString("base64");
+    const url = `data:${mime};base64,${data}`;
+    const src = fs.readFileSync(process.env.SRC, "utf8");
+    let n = 0;
+    const out = src.replace(/(NANOCLAW_ICON_DATA_URL = \x27)data:[^\x27]+/, (_, p) => { n++; return p + url; });
+    if (n !== 1) { console.error("expected 1 NANOCLAW_ICON_DATA_URL match, got " + n); process.exit(1); }
+    fs.writeFileSync(process.env.DST, out);
+    console.log("Baked custom logo from " + process.env.LOGO_PATH + " into " + process.env.DST);
+  '
+else
+  cp "$SRC" "$DST"
+fi
 ```
+
+To change the logo later, drop a new `dashboard-logo.*` file (or update the env var) and re-run this step + `pnpm install` + `pnpm run build`. The `patches/...` file is regenerated each run, so committing it captures the current logo for reproducible installs.
 
 Add the `patchedDependencies` entry to `pnpm-workspace.yaml` if it isn't already there:
 
