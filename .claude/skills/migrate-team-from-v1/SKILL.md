@@ -138,8 +138,10 @@ Note which of these exist (skip the ones marked skip):
 
 - `agents.json` — sub-agent definitions (translated in phase 8)
 - `CLAUDE.md` — team identity / voice / rules (becomes `CLAUDE.role.md`)
+- `memory.md` — curated persona / hard rules (imported into `CLAUDE.local.md` in phase 7f)
 - `wiki/` — knowledge base (copied verbatim)
 - `sources/`, `self-review-proposals.json` — reference material (copied to `sources/`)
+- **Any other directory or `*.md` file** (`voices/`, `client-notes/`, `clients/`, `people.md`, `preferences.md`, `mettro-voice.md`, etc.) — team-curated knowledge. Copy verbatim in phase 7d. The role spec almost always references these by path, so they're load-bearing even if the standard list above doesn't name them.
 - `conversations/`, `logs/`, empty `scripts/` — **skip these**
 
 ### 2b. v1 DB row + scheduled tasks
@@ -164,15 +166,29 @@ if (grp) {
 
 Use `SELECT *` — v1's `scheduled_tasks` schema has drifted across versions (e.g. older builds don't have `agent_role`; newer ones do). Naming columns explicitly errors on installs that lack them. The `jid` becomes irrelevant after the channel cutover, but `container_config.additionalMounts`, the trigger pattern, and the `(schedule_value, prompt)` pairs all carry over.
 
-### 2c. Host-mounted secrets
+### 2c. additionalMounts — credentials vs. cross-team data
 
-If the printed `container_config` had `additionalMounts`, list each mount path:
+If the printed `container_config` had `additionalMounts`, classify each mount before deciding what to do with it. Two distinct cases share the same shape:
+
+**Credentials mount** — `hostPath` points at a credentials directory outside any v1 group folder (e.g. `~/nanoclaw-secrets/<team>/`, `<team>-creds/`, an absolute path under `/etc/` or `~/.config/`). These files stay where they are — phase 5a / 7c re-mount them in v2 unchanged.
+
+**Cross-team data mount** — `hostPath` points at *another* v1 group's folder (e.g. `groups/slack_briefmate/clients`). The v1 team is sharing a sibling team's curated files (client knowledge bases, voice profiles, etc.), not exposing a secret. v2 needs an explicit decision since the source team may or may not be ported yet.
 
 ```bash
+# Inspect each mount to classify
 ls -la <hostPath-from-additionalMounts>
+# If hostPath starts with `groups/<other-team>/` it's a cross-team data mount.
 ```
 
-These files stay where they are — v2 mounts them with the same `additionalMounts` shape (phase 7c).
+For each cross-team mount, ask the operator with AskUserQuestion:
+
+| Option | When to pick |
+|---|---|
+| **Mount v1's path read-only** | Source team will stay on v1 indefinitely OR this is a temporary bridge until phase 12 retires v1. Easiest, but breaks when v1 is decommissioned. |
+| **Copy the data into v2 team's own dir** | Source team isn't being ported; the data is small and stable. v2 team becomes decoupled — future edits in v1 don't propagate. Phase 7c skips `additionalMounts`; phase 7d copies the directory in. |
+| **Port the source team first** | Source team is also being ported. Cleanest long-term — v2 team mounts the v2 source team's directory. Run this skill on the source team first, then return to this port. |
+
+Capture the decision per mount; phase 7c reflects it.
 
 ### 2d. Decide: port vs. fresh agent
 
@@ -313,10 +329,15 @@ The agent's persona/voice is independent of the agent group name — it's encode
 
 Pick `V2_FOLDER` — typically a clean version of `V1_FOLDER` without prefixes (e.g. `whatsapp_insights-team` → `insights-team`).
 
-Engage mode notes:
+Engage mode — translate from the v1 row's `(trigger_pattern, requires_trigger)`:
 
-- `mention` (require `@<assistant>`) is fine for noisy channels.
-- `pattern '.'` matches every message — what KDPup-style team groups use.
+| v1 row | v2 init flags | Use case |
+|---|---|---|
+| `requires_trigger=0` (any `trigger_pattern`) | `--engage-mode pattern --engage-pattern '.'` | Fires on every message in the chat. v1's trigger field was a fallback hint, not a gate — agent answered everything. |
+| `requires_trigger=1, trigger_pattern='@<assistant>'` | `--engage-mode mention` | Standard: only when the assistant is mentioned. |
+| `requires_trigger=1, trigger_pattern=<other regex>` | `--engage-mode pattern --engage-pattern '<regex>'` | Custom trigger phrase (e.g. "hey janet"). Copy the regex over verbatim. |
+
+`mention-sticky` (after a mention, keep replying to that user without re-mention until silence) has no v1 equivalent — only choose it if the operator wants new behavior.
 
 Unknown-sender-policy:
 
@@ -376,7 +397,12 @@ Then read the file and edit:
 
 - Replace any reference to v1's channel ("WhatsApp", "@<assistant> WhatsApp trigger") with the chosen v2 channel equivalent.
 - **`/workspace/group/` paths from v1 must become `/workspace/agent/`** — v2 mounts the team folder at `/workspace/agent/`, not `/workspace/group/`. Phase 7e does this sweep across all team files (CLAUDE.role.md, scripts, configs); just be aware that the references you see in `CLAUDE.role.md` will move. v1 paths under `/workspace/extra/<team>-creds/...` (host-mounted secrets) DO work as-is in v2 if `additionalMounts` (phase 7c) reuses the same `containerPath`.
-- Strip v1-only operational notes (e.g. "agents.json must not contain literal newlines" — v1-specific).
+- Strip v1-only operational notes. Common patterns to remove or rewrite (read the whole file with this list in hand — they show up in role specs more often than not):
+  - References to `ask_group` / `reply_to_lead` MCP tools — v1-only. v2 lanes/sub-agents communicate via `send_message`. If the agent is solo in v2, drop these mentions entirely.
+  - Sections titled "Replying to Dispatches from Main", "If main asks you a question via ask_group", or similar — only relevant if the v2 agent has a parent lane wiring (rare for ports). For solo agents, delete the section.
+  - `/workspace/global/wiki/` references — v2 has no global/shared wiki concept. Per-group wiki at `/workspace/group/wiki/` (which becomes `/workspace/agent/wiki/` after the phase 7e sweep) is the only wiki.
+  - Channel-specific formatting blocks ("This is a Slack channel — use Slack mrkdwn") — replace wholesale with the v2 channel's syntax (Telegram MarkdownV2, Discord standard markdown, etc.). Don't try to translate rule-by-rule; rewrite the block.
+  - "agents.json must not contain literal newlines" or other v1-only operational tics.
 - **Move v1's "Improvement Backlog" / "Watch items" sections out** of `CLAUDE.role.md` into `sources/improvement-backlog.md` — they're operational state, not role spec.
 - If you went lane-agent (phase 4), update the "delegation" section to refer to lane agents addressed via `send_message` rather than sub-agents addressed via Task tool.
 
@@ -564,7 +590,9 @@ If you're still in conversation with the agent, ask it to **re-read** specific f
 
 ### 7f. CLAUDE.local.md — role + memory imports
 
-`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, also import v1's curated memory file if present:
+`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, also import v1's curated memory file.
+
+**If v1 had a `memory.md`, copy it AND add the import. It's almost always load-bearing.** This isn't optional polish — `memory.md` is where v1 teams encoded the persona ("You are Janet from The Good Place, embody her warmth..."), hard always/never rules, and team-specific defaults. The v2 `agent_groups.name` field is just the dashboard label, not a persona override; without `memory.md` imported, persona-coded agents lose their character entirely on the first message and the operator notices immediately.
 
 ```bash
 LOCAL="groups/$V2_FOLDER/CLAUDE.local.md"
@@ -677,6 +705,25 @@ tail -n 100 logs/nanoclaw.log | grep -E "($V2_FOLDER|$V2_AGENT_GROUP_ID)"
 tail -n 50 logs/nanoclaw.error.log
 # clean (transient channel polling errors during outages are harmless retries)
 ```
+
+If you see `Session created` but no `Message delivered` after ~10s, peek at the session DBs to see where the chain stalled. The session id appears in the `Session created` log line:
+
+```bash
+SESS_DIR="data/v2-sessions/$V2_AGENT_GROUP_ID/<session-id>"
+pnpm exec tsx -e "
+const Database = require('better-sqlite3');
+const inb = new Database('$SESS_DIR/inbound.db', { readonly: true });
+console.log('--- messages_in ---');
+for (const m of inb.prepare('SELECT seq, kind, status, substr(content,1,200) AS content_preview FROM messages_in ORDER BY seq').all()) console.log(JSON.stringify(m));
+const out = new Database('$SESS_DIR/outbound.db', { readonly: true });
+console.log('--- messages_out ---');
+for (const m of out.prepare('SELECT seq, kind, substr(content,1,200) AS content_preview, timestamp FROM messages_out ORDER BY seq').all()) console.log(JSON.stringify(m));
+"
+```
+
+Real columns in current trunk: `messages_in.{seq,kind,status,content,timestamp,...}` and `messages_out.{seq,kind,content,timestamp,...}` — `content` is JSON-stringified (`{"text":"..."}`). Don't try `body` or `processing_ack` as columns; they don't exist on these tables (`processing_ack` is a sibling table on `inbound.db`, not a column).
+
+Reading: an inbound row with no matching outbound after ~10s usually means the container crashed silently. `docker ps --filter name=nanoclaw-v2-$V2_FOLDER` and `docker logs <name>` while the container's still up.
 
 ### 10b. Credential mount
 
