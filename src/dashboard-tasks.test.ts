@@ -115,9 +115,7 @@ describe('collectTasks', () => {
 
   it('keeps medium-length prompts intact (between 80 and 500 chars)', () => {
     const mediumPrompt = 'y'.repeat(200);
-    seedSession('ag1', 's1', [
-      { id: 't1', status: 'pending', content: JSON.stringify({ prompt: mediumPrompt }) },
-    ]);
+    seedSession('ag1', 's1', [{ id: 't1', status: 'pending', content: JSON.stringify({ prompt: mediumPrompt }) }]);
     const [task] = collectTasksForSession(refA);
     expect(task.prompt).toBe(mediumPrompt);
     expect(task.promptPreview).toBe(mediumPrompt); // 200 chars, no truncation
