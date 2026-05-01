@@ -528,10 +528,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc00edd644 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba3795a827a8b 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3254 @@
+@@ -2,172 +2,3430 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -2977,21 +2977,14 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    color: var(--ag-text-label);
 +    border-bottom: 1px solid var(--ag-border);
 +    background: var(--ag-surface-2);
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
--    margin-bottom: 8px;
++  }
 +  .agent-groups-v2 .ad-table tbody td {
 +    padding: 10px 14px;
 +    font-size: 12.5px;
 +    border-bottom: 1px solid var(--ag-surface-2);
 +    color: var(--ag-text);
 +    vertical-align: middle;
-   }
--  .sidebar nav a {
++  }
 +  .agent-groups-v2 .ad-table tbody tr:last-child td { border-bottom: none; }
 +  .agent-groups-v2 .ad-table tbody tr:hover td { background: rgba(45, 212, 191, 0.04); }
 +  .agent-groups-v2 .ad-num { text-align: center; }
@@ -3064,19 +3057,11 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +
 +  .messages-v2 .mdt-header { margin-bottom: 16px; }
 +  .messages-v2 .mdt-title-row {
-     display: flex;
-     align-items: center;
--    gap: 10px;
--    padding: 10px 20px;
--    color: #999;
--    font-size: 14px;
--    transition: background 0.15s, color 0.15s;
++    display: flex;
++    align-items: center;
 +    gap: 12px;
 +    flex-wrap: wrap;
-   }
--  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
--  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
--  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
++  }
 +  .messages-v2 .mdt-title-row h2 { font-size: 22px; font-weight: 700; color: #f1f5f9; }
 +  .messages-v2 .mdt-id-chip {
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
@@ -3100,22 +3085,14 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +  }
 +  .messages-v2 .mdt-copy-btn:hover { color: var(--msg-cyan); border-color: var(--msg-cyan); }
 +  .messages-v2 .mdt-copy-btn.mdt-copied { color: var(--msg-green); border-color: var(--msg-green); font-weight: 700; }
- 
--  /* Main */
--  .main {
--    margin-left: 220px;
--    padding: 24px 32px;
--    flex: 1;
--    min-width: 0;
++
 +  /* KPI strip */
 +  .messages-v2 .mdt-kpi-grid {
 +    display: grid;
 +    grid-template-columns: repeat(4, 1fr);
 +    gap: 12px;
 +    margin-bottom: 20px;
-   }
--  .page-title {
--    font-size: 22px;
++  }
 +  @media (max-width: 1100px) { .messages-v2 .mdt-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
 +  .messages-v2 .mdt-kpi-cell {
 +    background: var(--msg-surface);
@@ -3133,9 +3110,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    margin-top: 6px;
 +    font-size: 14px;
 +    color: #f1f5f9;
-     font-weight: 600;
--    margin-bottom: 20px;
--    color: #fff;
++    font-weight: 600;
 +    word-break: break-all;
 +  }
 +  .messages-v2 .mdt-pill {
@@ -3161,13 +3136,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    background: rgba(125, 211, 252, 0.10);
 +    color: #7dd3fc;
 +    border: 1px solid rgba(125, 211, 252, 0.25);
-   }
- 
--  /* Cards */
--  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
--  .card {
--    background: #1a1a1a;
--    border: 1px solid #2a2a2a;
++  }
++
 +  /* Content + Context two-col */
 +  .messages-v2 .mdt-content-row {
 +    display: grid;
@@ -3184,12 +3154,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    word-break: break-word;
 +    background: var(--msg-surface-2);
 +    padding: 14px 16px;
-     border-radius: 8px;
--    padding: 16px;
++    border-radius: 8px;
    }
--  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
--  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
--  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
+-    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
 +  .messages-v2 .mdt-meta-list { display: flex; flex-direction: column; gap: 8px; }
 +  .messages-v2 .mdt-meta-row {
 +    display: grid;
@@ -3209,12 +3180,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    overflow-wrap: anywhere;
 +  }
- 
--  /* Tables */
--  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
--  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
--  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
--  tr:hover td { background: #151515; }
++
 +  /* Bottom row: thread + raw */
 +  .messages-v2 .mdt-bottom-row {
 +    display: grid;
@@ -3223,28 +3189,42 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    margin-bottom: 24px;
 +  }
 +  @media (max-width: 1100px) { .messages-v2 .mdt-bottom-row { grid-template-columns: minmax(0, 1fr); } }
- 
--  /* Badges */
--  .badge {
++
 +  .messages-v2 .mdt-thread-item {
 +    border-left: 3px solid transparent;
 +    padding: 8px 12px;
 +    background: var(--msg-surface-2);
 +    border-radius: 6px;
-+    margin-bottom: 8px;
+     margin-bottom: 8px;
 +    font-size: 12.5px;
-+  }
+   }
+-  .sidebar nav a {
 +  .messages-v2 .mdt-thread-item.mdt-thread-in  { border-left-color: #7dd3fc; }
 +  .messages-v2 .mdt-thread-item.mdt-thread-out { border-left-color: var(--msg-green); }
 +  .messages-v2 .mdt-thread-current { background: rgba(45, 212, 191, 0.08); }
 +  .messages-v2 .mdt-thread-head {
-+    display: flex;
-+    align-items: center;
+     display: flex;
+     align-items: center;
+-    gap: 10px;
+-    padding: 10px 20px;
+-    color: #999;
+-    font-size: 14px;
+-    transition: background 0.15s, color 0.15s;
 +    gap: 8px;
 +    font-size: 11px;
 +    color: var(--msg-text-dim);
 +    margin-bottom: 4px;
-+  }
+   }
+-  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
+-  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
+-  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
+-
+-  /* Main */
+-  .main {
+-    margin-left: 220px;
+-    padding: 24px 32px;
+-    flex: 1;
+-    min-width: 0;
 +  .messages-v2 .mdt-thread-dir { font-weight: 700; color: var(--msg-text-label); }
 +  .messages-v2 .mdt-thread-current-tag {
 +    margin-left: auto;
@@ -3256,14 +3236,24 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    font-weight: 700;
 +    text-transform: uppercase;
 +    letter-spacing: 0.5px;
-+  }
+   }
+-  .page-title {
+-    font-size: 22px;
+-    font-weight: 600;
+-    margin-bottom: 20px;
+-    color: #fff;
 +  .messages-v2 .mdt-thread-body {
 +    color: var(--msg-text);
 +    line-height: 1.5;
 +    white-space: pre-wrap;
 +    word-break: break-word;
-+  }
-+
+   }
+ 
+-  /* Cards */
+-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+-  .card {
+-    background: #1a1a1a;
+-    border: 1px solid #2a2a2a;
 +  /* Raw JSON viewer */
 +  .messages-v2 .mdt-raw-head {
 +    display: flex;
@@ -3276,7 +3266,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    background: #0a0e1a;
 +    color: #cbd5e1;
 +    padding: 12px;
-+    border-radius: 8px;
+     border-radius: 8px;
+-    padding: 16px;
 +    border: 1px solid var(--msg-border);
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    font-size: 11.5px;
@@ -3284,8 +3275,19 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    max-height: 360px;
 +    overflow: auto;
 +    white-space: pre;
-+  }
-+
+   }
+-  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+-  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
+-  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
+-
+-  /* Tables */
+-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+-  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
+-  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
+-  tr:hover td { background: #151515; }
+ 
+-  /* Badges */
+-  .badge {
 +  /* Audit page */
 +  .audit-v2 .audit-toolbar {
 +    display: flex;
@@ -3545,24 +3547,9 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
      border-radius: 8px;
 -    padding: 12px;
 -    font-family: 'Cascadia Code', 'Fira Code', monospace;
--    font-size: 12px;
--    height: calc(100vh - 140px);
--    overflow-y: auto;
--    line-height: 1.6;
 +    margin-bottom: 14px;
 +    overflow: hidden;
-   }
--  .log-line { white-space: pre-wrap; word-break: break-all; }
--  .log-line:hover { background: #151515; }
--
--  /* Detail panel */
--  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
--  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
--  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
--  .detail-value { color: #e0e0e0; font-size: 13px; }
--
--  /* Loading */
--  .loading { color: #666; font-style: italic; padding: 20px; }
++  }
 +  .tasks-v2 .tasks-group-header {
 +    display: flex;
 +    align-items: center;
@@ -3596,12 +3583,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +  .tasks-v2 .tasks-count-processing { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
 +  .tasks-v2 .tasks-count-paused     { color: #94a3b8; background: rgba(148, 163, 184, 0.12); }
 +  .tasks-v2 .tasks-group.collapsed .tasks-group-body { display: none; }
- 
--  /* Select */
--  select {
--    background: #1a1a1a;
--    color: #e0e0e0;
--    border: 1px solid #2a2a2a;
++
 +  .tasks-v2 .tasks-table {
 +    width: 100%;
 +    border-collapse: collapse;
@@ -3624,7 +3606,10 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +  .tasks-v2 .tasks-actions-col { width: 200px; text-align: right; }
 +  .tasks-v2 .tasks-table td {
 +    padding: 10px 12px;
-+    font-size: 12px;
+     font-size: 12px;
+-    height: calc(100vh - 140px);
+-    overflow-y: auto;
+-    line-height: 1.6;
 +    color: #cbd5e1;
 +    vertical-align: top;
 +    border-bottom: 1px solid #111827;
@@ -3641,9 +3626,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +  .tasks-v2 .task-status-badge {
 +    display: inline-block;
 +    padding: 2px 8px;
-     border-radius: 4px;
--    padding: 6px 10px;
--    font-size: 13px;
++    border-radius: 4px;
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    font-size: 11px;
 +    font-weight: 600;
@@ -3691,11 +3674,14 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    text-transform: uppercase;
 +    letter-spacing: 0.4px;
    }
+-  .log-line { white-space: pre-wrap; word-break: break-all; }
+-  .log-line:hover { background: #151515; }
  
--  /* Tabs */
--  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
--  .tab {
--    padding: 8px 16px;
+-  /* Detail panel */
+-  .detail-panel { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+-  .detail-row { display: flex; gap: 8px; margin: 6px 0; }
+-  .detail-label { color: #888; min-width: 140px; font-size: 13px; }
+-  .detail-value { color: #e0e0e0; font-size: 13px; }
 +  /* Tasks drawer */
 +  .tasks-v2 .task-drawer-backdrop {
 +    position: fixed;
@@ -3802,8 +3788,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    padding: 2px 6px;
 +    border-radius: 3px;
 +    line-height: 1;
-     font-size: 13px;
--    color: #888;
++    font-size: 13px;
 +    opacity: 0;
 +    transition: opacity 0.12s, color 0.12s;
 +  }
@@ -3842,9 +3827,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +    background: transparent;
 +    border: 1px solid #1e293b;
 +    color: #94a3b8;
-     cursor: pointer;
--    border-bottom: 2px solid transparent;
--    transition: color 0.15s, border-color 0.15s;
++    cursor: pointer;
 +    padding: 4px 10px;
 +    border-radius: 4px;
 +    font-family: inherit;
@@ -3875,6 +3858,197 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
 +  .tasks-v2 .task-drawer-btn-cancel { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
 +  .tasks-v2 .task-drawer-btn-cancel:hover { background: rgba(248, 113, 113, 0.12); border-color: #f87171; }
 +  .tasks-v2 .task-drawer-running { color: #fbbf24; font-size: 12px; padding: 4px 0; }
+ 
+-  /* Loading */
+-  .loading { color: #666; font-style: italic; padding: 20px; }
++  /* Tasks page — split layout (timeline | content) */
++  .tasks-v2 .tasks-layout {
++    display: grid;
++    grid-template-columns: 320px 1fr;
++    gap: 16px;
++    align-items: start;
++  }
++  .tasks-v2 .tasks-content { min-width: 0; }
+ 
+-  /* Select */
+-  select {
+-    background: #1a1a1a;
+-    color: #e0e0e0;
+-    border: 1px solid #2a2a2a;
++  /* Timeline panel */
++  .tasks-v2 .tasks-timeline-panel {
++    background: #111728;
++    border: 1px solid #1f2944;
++    border-radius: 8px;
++    display: flex;
++    flex-direction: column;
++    max-height: calc(100vh - 220px);
++    overflow: hidden;
++    position: sticky;
++    top: 16px;
++  }
++  .tasks-v2 .tasks-timeline-header {
++    display: flex;
++    align-items: center;
++    justify-content: space-between;
++    gap: 8px;
++    padding: 14px 16px;
++    border-bottom: 1px solid #1f2944;
++  }
++  .tasks-v2 .tasks-timeline-header h3 {
++    margin: 0;
++    font-size: 13px;
++    font-weight: 600;
++    color: #e2e8f0;
++    letter-spacing: 0.2px;
++  }
++  .tasks-v2 .tasks-timeline-filter { position: relative; }
++  .tasks-v2 .tasks-timeline-filter-btn {
++    background: rgba(45, 212, 191, 0.06);
++    border: 1px solid rgba(45, 212, 191, 0.25);
+     border-radius: 4px;
++    color: #5eead4;
++    cursor: pointer;
++    font-family: inherit;
++    font-size: 11.5px;
++    padding: 4px 10px;
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++  }
++  .tasks-v2 .tasks-timeline-filter-btn:hover {
++    background: rgba(45, 212, 191, 0.12);
++    border-color: rgba(45, 212, 191, 0.45);
++  }
++  .tasks-v2 .tasks-timeline-filter-arrow { font-size: 9px; color: #5eead4; }
++  .tasks-v2 .tasks-timeline-filter-menu {
++    position: absolute;
++    top: calc(100% + 4px);
++    right: 0;
++    min-width: 180px;
++    background: #0d1426;
++    border: 1px solid #1f2944;
++    border-radius: 6px;
++    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
++    padding: 4px;
++    z-index: 10;
++    display: flex;
++    flex-direction: column;
++  }
++  .tasks-v2 .tasks-timeline-filter-menu[hidden] { display: none; }
++  .tasks-v2 .tasks-timeline-filter-menu button {
++    background: transparent;
++    border: 0;
++    color: #cbd5e1;
++    cursor: pointer;
++    font-family: inherit;
++    font-size: 12px;
+     padding: 6px 10px;
+-    font-size: 13px;
++    text-align: left;
++    border-radius: 4px;
+   }
++  .tasks-v2 .tasks-timeline-filter-menu button:hover { background: rgba(45, 212, 191, 0.08); color: #e2e8f0; }
++  .tasks-v2 .tasks-timeline-filter-menu button.active { color: #5eead4; background: rgba(45, 212, 191, 0.1); }
+ 
+-  /* Tabs */
+-  .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid #2a2a2a; }
+-  .tab {
++  .tasks-v2 .tasks-timeline-body {
++    flex: 1;
++    overflow-y: auto;
++    padding: 8px 0;
++  }
++  .tasks-v2 .tasks-timeline-empty {
++    font-size: 12px;
++    color: #64748b;
++    padding: 20px 16px;
++    text-align: center;
++  }
++  .tasks-v2 .tasks-timeline-bucket { padding: 8px 0; }
++  .tasks-v2 .tasks-timeline-date {
++    display: flex;
++    align-items: baseline;
++    gap: 8px;
++    padding: 6px 16px 8px 18px;
++    position: relative;
++  }
++  .tasks-v2 .tasks-timeline-date-accent {
++    width: 3px;
++    height: 14px;
++    background: #2dd4bf;
++    border-radius: 2px;
++    position: absolute;
++    left: 8px;
++    top: 8px;
++  }
++  .tasks-v2 .tasks-timeline-date-label {
++    font-size: 11px;
++    font-weight: 700;
++    color: #f1f5f9;
++    text-transform: uppercase;
++    letter-spacing: 0.5px;
++  }
++  .tasks-v2 .tasks-timeline-date-text {
++    font-size: 11px;
++    color: #64748b;
++  }
++  .tasks-v2 .tasks-timeline-list {
++    list-style: none;
++    margin: 0;
++    padding: 0;
++  }
++  .tasks-v2 .tasks-timeline-entry {
++    display: grid;
++    grid-template-columns: 56px 1fr 10px;
++    align-items: center;
++    gap: 8px;
+     padding: 8px 16px;
+-    font-size: 13px;
+-    color: #888;
+     cursor: pointer;
+-    border-bottom: 2px solid transparent;
+-    transition: color 0.15s, border-color 0.15s;
++    border-left: 2px solid transparent;
++    transition: background 0.12s, border-color 0.12s;
++  }
++  .tasks-v2 .tasks-timeline-entry:hover {
++    background: #18223a;
++    border-left-color: rgba(45, 212, 191, 0.4);
++  }
++  .tasks-v2 .tasks-timeline-entry:focus {
++    outline: none;
++    background: #18223a;
++    border-left-color: #2dd4bf;
++  }
++  .tasks-v2 .tasks-timeline-time {
++    font-size: 11px;
++    color: #64748b;
++    font-variant-numeric: tabular-nums;
++    white-space: nowrap;
++  }
++  .tasks-v2 .tasks-timeline-title {
++    font-size: 12px;
++    color: #e2e8f0;
++    white-space: nowrap;
++    overflow: hidden;
++    text-overflow: ellipsis;
++  }
++  .tasks-v2 .tasks-timeline-status {
++    width: 8px;
++    height: 8px;
++    border-radius: 50%;
++    background: #2dd4bf;
++    justify-self: end;
++  }
++  .tasks-v2 .tasks-timeline-status-pending     { background: #2dd4bf; }
++  .tasks-v2 .tasks-timeline-status-processing  { background: #fbbf24; box-shadow: 0 0 4px #fbbf24aa; }
++  .tasks-v2 .tasks-timeline-status-paused      { background: #94a3b8; }
++
++  @media (max-width: 900px) {
++    .tasks-v2 .tasks-layout { grid-template-columns: 1fr; }
++    .tasks-v2 .tasks-timeline-panel { position: static; max-height: 360px; }
++  }
 +
 +  @media (max-width: 600px) {
 +    .tasks-v2 .task-drawer { width: 100%; }
@@ -3892,7 +4066,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3257,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3433,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -3907,7 +4081,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3271,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3447,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -3933,7 +4107,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3297,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3473,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -3952,7 +4126,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3318,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3494,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -3969,7 +4143,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..85a371eae5bd161ad9ae5eb7b46a08bc
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3339,52 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3515,52 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -6673,10 +6847,10 @@ index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb396706a6
+index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876fa5bf02b
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
-@@ -0,0 +1,634 @@
+@@ -0,0 +1,814 @@
 +import { layout } from '../layout.js';
 +/**
 + * /dashboard/tasks — every active scheduled task across all sessions.
@@ -6745,6 +6919,7 @@ index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb
 +      filter: { search: '', statuses: { pending: true, processing: true, paused: true } },
 +      collapsed: Object.create(null),
 +      drawerTaskId: null,
++      timelineGroup: '__all__',
 +    };
 +
 +    async function renderTasks(rows) {
@@ -6787,11 +6962,27 @@ index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb
 +      }
 +
 +      bodyEl.innerHTML = headerHtml + toolbarHtml +
-+        '<div id="tasks-groups">' + renderGroups(rows) + '</div>' +
++        '<div class="tasks-layout">' +
++          '<aside class="tasks-timeline-panel">' +
++            '<header class="tasks-timeline-header">' +
++              '<h3>Timeline</h3>' +
++              '<div class="tasks-timeline-filter" id="tasks-timeline-filter">' +
++                '<button type="button" class="tasks-timeline-filter-btn">' +
++                  '<span id="tasks-timeline-filter-label">All Tasks</span>' +
++                  '<span class="tasks-timeline-filter-arrow">&#9662;</span>' +
++                '</button>' +
++                '<div class="tasks-timeline-filter-menu" id="tasks-timeline-filter-menu" hidden></div>' +
++              '</div>' +
++            '</header>' +
++            '<div class="tasks-timeline-body" id="tasks-timeline-body">' + renderTimeline(rows) + '</div>' +
++          '</aside>' +
++          '<div class="tasks-content"><div id="tasks-groups">' + renderGroups(rows) + '</div></div>' +
++        '</div>' +
 +        renderDrawerScaffold();
 +
 +      wireToolbar();
 +      wireGroups();
++      wireTimeline();
 +      wireDrawer();
 +      // Best-effort hydrate cron descriptions in already-rendered rows.
 +      hydrateCronCells();
@@ -6921,6 +7112,168 @@ index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb
 +      }
 +    }
 +
++    // ── Timeline ──────────────────────────────────────────────────────
++
++    function renderTimeline(rows) {
++      var groupId = state.timelineGroup || '__all__';
++      var withNext = rows.filter(function(t) {
++        if (!t.nextRun) return false;
++        if (groupId !== '__all__' && t.agentGroupId !== groupId) return false;
++        return true;
++      });
++      withNext.sort(function(a, b) { return new Date(a.nextRun) - new Date(b.nextRun); });
++      if (withNext.length === 0) {
++        return '<div class="tasks-timeline-empty">No upcoming runs.</div>';
++      }
++      return bucketByDate(withNext).map(renderTimelineBucket).join('');
++    }
++
++    function bucketByDate(tasks) {
++      var now = new Date();
++      var todayKey = dateKey(now);
++      var tomorrow = new Date(now);
++      tomorrow.setDate(tomorrow.getDate() + 1);
++      var tomorrowKey = dateKey(tomorrow);
++      var groups = [];
++      var index = Object.create(null);
++      tasks.forEach(function(t) {
++        var d = new Date(t.nextRun);
++        var key = dateKey(d);
++        if (!index[key]) {
++          var label;
++          if (key === todayKey) label = 'Today';
++          else if (key === tomorrowKey) label = 'Tomorrow';
++          else label = d.toLocaleDateString(undefined, { weekday: 'long' });
++          var dateText = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
++          index[key] = { key: key, label: label, dateText: dateText, tasks: [] };
++          groups.push(index[key]);
++        }
++        index[key].tasks.push(t);
++      });
++      return groups;
++    }
++
++    function dateKey(d) {
++      return d.getFullYear() + '-' +
++        String(d.getMonth() + 1).padStart(2, '0') + '-' +
++        String(d.getDate()).padStart(2, '0');
++    }
++
++    function renderTimelineBucket(b) {
++      return '<section class="tasks-timeline-bucket">' +
++        '<header class="tasks-timeline-date">' +
++          '<span class="tasks-timeline-date-accent"></span>' +
++          '<span class="tasks-timeline-date-label">' + esc(b.label) + '</span>' +
++          '<span class="tasks-timeline-date-text">' + esc(b.dateText) + '</span>' +
++        '</header>' +
++        '<ul class="tasks-timeline-list">' +
++          b.tasks.map(renderTimelineEntry).join('') +
++        '</ul>' +
++      '</section>';
++    }
++
++    function renderTimelineEntry(t) {
++      var d = new Date(t.nextRun);
++      var time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
++      var title = (t.prompt || t.promptPreview || '').replace(/\\s+/g, ' ').trim();
++      if (title.length > 80) title = title.slice(0, 80) + '…';
++      return '<li class="tasks-timeline-entry" data-task-id="' + esc(t.id) +
++          '" data-status="' + esc(t.status) + '" tabindex="0" title="' + esc(title || '(empty)') + '">' +
++        '<span class="tasks-timeline-time">' + esc(time) + '</span>' +
++        '<span class="tasks-timeline-title">' + esc(title || '(empty)') + '</span>' +
++        '<span class="tasks-timeline-status tasks-timeline-status-' + esc(t.status) +
++          '" title="' + esc(t.status) + '"></span>' +
++      '</li>';
++    }
++
++    function uniqueTimelineGroups(tasks) {
++      var seen = Object.create(null);
++      var out = [];
++      tasks.forEach(function(t) {
++        if (!t.nextRun) return;
++        if (seen[t.agentGroupId]) return;
++        seen[t.agentGroupId] = true;
++        out.push({ id: t.agentGroupId, name: t.agentGroupName });
++      });
++      out.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
++      return out;
++    }
++
++    function rebuildTimelineFilterMenu() {
++      var menu = document.getElementById('tasks-timeline-filter-menu');
++      if (!menu) return;
++      var groups = uniqueTimelineGroups(state.tasks);
++      // If the active filter group no longer has any upcoming tasks, fall back to all.
++      var validIds = Object.create(null);
++      validIds.__all__ = true;
++      groups.forEach(function(g) { validIds[g.id] = true; });
++      if (!validIds[state.timelineGroup]) state.timelineGroup = '__all__';
++      var labelEl = document.getElementById('tasks-timeline-filter-label');
++      var allActive = state.timelineGroup === '__all__';
++      menu.innerHTML =
++        '<button type="button" data-group="__all__"' + (allActive ? ' class="active"' : '') + '>All Tasks</button>' +
++        groups.map(function(g) {
++          return '<button type="button" data-group="' + esc(g.id) + '"' +
++            (state.timelineGroup === g.id ? ' class="active"' : '') + '>' + esc(g.name) + '</button>';
++        }).join('');
++      if (labelEl) {
++        if (allActive) {
++          labelEl.textContent = 'All Tasks';
++        } else {
++          var active = groups.find ? groups.find(function(g) { return g.id === state.timelineGroup; }) : null;
++          if (!active) {
++            for (var i = 0; i < groups.length; i++) {
++              if (groups[i].id === state.timelineGroup) { active = groups[i]; break; }
++            }
++          }
++          labelEl.textContent = active ? active.name : 'All Tasks';
++        }
++      }
++    }
++
++    function rerenderTimeline() {
++      var el = document.getElementById('tasks-timeline-body');
++      if (!el) return;
++      el.innerHTML = renderTimeline(state.tasks);
++      rebuildTimelineFilterMenu();
++    }
++
++    function wireTimeline() {
++      var bodyEl = document.getElementById('tasks-timeline-body');
++      if (bodyEl) {
++        bodyEl.addEventListener('click', function(ev) {
++          var entry = ev.target.closest('.tasks-timeline-entry');
++          if (entry) openDrawer(entry.getAttribute('data-task-id'));
++        });
++        bodyEl.addEventListener('keydown', function(ev) {
++          if (ev.key !== 'Enter') return;
++          var entry = ev.target.closest('.tasks-timeline-entry');
++          if (entry) { ev.preventDefault(); openDrawer(entry.getAttribute('data-task-id')); }
++        });
++      }
++      var filterEl = document.getElementById('tasks-timeline-filter');
++      var filterBtn = filterEl && filterEl.querySelector('.tasks-timeline-filter-btn');
++      var filterMenu = document.getElementById('tasks-timeline-filter-menu');
++      if (filterBtn && filterMenu) {
++        filterBtn.addEventListener('click', function(ev) {
++          ev.stopPropagation();
++          filterMenu.hidden = !filterMenu.hidden;
++        });
++        filterMenu.addEventListener('click', function(ev) {
++          var btn = ev.target.closest('button[data-group]');
++          if (!btn) return;
++          state.timelineGroup = btn.getAttribute('data-group');
++          filterMenu.hidden = true;
++          rerenderTimeline();
++        });
++        document.addEventListener('click', function(ev) {
++          if (filterEl.contains(ev.target)) return;
++          if (!filterMenu.hidden) filterMenu.hidden = true;
++        });
++      }
++      rebuildTimelineFilterMenu();
++    }
++
 +    function wireToolbar() {
 +      var search = document.getElementById('tasks-search');
 +      if (search) {
@@ -7020,6 +7373,7 @@ index 0000000000000000000000000000000000000000..99fca9ecd88789b8bc0aa7c68936efeb
 +        var rows = Array.isArray(data) ? data : (data && data.tasks) || [];
 +        state.tasks = rows;
 +        rerenderGroups();
++        rerenderTimeline();
 +        // If a drawer is open, refresh it from the new data.
 +        if (state.drawerTaskId) refreshDrawer();
 +      } catch (e) {
