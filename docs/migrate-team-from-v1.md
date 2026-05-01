@@ -56,3 +56,35 @@ This file tracks teams ported from the v1 install at `/home/admin/Agents/janet/`
 - Role spec was edited: removed v1-only "Replying to Dispatches from Main" section (no parent in v2), Slack mrkdwn formatting block replaced with Telegram MarkdownV2 hints, "Slack sender" updated to "Telegram sender", `/workspace/global/wiki/` reference removed (v2 has no global wiki concept).
 - `memory.md` carries the Janet (Good Place) personality. The role spec calls the agent "ClientMate" — these don't conflict, but the agent introduces itself as "clientmate" rather than as Janet. If the team prefers the assistant introduce itself as Janet, edit the opening of `CLAUDE.role.md`.
 - Mettro voice rule "no em dashes" — verify the agent obeys this in real drafts; it used an em dash in its first greeting.
+
+### Janet (adam-dm) — 2026-05-01 (port #3)
+
+| Field | Value |
+|---|---|
+| v1 folder | `/home/admin/Agents/janet/groups/slack_adam_dm/` |
+| v1 channel | Slack DM — `slack:D0APF375W9H`, trigger `@Janet`, `requires_trigger=0` (fired on every message), `is_main=1` |
+| v1 secrets | Filesystem-mounted: `~/nanoclaw-secrets/wordpress/wp-sites.json` (host path, outside both v1 and v2 working dirs) |
+| v1 sub-agents | None — no `agents.json` |
+| v1 npm deps | None |
+| v1 active schedules | 2 — weekly wiki-lint (`0 10 * * 0`), daily reflection (`0 6 * * *`) |
+| v2 parent folder | `groups/dm-with-adam` (`agent_groups.id = ag-1777257359331-63ti7x`) — pre-existed; this port overlaid v1 content onto a skeleton v2 agent rather than creating a new one |
+| v2 channel | telegram DM — `messaging_groups.platform_id = telegram:7466423983` (`mg-1777256921639-x18t1p`, name was `null`), engage_mode `pattern` `/./`, sender_scope `all`, ignored_message_policy `drop`, session_mode `shared` |
+| v2 mount path | `~/nanoclaw-secrets/wordpress/` → `/workspace/extra/wordpress-creds/` (read-only) — same containerPath as v1 so role-spec references still resolve |
+| Delegation model chosen | **N/A** — solo agent, no sub-agents in v1. (Janet routes to other agents like `briefmate`/`clientmate`/`launchmate` via `send_message to:` once those are ported.) |
+| v2 lanes | None |
+| OneCLI | Existing agent `ec3ec059-14df-4044-99ce-a8cc2741878a`, `mode=selective`, 1 secret assigned (Anthropic) — matches v1's `slack-adam-dm` agent's set. No new OneCLI work. |
+
+**Outstanding on the user:**
+- Send a smoke-test message in the Telegram DM (`telegram:7466423983`) to confirm the new container spawns with the wordpress-creds mount and the new role spec loads (Janet should sound like Janet from The Good Place + warm Mettro persona).
+- Then ask Janet via Telegram: `please read sources/v1-scheduled-tasks.md and schedule each cron task listed there in Brisbane time. Confirm each one back to me.` — registers the v1 schedules. Two prompts inside that file: weekly wiki-lint + daily reflection.
+- Verify Janet can read `/workspace/extra/wordpress-creds/wp-sites.json` (ask: `list the files under /workspace/extra/`).
+
+**Caveats:**
+- This was an **overlay onto an existing v2 agent**, not a fresh init. Skipped phase 6 (`init-group-agent.ts`) entirely. The v2 agent group + Telegram wiring + OneCLI agent all pre-existed from earlier setup. Phase 7 dropped v1 content (CLAUDE.md → CLAUDE.role.md, memory.md, wiki/) on top of skeleton v2 files. The v2 wiki was a 24K skeleton (just `index.md` + `log.md`); v1's 100K (17 files of real Mettro/team/clickup/admin content) replaced it wholesale.
+- `CLAUDE.local.md` previously held v2-authored wiki guidance; replaced with `@./CLAUDE.role.md` + `@./memory.md` imports per the v2 convention. The role spec already covers wiki workflow, so no information was lost.
+- Role spec was edited heavily: removed ~160 lines of v1 group-management (Managing Groups / Adding a Group / Sender Allowlist / Removing Group / Listing Groups — all host-managed in v2), replaced Slack mrkdwn formatting with Telegram MarkdownV2, replaced `ask_group`/`reply_to_lead` with `send_message to:`, removed `/workspace/global/wiki/` references (v2 has no global wiki), removed `target_group_jid` scheduling pattern (gone in v2), replaced `/workspace/project/store/messages.db` references in scheduled-task prompts (no host project mount in v2).
+- `memory.md` rewrote the Slack channel architecture table as historical reference (kept JIDs in a "v1 era" section for archival, marked them as no-longer-live destinations) and added a current "Communication Channels (v2)" section pointing at Telegram + `send_message to:` routing.
+- Conversations: copied v1's `conversations/` (4 files, 280K) to `groups/dm-with-adam/sources/v1-conversations/` as reference (not auto-loaded, agent grep'able on demand). Adam picked "copy as reference" over skip.
+- The existing v2 wiki had a `[2026-05-01] lint | 0 issues found, 0 fixed` log entry written ~10 minutes before the port (clean empty scaffold); that log was overwritten by v1's richer log. No real wiki content was lost.
+- `/workspace/group/` → `/workspace/agent/` sweep completed cleanly across all team files. `grep -rln /workspace/group groups/dm-with-adam | grep -vE '/(data|logs|conversations|v1-conversations)/'` returned `(clean)`.
+- Stopped the running container (`nanoclaw-v2-dm-with-adam-1777609777989`) so the next inbound message spawns a fresh container with the new wordpress-creds mount + new role spec. Existing SDK conversation transcripts (244K of jsonl in `.claude-shared/projects/`) preserved — Adam's recent chat memory is intact, only the system prompt changes.
