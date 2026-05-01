@@ -2,7 +2,7 @@
 #
 # Status line for janet-v2.
 # Format:
-#   janet-v2 | <version> (<branch>) | Janet: <Up|Down> | <ctx%> | <model> (<ctx-size>) | <last push>
+#   janet-v2 | nanoclaw <version> (<branch>) | Janet: <Up|Down> | <ctx%> | <model> | <last push>
 #
 # Reads Claude Code session JSON on stdin; runs git + service checks for the rest.
 
@@ -41,32 +41,38 @@ janet_status() {
 }
 JANET=$(janet_status)
 
-# -- context % remaining --
-# Look for any of the field paths Claude Code may pass; otherwise fall back.
-USED=$(printf '%s' "$INPUT" | jq -r '.context.used // .tokens.used // .usage.input_tokens // empty')
-MAX=$(printf '%s' "$INPUT" | jq -r '.context.max // .tokens.max // empty')
-if [ -n "$USED" ] && [ -n "$MAX" ] && [ "$MAX" -gt 0 ] 2>/dev/null; then
-  CTX_PCT=$(( 100 - (USED * 100 / MAX) ))%
-elif [ "$(printf '%s' "$INPUT" | jq -r '.exceeds_200k_tokens // false')" = "true" ]; then
-  CTX_PCT="<low"
-else
-  CTX_PCT="?"
-fi
-
 # -- model + context window --
 MODEL=$(printf '%s' "$INPUT" | jq -r '.model.display_name // .model.id // "?"')
 MODEL_ID=$(printf '%s' "$INPUT" | jq -r '.model.id // ""')
 case "$MODEL_ID" in
-  *opus-4-7*1m*|*opus-4-7\[1m\]*) CTX_SIZE="1M" ;;
-  *opus*1m*) CTX_SIZE="1M" ;;
-  *sonnet*1m*) CTX_SIZE="1M" ;;
-  *opus*|*sonnet*|*haiku*) CTX_SIZE="200K" ;;
-  *) CTX_SIZE="?" ;;
+  *1m*|*\[1m\]*) MAX=1000000 ;;
+  *opus*|*sonnet*|*haiku*) MAX=200000 ;;
+  *) MAX=200000 ;;
 esac
+
+# -- context % remaining --
+# Claude Code doesn't pass token counts on stdin; read the latest assistant
+# usage record from the session transcript and compute against the model's
+# effective context window.
+TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty')
+CTX_PCT="?"
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  USED=$(tac "$TRANSCRIPT" 2>/dev/null \
+    | grep -m1 '"usage"' \
+    | jq -r '(.message.usage // .usage // {}) | ((.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0))' 2>/dev/null)
+  if [ -n "$USED" ] && [ "$USED" -gt 0 ] 2>/dev/null; then
+    REMAINING=$(( 100 - (USED * 100 / MAX) ))
+    [ "$REMAINING" -lt 0 ] && REMAINING=0
+    CTX_PCT="${REMAINING}%"
+  fi
+fi
+if [ "$CTX_PCT" = "?" ] && [ "$(printf '%s' "$INPUT" | jq -r '.exceeds_200k_tokens // false')" = "true" ]; then
+  CTX_PCT="<low"
+fi
 
 # -- last git push (relative time of latest commit on origin/main) --
 LAST_PUSH=$(git -C "$PROJECT_DIR" log -1 --format=%cr origin/main 2>/dev/null)
 [ -z "$LAST_PUSH" ] && LAST_PUSH="?"
 
-printf 'janet-v2 | %s (%s) | Janet: %s | %s | %s (%s) | pushed %s\n' \
-  "$VERSION" "$BRANCH" "$JANET" "$CTX_PCT" "$MODEL" "$CTX_SIZE" "$LAST_PUSH"
+printf 'janet-v2 | nanoclaw %s (%s) | Janet: %s | %s | %s | pushed %s\n' \
+  "$VERSION" "$BRANCH" "$JANET" "$CTX_PCT" "$MODEL" "$LAST_PUSH"
