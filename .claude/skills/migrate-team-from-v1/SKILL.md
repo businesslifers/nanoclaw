@@ -65,11 +65,9 @@ Save the unit/label as `V2_SERVICE`. If neither found, note "manual restart requ
 
 ### 0d. Migrations at head
 
-```bash
-pnpm exec tsx scripts/run-migrations.ts
-```
+The host runs central-DB migrations on startup, so an active service from 0c implies the schema is current. If 0c found nothing (manual-run install), tell the operator: "ensure the host has been started against this checkout since the last `git pull` — that's what runs migrations."
 
-Idempotent. Confirms the central DB schema is current.
+> **Don't** run `pnpm exec tsx scripts/run-migrations.ts` here — in current trunk that script is the version-upgrade runner used by `/update-nanoclaw` and takes `<from-version> <to-version> <new-core-path>` args. Calling it bare-handed errors noisily.
 
 ### 0e. OneCLI reachable (if used)
 
@@ -156,13 +154,15 @@ const folder = process.argv[1];
 const grp = db.prepare('SELECT * FROM registered_groups WHERE folder = ?').get(folder);
 console.log('--- registered_groups ---');
 console.log(JSON.stringify(grp, null, 2));
-const tasks = db.prepare(\"SELECT id, schedule_type, schedule_value, next_run, agent_role, prompt FROM scheduled_tasks WHERE chat_jid = ? AND status='active'\").all(grp.jid);
-console.log('--- active scheduled_tasks (' + tasks.length + ') ---');
-for (const t of tasks) console.log(JSON.stringify(t, null, 2));
+if (grp) {
+  const tasks = db.prepare(\"SELECT * FROM scheduled_tasks WHERE chat_jid = ? AND status='active'\").all(grp.jid);
+  console.log('--- active scheduled_tasks (' + tasks.length + ') ---');
+  for (const t of tasks) console.log(JSON.stringify(t, null, 2));
+}
 " "$V1_FOLDER"
 ```
 
-Save the output. The `jid` becomes irrelevant after the channel cutover, but `container_config.additionalMounts`, the trigger pattern, and the `(schedule_value, prompt)` pairs all carry over.
+Use `SELECT *` — v1's `scheduled_tasks` schema has drifted across versions (e.g. older builds don't have `agent_role`; newer ones do). Naming columns explicitly errors on installs that lack them. The `jid` becomes irrelevant after the channel cutover, but `container_config.additionalMounts`, the trigger pattern, and the `(schedule_value, prompt)` pairs all carry over.
 
 ### 2c. Host-mounted secrets
 
@@ -174,12 +174,33 @@ ls -la <hostPath-from-additionalMounts>
 
 These files stay where they are — v2 mounts them with the same `additionalMounts` shape (phase 7c).
 
+### 2d. Decide: port vs. fresh agent
+
+If 2a–2c found nothing meaningful to port, the rest of the skill is 10 phases of no-ops. Classify the team:
+
+- **No customization** if ALL of: `agents.json` absent, `wiki/` absent, `sources/` absent, `container_config IS NULL` in the v1 row, `scheduled_tasks` count = 0, AND `CLAUDE.md` is the v1 boilerplate (compare against `<V1_PATH>/groups/main/CLAUDE.md` or another known-stock group — within ~5% size and no team-specific content beyond the default Janet template).
+- **Some customization** otherwise.
+
+If no customization, ask the operator with AskUserQuestion:
+
+> v1 `<V1_FOLDER>` has no team-specific content (no agents.json, no wiki, no sources, no scheduled tasks, generic CLAUDE.md). What do you want to do?
+> - **Skip the port — create a fresh agent** *(recommended)*: Use `init-group-agent.ts` directly — saves ~10 phases of no-op work.
+> - **Port it anyway**: Run the full skill; you'll end up with a v2 agent group named after the team and the boilerplate copied verbatim.
+> - **Pick a different team**: Show the candidate list again.
+
+If "skip", jump straight to phase 3 (channel) → phase 6 (init-group-agent) → phase 5b (OneCLI pre-create) → phase 10 smoke test → phase 11 log. Skip phases 4, 7, 8, 9 entirely. The team has nothing to translate.
+
 ## Phase 3 — Decide the channel cutover
 
 Show the categorized channel list from phase 0f. Ask the user to pick. Capture:
 
 - `CHANNEL` — adapter name (e.g. `telegram`, `whatsapp`, `slack`)
 - `PLATFORM_ID` — the chat ID format for the chosen channel
+
+**If the v1 team's channel adapter isn't installed in v2** (e.g. v1 was on Slack but the v2 install only has Telegram in `src/channels/`), surface this as an explicit binary fork — don't make the operator infer it:
+
+- **Install the missing adapter first** — run the matching `/add-<channel>` skill (e.g. `/add-slack`, `/add-discord`) before continuing this port, so the v2 agent stays on the same channel as v1.
+- **Cut over to a different channel** — pick from the installed-and-configured list. The agent's role spec still works; phase 7a will need to update channel-specific formatting hints (Slack mrkdwn vs. Telegram MarkdownV2 vs. Discord standard).
 
 If the user picks **WhatsApp (Baileys)**, surface this constraint:
 
@@ -232,6 +253,21 @@ If v1's `additionalMounts` pointed at host paths (e.g. `~/nanoclaw-secrets/<team
 Auto-created v2 OneCLI agents start in `selective` mode with **no secrets assigned**, even if matching secrets exist in the vault. Symptom: first message hangs or returns 401. Pre-create the agent and assign secrets BEFORE the first container spawn.
 
 This step runs AFTER phase 6 (which gives you the v2 `agent_groups.id`). Plan it now; execute after phase 6.
+
+**v1-twin lookup (do this first).** v1 installs typically already have a OneCLI agent for this team, identified by `<channel>-<team>` (e.g. `slack-crm`, `whatsapp-launchmate`). Find it before deciding mode/secrets — its assigned set is the operator's existing baseline:
+
+```bash
+onecli agents list | python3 -c "
+import json, sys
+v1_ident_guess = '<v1-folder-without-channel-prefix>'  # e.g. 'crm' for slack_crm
+for a in json.load(sys.stdin):
+    ident = a.get('identifier', '') or ''
+    if ident.endswith('-' + v1_ident_guess) or ident == v1_ident_guess:
+        print(json.dumps({'id': a['id'], 'identifier': ident, 'name': a.get('name'), 'mode': a.get('secret_mode')}))
+"
+```
+
+If found, list its assigned secrets and surface them to the operator with AskUserQuestion: "v1 has secrets X, Y, Z assigned to this team — clone the same set, mode=all, or start fresh with just Anthropic?" Don't decide silently; the answer often differs by team scope.
 
 ```bash
 # 1. Discover v1's secret assignments (V1's identifier is its v1 group name, e.g. "whatsapp-<team>").
