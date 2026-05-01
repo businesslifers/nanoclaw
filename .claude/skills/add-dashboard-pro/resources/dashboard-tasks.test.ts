@@ -87,15 +87,15 @@ describe('collectTasks', () => {
     expect(tasks.map((t) => t.id).sort()).toEqual(['t1', 't4', 't5']);
   });
 
-  it('decorates rows with prompt preview, script flag, and next run', () => {
-    const longPrompt = 'x'.repeat(200);
+  it('decorates rows with full prompt, preview, script flag, and next run', () => {
+    const veryLongPrompt = 'x'.repeat(800);
     seedSession('ag1', 's1', [
       {
         id: 't1',
         status: 'pending',
         recurrence: '0 9 * * *',
         process_after: '2026-04-30T09:00:00Z',
-        content: JSON.stringify({ prompt: longPrompt, script: 'echo hi' }),
+        content: JSON.stringify({ prompt: veryLongPrompt, script: 'echo hi' }),
       },
     ]);
     const [task] = collectTasks([refA]);
@@ -103,13 +103,24 @@ describe('collectTasks', () => {
     expect(task.agentGroupId).toBe('ag1');
     expect(task.agentGroupName).toBe('Group A');
     expect(task.sessionId).toBe('s1');
-    expect(task.promptPreview.length).toBe(78);
+    // Prompts longer than 500 chars get truncated to 497 + ellipsis = 498 chars total
+    expect(task.promptPreview.length).toBe(498);
     expect(task.promptPreview.endsWith('…')).toBe(true);
-    expect(task.prompt).toBe(longPrompt);
-    expect(task.prompt.length).toBe(200);
+    expect(task.prompt).toBe(veryLongPrompt);
+    expect(task.prompt.length).toBe(800);
     expect(task.scriptPresent).toBe(true);
     expect(task.recurrence).toBe('0 9 * * *');
     expect(task.nextRun).toMatch(/^\d{4}-\d{2}-\d{2}T09:00:00/);
+  });
+
+  it('keeps medium-length prompts intact (between 80 and 500 chars)', () => {
+    const mediumPrompt = 'y'.repeat(200);
+    seedSession('ag1', 's1', [
+      { id: 't1', status: 'pending', content: JSON.stringify({ prompt: mediumPrompt }) },
+    ]);
+    const [task] = collectTasksForSession(refA);
+    expect(task.prompt).toBe(mediumPrompt);
+    expect(task.promptPreview).toBe(mediumPrompt); // 200 chars, no truncation
   });
 
   it('uses process_after as nextRun for one-shot tasks', () => {

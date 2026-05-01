@@ -23,7 +23,7 @@ export interface TaskSummary {
   status: 'pending' | 'processing' | 'paused';
   /** Full prompt — used by the drawer's edit textarea, hover tooltip, and search. */
   prompt: string;
-  /** First 80 chars of prompt (with ellipsis) — used by the one-line table cell. */
+  /** First 500 chars of prompt (with ellipsis) — used by the wrapping table cell. */
   promptPreview: string;
   scriptPresent: boolean;
   recurrence: string | null;
@@ -106,7 +106,7 @@ function decorateRow(row: TaskRow, sessionRef: SessionRef): TaskSummary {
     // malformed content — leave defaults rather than crashing the whole collect
   }
 
-  const promptPreview = prompt.length > 80 ? prompt.slice(0, 77) + '…' : prompt;
+  const promptPreview = prompt.length > 500 ? prompt.slice(0, 497) + '…' : prompt;
 
   return {
     id: row.id,
