@@ -267,7 +267,7 @@ If the user picks **WhatsApp (Baileys)**, surface this constraint:
 
 > Baileys WhatsApp can only own one session per WhatsApp number. If v1 is currently running on the team's WhatsApp account, you must stop v1 before scanning the QR for v2 — there is no graceful handover. Plan ~30 minutes downtime. Alternatively: spin up v2 on a second WhatsApp number and add it to the same group. Or: switch to WhatsApp Cloud (Meta API) via /add-whatsapp-cloud.
 
-If the user picks **Telegram**, capture the chat ID. The fast path: if the bot has been added to the new Telegram group and any message was sent there, v2's adapter already auto-created a `messaging_groups` row. Look for the most recent unnamed/new-titled telegram row:
+If the user picks **Telegram**, capture the chat ID. The fast path: if the bot has been added to the new Telegram chat and any message was sent there, v2's adapter already auto-created a `messaging_groups` row. Look for the most recent unnamed/new-titled telegram row:
 
 ```bash
 pnpm exec tsx -e "
@@ -278,7 +278,7 @@ for (const r of rows) console.log(JSON.stringify(r));
 "
 ```
 
-The negative integer in `platform_id` (`telegram:-1001234567890`) is the chat ID. **Do not approve any channel-registration card** that landed in the operator's DM — phase 6 wires the right agent group and clears stale approvals automatically.
+The integer in `platform_id` is the chat ID. **Groups have negative IDs** (e.g. `telegram:-1001234567890`); **personal DMs have positive IDs** (the user's Telegram ID, e.g. `telegram:7466423983`). Both flow through `--platform-id` to `init-group-agent.ts` unchanged. Personal-DM ports — porting a v1 1:1 chat like `whatsapp_<owner>` — land in the second case; the row may also already exist from a prior `/init-first-agent` or `/add-karpathy-llm-wiki` run, which makes phase 2e re-port detection important. **Do not approve any channel-registration card** that landed in the operator's DM — phase 6 wires the right agent group and clears stale approvals automatically.
 
 For Slack/Discord/WhatsApp/etc., follow that channel's specific path to obtain the platform ID. If the user doesn't know, search the install for that channel's setup skill (`grep '/add-<channel>' .claude/skills/`).
 
@@ -451,27 +451,26 @@ Then read the file and edit:
 - **Move v1's "Improvement Backlog" / "Watch items" sections out** of `CLAUDE.role.md` into `sources/improvement-backlog.md` — they're operational state, not role spec.
 - If you went lane-agent (phase 4), update the "delegation" section to refer to lane agents addressed via `send_message` rather than sub-agents addressed via Task tool.
 
-### 7a.bis. Wire CLAUDE.role.md into the auto-load chain
+### 7a.bis. Verify CLAUDE.role.md is in the auto-load chain
 
-**v2's composed `CLAUDE.md` does NOT auto-import `CLAUDE.role.md`.** It imports `.claude-shared.md`, the module fragments, and `CLAUDE.local.md` (which Claude Code auto-loads). So the role spec you just wrote to `CLAUDE.role.md` will be invisible to the agent unless `CLAUDE.local.md` pulls it in.
+In current trunk, the composed `CLAUDE.md` auto-imports `@./CLAUDE.role.md` (see `src/claude-md-compose.ts:126`, pinned by tests in `claude-md-compose.test.ts`). The role spec you just wrote is loaded automatically — **do not** add `@./CLAUDE.role.md` to `CLAUDE.local.md` on current trunk; it would be a duplicate import.
 
-`init-group-agent.ts` creates an empty `CLAUDE.local.md`. Add a single import line:
-
-```bash
-echo '@./CLAUDE.role.md' > "groups/$V2_FOLDER/CLAUDE.local.md"
-```
-
-The agent's effective system prompt will then be: shared base + module fragments + role spec + (room below the import for operational memory you or the agent add over time). Keep the `@./CLAUDE.role.md` line at the top so the role loads first.
-
-For lane agents (phase 8), do the same after each lane is created:
+Quick sanity check (skip on greenfield ports; do it on re-ports, on installs you didn't set up, or if you suspect drift):
 
 ```bash
-for lane in <lane-folder-1> <lane-folder-2> ...; do
-  echo '@./CLAUDE.role.md' > "groups/$lane/CLAUDE.local.md"
-done
+grep -F '@./CLAUDE.role.md' "groups/$V2_FOLDER/CLAUDE.md" && echo "OK" || echo "MISSING"
 ```
 
-Symptom if missed: the agent operates from the generic NanoClaw base only — it knows nothing team-specific (no Google Ads paths, no lane refs, no client-specific instructions). Reports like "I don't see a credentials/ folder" while staring at `/workspace/group/` (the empty Dockerfile WORKDIR) are the typical tell.
+If `MISSING`, the install is on an older `claude-md-compose.ts` that didn't add the import, or someone hand-edited the composed file. Two paths:
+
+- **Best:** rebuild the composed file via the host's normal `composeGroupClaudeMd` flow (restart the host or re-run whatever path normally regenerates it).
+- **Workaround:** add the import to `CLAUDE.local.md` so the role still loads (no harm beyond an extra layer of indirection):
+
+```bash
+echo '@./CLAUDE.role.md' >> "groups/$V2_FOLDER/CLAUDE.local.md"
+```
+
+Lane agents (phase 8) get the same auto-import treatment via `composeGroupClaudeMd` — no per-lane setup needed.
 
 ### 7b. Sub-agents (only if phase 4 = sub-agent path)
 
@@ -523,17 +522,40 @@ mkdir -p "groups/$V2_FOLDER/sources"
 [ -d "$V1_PATH/groups/$V1_FOLDER/sources" ] && cp -r "$V1_PATH/groups/$V1_FOLDER/sources/." "groups/$V2_FOLDER/sources/"
 ```
 
+**Top-level `*.md` files** flagged in phase 2a (e.g. `people.md`, `clients.md`, `preferences.md`, `mettro-voice.md`, `SOUL.md`, `<team>_research.md`) — default to copying these into `sources/`. They're reference material the agent reads on demand; in `sources/` they cost no context budget unless the agent reaches for them. Two exceptions where you should keep them at the team root instead:
+
+1. The role spec or v1 scripts reference them by an unprefixed path (e.g. `Read people.md` rather than `Read sources/people.md`). Keeping them at the root preserves those references; otherwise update the references during phase 7e.
+2. The file is small (<1KB) and load-bearing on every turn (true persona/memory). Treat as a `memory.md`-equivalent and handle in phase 7f.
+
+```bash
+# Copy top-level *.md (excluding CLAUDE.md and memory.md, which are special-cased
+# in phases 7a and 7f) into sources/ by default.
+shopt -s nullglob
+for f in "$V1_PATH/groups/$V1_FOLDER"/*.md; do
+  base=$(basename "$f")
+  case "$base" in CLAUDE.md|memory.md) continue ;; esac
+  cp "$f" "groups/$V2_FOLDER/sources/$base"
+done
+shopt -u nullglob
+```
+
+If 7a's edit of `CLAUDE.role.md` doesn't already mention these files, add a short "Reference Material" section there pointing at `sources/<name>.md` so the agent knows they exist and what each one contains.
+
 Always skip `logs/` — operational noise, never useful.
 
-**Conversation transcripts are a decision** — ask the operator. v1 stored Slack/WhatsApp transcripts in `conversations/`; some teams have rich history worth preserving, others are noisy enough that a clean start is better. Show the size and let the operator pick:
+**Conversation transcripts are a decision** — ask the operator (only if there's anything to copy). v1 stored Slack/WhatsApp transcripts in `conversations/`; some teams have rich history worth preserving, others are noisy enough that a clean start is better. Check first, then ask only if non-empty:
 
 ```bash
 SIZE=$(du -sh "$V1_PATH/groups/$V1_FOLDER/conversations" 2>/dev/null | cut -f1)
 COUNT=$(find "$V1_PATH/groups/$V1_FOLDER/conversations" -type f 2>/dev/null | wc -l | tr -d ' ')
-echo "v1 conversations: $COUNT files, $SIZE total"
+if [ "${COUNT:-0}" -eq 0 ]; then
+  echo "v1 conversations: empty (or missing) — skipping, no operator question needed"
+else
+  echo "v1 conversations: $COUNT files, $SIZE total"
+fi
 ```
 
-Use AskUserQuestion (or plain prompt) with these three options. Default recommendation is skip; bring if the operator answers a clear use case ("yes, the agent needs to recall what was discussed about X").
+If `COUNT=0` (or the directory doesn't exist), **skip the operator question** — there's nothing to copy. Otherwise, use AskUserQuestion (or plain prompt) with these three options. Default recommendation is skip; bring if the operator answers a clear use case ("yes, the agent needs to recall what was discussed about X").
 
 | Option | Where it lands | When to pick |
 |---|---|---|
@@ -638,9 +660,9 @@ This wipes the agent's conversation memory for that session — it forgets earli
 
 If you're still in conversation with the agent, ask it to **re-read** specific files rather than recall their contents — e.g. *"Read CLAUDE.role.md and the credentials JSON, then list the actual paths shown there."* This forces fresh reads and surfaces any remaining stale-quoting before the operator gets confused by mixed-truth replies.
 
-### 7f. CLAUDE.local.md — role + memory imports
+### 7f. CLAUDE.local.md — memory import
 
-`CLAUDE.local.md` is auto-loaded by Claude Code and is the only place per-group content reaches the agent (the composed `CLAUDE.md` does not auto-import `CLAUDE.role.md` — see 7a.bis). After 7a.bis writes the `@./CLAUDE.role.md` line, also import v1's curated memory file.
+`CLAUDE.local.md` is auto-loaded by Claude Code, separately from the composed `CLAUDE.md`. The role spec already loads via `CLAUDE.md` (see 7a.bis — current trunk auto-imports `@./CLAUDE.role.md`), so don't re-import it here. Use `CLAUDE.local.md` for the one v1 piece that v2 doesn't auto-load: the curated memory file.
 
 **If v1 had a `memory.md`, copy it AND add the import. It's almost always load-bearing.** This isn't optional polish — `memory.md` is where v1 teams encoded the persona ("You are Janet from The Good Place, embody her warmth..."), hard always/never rules, and team-specific defaults. The v2 `agent_groups.name` field is just the dashboard label, not a persona override; without `memory.md` imported, persona-coded agents lose their character entirely on the first message and the operator notices immediately.
 
@@ -668,18 +690,18 @@ In v1, `memory.md` was the per-team curated memory file (personality, principles
 
 **Symptom if missed:** the agent loses its persona / hard rules — its assigned voice or character disappears, "always X" / "never Y" guardrails go missing, and team-specific defaults the operator carefully wrote in v1 stop influencing replies.
 
-**Final shape of the file:**
+**Final shape of the file (current trunk):**
 
 ```
-@./CLAUDE.role.md
 @./memory.md     # only if v1 had memory.md
+# (the agent appends its own observations / preferences below over time)
 ```
 
-The agent will append its own observations / preferences below these imports over time. Don't pre-seed conversation history or other dynamic state — that's what `conversations/` (skipped) and the wiki are for.
+`CLAUDE.role.md` does NOT belong here on current trunk — it's already imported by the composed `CLAUDE.md`. Don't pre-seed conversation history or other dynamic state — that's what `conversations/` (skipped) and the wiki are for.
 
 ### 7f.bis — Other v1 memory artifacts
 
-If v1 had additional team-specific memory files (`people.md`, `clients.md`, `preferences.md`, `customers.md`, etc.), the rsync in 7d already copied them. They live as separate files at `/workspace/agent/<name>.md` and the agent reads them on demand (the role spec usually points to them). Don't auto-import these into `CLAUDE.local.md` unless they're small (<1KB) and load-bearing on every turn — keeping them as on-demand-readable files saves context budget.
+If v1 had additional team-specific reference files (`people.md`, `clients.md`, `preferences.md`, `customers.md`, etc.), 7d's top-level `*.md` snippet copied them into `groups/$V2_FOLDER/sources/`. They live at `/workspace/agent/sources/<name>.md` and the agent reads them on demand (the role spec usually points to them; if it doesn't, add a "Reference Material" section in 7a). Don't auto-import these into `CLAUDE.local.md` unless they're small (<1KB) and load-bearing on every turn — keeping them as on-demand-readable files saves context budget. If a file is genuinely persona/memory rather than reference (small, declarative, "always X / never Y" rules), move it from `sources/` back to the team root and import it via `CLAUDE.local.md` like 7f's `memory.md` flow.
 
 ## Phase 8 — Lane agents (only if phase 4 = lane path)
 
