@@ -206,6 +206,51 @@ If no customization, ask the operator with AskUserQuestion:
 
 If "skip", jump straight to phase 3 (channel) → phase 6 (init-group-agent) → phase 5b (OneCLI pre-create) → phase 10 smoke test → phase 11 log. Skip phases 4, 7, 8, 9 entirely. The team has nothing to translate.
 
+### 2e. Detect existing v2 agent (re-port check)
+
+The skill assumes a fresh port end-to-end, but the same v1 team often has a partial v2 presence already — typically because the operator ran `init-group-agent.ts` manually, `/add-karpathy-llm-wiki` scaffolded a skeleton DM, or an earlier port was abandoned half-done. Detect the collision now, since it changes phases 5b, 6, 7a, and 7d.
+
+Pick a candidate `V2_FOLDER` using the same rule phase 6 will (typically `V1_FOLDER` minus the channel prefix, e.g. `slack_adam_dm` → `adam-dm`). Then check three places — any single hit means re-port:
+
+```bash
+V2_FOLDER_CANDIDATE="<your guess>"
+
+echo "--- folder ---"
+[ -d "groups/$V2_FOLDER_CANDIDATE" ] && echo "EXISTS: groups/$V2_FOLDER_CANDIDATE/" || echo "(none)"
+
+echo "--- agent_groups row by folder ---"
+pnpm exec tsx -e "
+const Database = require('better-sqlite3');
+const db = new Database('data/v2.db', { readonly: true });
+const r = db.prepare('SELECT id, name, folder FROM agent_groups WHERE folder = ?').get('$V2_FOLDER_CANDIDATE');
+console.log(r ? JSON.stringify(r) : '(none)');
+"
+
+echo "--- OneCLI agent for that agent_groups.id (if any) ---"
+# Pipe the id from the previous query into:
+# onecli agents list | python3 -c "import json,sys; print(json.dumps([a for a in json.load(sys.stdin) if a.get('identifier')=='<id>'], indent=2))"
+```
+
+Also flag at phase 3: when the picked `mg-...` already has wirings on `messaging_group_agents`, that's another collision signal.
+
+If any match, ask the operator with AskUserQuestion:
+
+| Option | When to pick |
+|---|---|
+| **Overlay onto the existing v2 agent** *(most common)* | Earlier v2 work was a skeleton/stub. Keep the wiring + OneCLI agent + agent_groups row, drop v1 content on top. |
+| **Backup then overlay** | Same as above but copy `groups/<V2_FOLDER>/` to `groups/<V2_FOLDER>.bak-<YYYYMMDD>/` first. Use when the existing v2 has hand-curated content the operator wants reversible. |
+| **Abort and use a different V2_FOLDER** | Folder collision is accidental — the existing v2 agent is unrelated. Pick a different name and continue as a fresh port. |
+
+If overlay (either form), apply these adjustments downstream:
+
+- **Skip phase 5b** — OneCLI agent already exists. List its current assigned secrets (`onecli agents secrets --id <id>`) and confirm they match the v1 twin's set. No `onecli agents create` call.
+- **Skip phase 6 (`init-group-agent.ts`)** — agent group + scaffold already in place. Capture the existing `agent_groups.id` as `V2_AGENT_GROUP_ID`. Run phase 6a's wiring audit anyway — re-ports often inherit a stray default-DM-agent wiring on the same messaging group.
+- **Phase 7a clobber check** — before overwriting `CLAUDE.role.md` / `CLAUDE.local.md`, read the existing `CLAUDE.local.md`. If it's the bare-imports skeleton (just `@./CLAUDE.role.md` and maybe `@./memory.md`), overlay freely. If it contains hand-authored v2 content, surface to the operator: discard (common — v1's CLAUDE.md usually covers the same ground), preserve verbatim by copying to `CLAUDE.local-v2-authored.md.bak` for later manual merge, or abort.
+- **Phase 7d wiki overlay** — `find groups/<V2_FOLDER>/wiki -type f | wc -l`. If <5 files, it's a `/add-karpathy-llm-wiki` skeleton; overlay v1's wiki freely. If ≥5 files or any file outside `index.md`/`log.md`, pause and ask the operator how to merge.
+- **Phase 7e.bis container restart** — required regardless of whether you smoke-tested mid-port. The broadened trigger in 7e.bis covers this.
+
+If no match, continue to phase 3 unchanged.
+
 ## Phase 3 — Decide the channel cutover
 
 Show the categorized channel list from phase 0f. Ask the user to pick. Capture:
@@ -548,7 +593,12 @@ What it skips:
 
 ### 7e.bis — Restart any running session
 
-If the agent's container started before this sed (e.g. because a smoke-test message was sent during/before phase 7), the agent already loaded the old role spec into its session context — and may have *also* read config files (e.g. `credentials/<service>-config.json`) that quoted v1 paths. Path edits on disk DON'T update either of those:
+If the agent's container is running at any point during this port, it already loaded the OLD role spec, the OLD `CLAUDE.local.md` imports, and the OLD `container.json` mounts into its config — none of which the host re-reads on a live container. This fires for two cases:
+
+- **Mid-port smoke-test** — a message was sent during/before phase 7, the agent quoted file content, and the role spec / scripts were edited under it. Path edits on disk DON'T update what's already cached.
+- **Re-port flow (phase 2e)** — the existing v2 agent has been live for hours/days/weeks before the port even started. Same problem: its container config and system prompt reflect pre-port state.
+
+Either way, the agent already loaded the old role spec into its session context — and may have *also* read config files (e.g. `credentials/<service>-config.json`) that quoted v1 paths. Path edits on disk DON'T update either of those:
 
 - **Role spec / system prompt:** loaded once at session start. A container restart fixes this part.
 - **Config / data files the agent already opened:** the Claude Agent SDK persists conversation transcripts (under the session's `.claude-shared/projects/*.jsonl`). Any value the agent quoted in an earlier turn — including stale paths inside JSON configs — survives the container restart and gets re-quoted in later turns. The agent isn't lying; it's faithfully reading from its own preserved memory.
@@ -600,6 +650,19 @@ LOCAL="groups/$V2_FOLDER/CLAUDE.local.md"
   cp "$V1_PATH/groups/$V1_FOLDER/memory.md" "groups/$V2_FOLDER/memory.md" && \
   echo '@./memory.md' >> "$LOCAL"
 ```
+
+**On a channel cutover, scan the copied `memory.md` for channel-specific content and reframe.** Phase 7a covers this for `CLAUDE.role.md`, but `memory.md` has the same problem — and is more dangerous because the agent treats it as authoritative facts rather than instructions. Common patterns to look for after the copy:
+
+- A "Communication Channels" section that says "we communicate exclusively via Slack" / "Teams uses WhatsApp" — the agent will repeat this as fact and may try to message the wrong destination.
+- A channel-architecture table with platform JIDs / chat IDs (Slack `C0...` / WhatsApp `...@g.us` / Telegram negative integers) — those IDs are dead in v2 if the channel cut over, and the agent shouldn't try to route to them.
+- Per-channel admin / privilege notes ("only adam-dm has register_group", "main channel has elevated tools") — v2 manages privilege via `user_roles`, not channel flags.
+- References to v1-only MCP tools that happened to be channel-scoped (`register_group`, etc.).
+
+Don't strip — *reframe*. Move the v1 channel architecture into a `## Historical channels (v1 — <Channel> era)` section labelled clearly as no-longer-live destinations (the table is still useful as archival reference for "what was this team called on Slack"). Add a fresh `## Communication Channels (current — v2)` section pointing at the new channel(s) and the v2 routing model (`send_message` with `to:` for cross-agent delivery; no JIDs in agent code).
+
+If v1 and v2 are on the same channel and platform IDs survive the port, this scan is a no-op — but still grep `memory.md` for `register_group`, `target_group_jid`, and v1 MCP tool names and remove or rewrite. They'll mislead the agent on later turns.
+
+**Symptom if missed:** the agent confidently quotes a Slack channel JID when asked "where should I send this", or refers to itself as the Slack-channel `is_main` agent in a Telegram DM, or proposes `register_group` calls that no longer exist.
 
 In v1, `memory.md` was the per-team curated memory file (personality, principles, hard "always/never" rules). It wasn't auto-loaded by v1's stack either — but the role spec or v1 system prompt explicitly read it on every turn. In v2, the equivalent is auto-loading via `CLAUDE.local.md`.
 
