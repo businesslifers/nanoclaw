@@ -30,3 +30,29 @@ This file tracks teams ported from the v1 install at `/home/admin/Agents/janet/`
 - The `.mjs` scripts hard-code `/workspace/group/node_modules/...` paths. v2's container runner should install `google-ads-node` (per `container.json packages.npm`) into that path on first session. If the imports fail, check container build logs.
 - v1 `package.json` and `package-lock.json` are still in the group folder for reference but are no longer authoritative — `container.json packages.npm` is the source of truth in v2.
 - Lane agents are isolated from the parent's filesystem. They can't read `data/raw/...` directly — the parent must paste relevant data into the `send_message` body. Their CLAUDE.role.md spells this out.
+
+### ClientMate — 2026-05-01 (port #2)
+
+| Field | Value |
+|---|---|
+| v1 folder | `/home/admin/Agents/janet/groups/slack_clientmate/` |
+| v1 channel | Slack — `slack:C0APY2SDPSB`, trigger `@Janet`, `requires_trigger=0` (fired on every message) |
+| v1 secrets | None filesystem-mounted. v1 `additionalMounts` was a cross-team data mount of `groups/slack_briefmate/clients` (read-only) — not credentials. |
+| v1 sub-agents | None — no `agents.json` |
+| v1 npm deps | None |
+| v1 active schedules | 0 |
+| v2 parent folder | `groups/clientmate` (`agent_groups.id = ag-1777607105027-isi0rv`) |
+| v2 channel | telegram — `messaging_groups.platform_id = telegram:-5293085842` (`mg-1777607057297-8k2t6h`), engage_mode `pattern` `/./`, unknown_sender_policy `request_approval` |
+| v2 mount path | None — copied briefmate's `clients/` (5 files: arrow-energy, leap-in, mbi, qld-capital, README) directly into `groups/clientmate/clients/` instead of mounting from briefmate (briefmate not yet ported). |
+| Delegation model chosen | **N/A** — solo agent, no sub-agents in v1 |
+| v2 lanes | None |
+| OneCLI | Pre-created agent (`93208dd7-5ec0-4a1e-b7ca-da6cca7685d8`), `mode=selective`, cloned v1's exact set: 1 secret (Anthropic). ClickUp not assigned despite role-spec referencing `api.clickup.com` auto-injection — assign manually if/when needed. |
+
+**Outstanding on the user:**
+- If clientmate ever needs ClickUp, run `onecli agents set-secrets --id 93208dd7-5ec0-4a1e-b7ca-da6cca7685d8 --secret-ids 4032b812-87e2-4d65-b20e-60651d51fe51,1496e2b7-1981-4872-b0c8-91f82599e301` (Anthropic + ClickUp).
+- Once `slack_briefmate` is ported in a future run, decide whether to switch clientmate's `clients/` from a local copy back to a mount of the v2 briefmate's directory (so edits in briefmate flow into clientmate). For now the two are decoupled.
+
+**Caveats:**
+- Role spec was edited: removed v1-only "Replying to Dispatches from Main" section (no parent in v2), Slack mrkdwn formatting block replaced with Telegram MarkdownV2 hints, "Slack sender" updated to "Telegram sender", `/workspace/global/wiki/` reference removed (v2 has no global wiki concept).
+- `memory.md` carries the Janet (Good Place) personality. The role spec calls the agent "ClientMate" — these don't conflict, but the agent introduces itself as "clientmate" rather than as Janet. If the team prefers the assistant introduce itself as Janet, edit the opening of `CLAUDE.role.md`.
+- Mettro voice rule "no em dashes" — verify the agent obeys this in real drafts; it used an em dash in its first greeting.
