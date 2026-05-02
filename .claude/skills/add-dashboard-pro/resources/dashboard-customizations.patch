@@ -6850,7 +6850,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876fa5bf02b
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
-@@ -0,0 +1,913 @@
+@@ -0,0 +1,921 @@
 +import { layout } from '../layout.js';
 +/**
 + * /dashboard/tasks — every active scheduled task across all sessions.
@@ -6867,6 +6867,62 @@ index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876
 + * and the drawer's live preview.
 + */
 +import cronstrue from 'cronstrue';
++/**
++ * Markdown→HTML for task prompts (escape-first; safe for innerHTML).
++ * Defined at module scope and interpolated into the page via
++ * `${renderMarkdown.toString()}` so its regex literals reach the browser
++ * verbatim — embedding it directly in the template literal would have
++ * the host's template parser strip backslashes (\d→d, \n→newline) and
++ * break the regex literals before the browser ever sees them.
++ */
++function renderMarkdown(src) {
++    if (!src) return '';
++    function escHtml(s) {
++        return String(s)
++            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
++            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
++    }
++    var BT = String.fromCharCode(96);
++    var fenceRe = new RegExp(BT + BT + BT + '([a-zA-Z0-9_+-]*)\\n([\\s\\S]*?)' + BT + BT + BT, 'g');
++    var inlineRe = new RegExp(BT + '([^' + BT + '\\n]+)' + BT, 'g');
++    var blocks = [], inlines = [];
++    src = src.replace(fenceRe, function(_m, _lang, code) {
++        blocks.push('<pre class="md-pre"><code>' + escHtml(code.replace(/\n$/, '')) + '</code></pre>');
++        return '__MD_F_' + (blocks.length - 1) + '__';
++    });
++    src = src.replace(inlineRe, function(_m, code) {
++        inlines.push('<code class="md-code">' + escHtml(code) + '</code>');
++        return '__MD_I_' + (inlines.length - 1) + '__';
++    });
++    src = escHtml(src);
++    src = src.replace(/^(#{1,6})[ \t]+(.+?)[ \t]*$/gm, function(_m, h, text) {
++        return '<h' + h.length + ' class="md-h' + h.length + '">' + text + '</h' + h.length + '>';
++    });
++    src = src.replace(/\*\*([^\*\n]+?)\*\*/g, '<strong>$1</strong>');
++    src = src.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
++    src = src.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
++    src = src.replace(/(^|[^a-zA-Z0-9])_([^_\n]+?)_(?=$|[^a-zA-Z0-9])/g, '$1<em>$2</em>');
++    src = src.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, function(_m, text, url) {
++        if (!/^(https?:|mailto:|\/)/i.test(url)) return text;
++        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
++    });
++    src = src.replace(/(?:^[ \t]*[-*][ \t]+.+(?:\n[ \t]*[-*][ \t]+.+)*)/gm, function(block) {
++        var items = block.split(/\n/).map(function(l) { return l.replace(/^[ \t]*[-*][ \t]+/, ''); });
++        return '<ul class="md-ul">' + items.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul>';
++    });
++    src = src.replace(/(?:^[ \t]*\d+\.[ \t]+.+(?:\n[ \t]*\d+\.[ \t]+.+)*)/gm, function(block) {
++        var items = block.split(/\n/).map(function(l) { return l.replace(/^[ \t]*\d+\.[ \t]+/, ''); });
++        return '<ol class="md-ol">' + items.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ol>';
++    });
++    src = src.replace(/__MD_I_(\d+)__/g, function(_m, i) { return inlines[+i]; });
++    src = src.replace(/__MD_F_(\d+)__/g, function(_m, i) { return blocks[+i]; });
++    return src.split(/\n{2,}/).map(function(b) {
++        var t = b.trim();
++        if (!t) return '';
++        if (/^<(h[1-6]|ul|ol|pre|blockquote|hr|table)/i.test(t)) return t;
++        return '<p class="md-p">' + t.replace(/\n/g, '<br>') + '</p>';
++    }).join('');
++}
 +export function tasksPage() {
 +    // Fetch /api/cronstrue isn't a thing; instead the cronstrue helper is
 +    // loaded as a serializable module. The trick is that cronstrue ships an
@@ -6955,55 +7011,7 @@ index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876
 +      return cronInflight[expr];
 +    }
 +
-+    /** Markdown→HTML for task prompts (escape-first; safe for innerHTML). */
-+    function renderMarkdown(src) {
-+      if (!src) return '';
-+      function escHtml(s) {
-+        return String(s)
-+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-+      }
-+      var BT = String.fromCharCode(96);
-+      var fenceRe = new RegExp(BT + BT + BT + '([a-zA-Z0-9_+-]*)\\n([\\s\\S]*?)' + BT + BT + BT, 'g');
-+      var inlineRe = new RegExp(BT + '([^' + BT + '\\n]+)' + BT, 'g');
-+      var blocks = [], inlines = [];
-+      src = src.replace(fenceRe, function(_m, _lang, code) {
-+        blocks.push('<pre class="md-pre"><code>' + escHtml(code.replace(/\n$/, '')) + '</code></pre>');
-+        return '__MD_F_' + (blocks.length - 1) + '__';
-+      });
-+      src = src.replace(inlineRe, function(_m, code) {
-+        inlines.push('<code class="md-code">' + escHtml(code) + '</code>');
-+        return '__MD_I_' + (inlines.length - 1) + '__';
-+      });
-+      src = escHtml(src);
-+      src = src.replace(/^(#{1,6})[ \t]+(.+?)[ \t]*$/gm, function(_m, h, text) {
-+        return '<h' + h.length + ' class="md-h' + h.length + '">' + text + '</h' + h.length + '>';
-+      });
-+      src = src.replace(/\*\*([^\*\n]+?)\*\*/g, '<strong>$1</strong>');
-+      src = src.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
-+      src = src.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
-+      src = src.replace(/(^|[^a-zA-Z0-9])_([^_\n]+?)_(?=$|[^a-zA-Z0-9])/g, '$1<em>$2</em>');
-+      src = src.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, function(_m, text, url) {
-+        if (!/^(https?:|mailto:|\/)/i.test(url)) return text;
-+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
-+      });
-+      src = src.replace(/(?:^[ \t]*[-*][ \t]+.+(?:\n[ \t]*[-*][ \t]+.+)*)/gm, function(block) {
-+        var items = block.split(/\n/).map(function(l) { return l.replace(/^[ \t]*[-*][ \t]+/, ''); });
-+        return '<ul class="md-ul">' + items.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ul>';
-+      });
-+      src = src.replace(/(?:^[ \t]*\d+\.[ \t]+.+(?:\n[ \t]*\d+\.[ \t]+.+)*)/gm, function(block) {
-+        var items = block.split(/\n/).map(function(l) { return l.replace(/^[ \t]*\d+\.[ \t]+/, ''); });
-+        return '<ol class="md-ol">' + items.map(function(i) { return '<li>' + i + '</li>'; }).join('') + '</ol>';
-+      });
-+      src = src.replace(/__MD_I_(\d+)__/g, function(_m, i) { return inlines[+i]; });
-+      src = src.replace(/__MD_F_(\d+)__/g, function(_m, i) { return blocks[+i]; });
-+      return src.split(/\n{2,}/).map(function(b) {
-+        var t = b.trim();
-+        if (!t) return '';
-+        if (/^<(h[1-6]|ul|ol|pre|blockquote|hr|table)/i.test(t)) return t;
-+        return '<p class="md-p">' + t.replace(/\n/g, '<br>') + '</p>';
-+      }).join('');
-+    }
++    ${renderMarkdown.toString()}
 +
 +    var STATUSES = ['pending', 'processing', 'paused'];
 +    var state = {
