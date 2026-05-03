@@ -135,6 +135,7 @@ export interface ChannelAdapter {
   // Optional
   setTyping?(platformId: string, threadId: string | null): Promise<void>;
   syncConversations?(): Promise<ConversationInfo[]>;
+  resolveChannelName?(platformId: string): Promise<string | null>;
 
   /**
    * Set (or clear) an emoji reaction on a previously-delivered platform
