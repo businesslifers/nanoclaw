@@ -38,13 +38,14 @@
 
 ## Communication Channels (current — v2)
 
-- This DM (Adam) runs on Telegram. Other team channels are being ported across from v1 separately and may not all be live yet.
-- Reach other agents via `send_message` with a `to:` parameter using their local-name. Currently live: `clientmate`, `marketingteam` (was `launchmate` in v1), `crm`, `cli-with-adam`. `briefmate` and `pmmate` are planned ports from v1, not yet available.
-- Mount allowlist (host-only) is the last security boundary — Janet cannot modify it, only Adam can.
+- Adam's DM with you runs on **two channels in parallel**: Telegram (the original v2 channel) and Slack (added 2026-05-05 via `/add-slack`). Format replies per the channel of the incoming message, see "Message Formatting" in your role file.
+- Other team channels (Marketing Team, CRM, ClientMate) are being ported across from v1 separately and may not all be live yet on every platform.
+- `send_message` with a `to:` parameter routes to a destination registered in your `agent_destinations`. Today those are channel destinations only; inter-agent destinations to `clientmate`, `marketingteam`, `crm`, `cli-with-adam` are not yet wired on this install (the agent groups exist; the destination rows do not).
+- Mount allowlist (host-only) is the last security boundary, Janet cannot modify it, only Adam can.
 
 ## Historical channels (v1 — Slack era)
 
-The team ran on Slack until the v2 port. Slack channels and JIDs are kept here for reference only — they are no longer live destinations, and you should not try to message them.
+The team ran on Slack until the v2 port. Slack channels and JIDs below are kept for reference only, they are not live destinations and you should not try to message them. (Slack itself is back as a live channel for Adam's DM in v2, that's the new bot, a different workspace; nothing in this table maps to it.)
 
 | v1 group     | v1 Slack JID    | Notes                        |
 |--------------|-----------------|------------------------------|
