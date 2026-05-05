@@ -76,23 +76,34 @@ async function withRetry(fn, label, retries = 3) {
 
 // ─── Google Ads Client ───────────────────────────────────────────────────────
 
-function createAdsClient() {
+// google-gax 5.x's createFromGoogleCredential bridge silently drops auth from
+// google-auth-library@10.x JWTs. We fetch the bearer token explicitly and
+// attach it as gRPC metadata per-call. Tokens last ~1h, longer than a run.
+let ADS_BEARER_TOKEN = null;
+
+async function createAdsClient() {
   const jwtClient = new JWT({
     email: KEY_DATA.client_email,
     key: KEY_DATA.private_key,
     scopes: ['https://www.googleapis.com/auth/adwords'],
   });
-  const sslCreds = grpc.credentials.createSsl();
-  const authCreds = grpc.credentials.createFromGoogleCredential(jwtClient);
-  const combinedCreds = grpc.credentials.combineChannelCredentials(sslCreds, authCreds);
-  return new GoogleAdsServiceClient({ sslCreds: combinedCreds });
+  const { access_token } = await jwtClient.authorize();
+  ADS_BEARER_TOKEN = access_token;
+  return new GoogleAdsServiceClient({ sslCreds: grpc.credentials.createSsl() });
 }
 
 async function queryAds(adsClient, customerId, query) {
   const rows = [];
   const stream = adsClient.searchStream(
     { customer_id: customerId, query },
-    { otherArgs: { headers: { 'developer-token': CONFIG.developerToken } } }
+    {
+      otherArgs: {
+        headers: {
+          'developer-token': CONFIG.developerToken,
+          authorization: `Bearer ${ADS_BEARER_TOKEN}`,
+        },
+      },
+    }
   );
   for await (const page of stream) {
     for (const row of (page.results || [])) {
@@ -698,7 +709,7 @@ async function main() {
   log(`Active clients: ${activeClients.length}`);
 
   // Create shared API clients
-  const adsClient = createAdsClient();
+  const adsClient = await createAdsClient();
   const ga4Token = await getGA4Token();
 
   const accountResults = [];
