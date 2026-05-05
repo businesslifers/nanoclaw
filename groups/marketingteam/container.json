@@ -1,0 +1,14 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": [
+      "google-ads-node@^23.0.0"
+    ]
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "Marketing Team",
+  "assistantName": "Marketing Team",
+  "agentGroupId": "ag-1777429834314-u4riyu"
+}

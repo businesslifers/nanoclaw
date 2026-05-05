@@ -6,20 +6,65 @@ node_modules/
 # Build output
 dist/
 
-# Local data & auth
+# v1 store and host logs
 store/
-data/
 logs/
 
-# Groups - per-installation state, not tracked
-groups/*
+# === Per-install state (tracked) ===
+# `groups/` and `data/dumps/` are tracked on this install's `origin` remote
+# (businesslifers/janet-v2) for disaster recovery. Per-group identity (personas,
+# memory, wiki, configs, agent scripts) lives there. Live DB, sessions, raw
+# source material, credentials, and runtime artefacts are excluded below.
 
-# Composer-managed CLAUDE.md artifacts (regenerated every spawn) and
-# per-group memory (CLAUDE.local.md) must never be committed.
-**/CLAUDE.local.md
-**/.claude-shared.md
-**/.claude-fragments/
+# --- groups/ exclusions ---
+# Raw source material (chat transcripts, ingested PDFs, etc.) — out of scope
+# for the install repo: large, may contain PII, distilled content lives in wiki/.
+groups/*/sources/
 
+# Live credentials — must never be pushed. Real keys live in OneCLI vault.
+groups/*/credentials/
+groups/*/.env
+groups/*/.env*
+
+# Build artefacts and dependencies under groups/
+groups/*/node_modules/
+groups/*/.pnpm-store/
+groups/*/.pnpm-cache/
+groups/*/dist/
+
+# Runtime / regenerable per-agent data
+groups/*/data/raw/
+groups/*/data/analysis/
+groups/*/data/reports/
+groups/*/data/*.log
+groups/*/data/api-test-result.txt
+groups/*/data/ga4-test-result.txt
+groups/*/data/collector-status.json
+
+# Composer-managed CLAUDE.md artefacts (regenerated each container spawn)
+groups/*/CLAUDE.md
+groups/*/.claude-shared.md
+groups/*/.claude-fragments/
+
+# --- data/ exclusions ---
+# Live central DB and SQLite WAL/SHM transient state.
+# Identity is tracked separately as text dumps under data/dumps/ via
+# scripts/dump-central-db.sh — run before commits that should snapshot state.
+data/v2.db
+data/v2.db-shm
+data/v2.db-wal
+
+# Per-session DBs (inbound.db / outbound.db / .heartbeat) — churn rapidly,
+# regenerate as messages flow in after restore.
+data/v2-sessions/
+
+# Runtime / sockets / secrets
+data/circuit-breaker.json
+data/cli.sock
+data/env/
+data/telegram-pairings.json
+
+# === Generic ===
 # Secrets
 *.keys.json
 .env

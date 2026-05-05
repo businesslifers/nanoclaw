@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "clientmate",
+  "assistantName": "clientmate",
+  "agentGroupId": "ag-1777607105027-isi0rv"
+}

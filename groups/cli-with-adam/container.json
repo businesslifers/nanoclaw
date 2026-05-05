@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "CLI Agent",
+  "assistantName": "CLI Agent",
+  "agentGroupId": "ag-1777255249928-wmdu63"
+}

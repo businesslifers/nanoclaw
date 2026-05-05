@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "CRM",
+  "assistantName": "CRM",
+  "agentGroupId": "ag-1777601813158-ualv4y"
+}

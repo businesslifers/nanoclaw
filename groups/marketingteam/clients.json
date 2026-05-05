@@ -1,0 +1,59 @@
+[
+  {
+    "clientId": "carpet-one-redcliffe",
+    "clientName": "Carpet One - Redcliffe",
+    "googleAdsCustomerId": "336-687-5793",
+    "ga4PropertyId": "285796803",
+    "active": true
+  },
+  {
+    "clientId": "carpet-one-caloundra",
+    "clientName": "Carpet One - Caloundra",
+    "googleAdsCustomerId": "713-800-1437",
+    "ga4PropertyId": "285817063",
+    "active": true
+  },
+  {
+    "clientId": "carpet-one-logan-city",
+    "clientName": "Carpet One - Logan City",
+    "googleAdsCustomerId": "348-046-5964",
+    "ga4PropertyId": "282212065",
+    "active": true
+  },
+  {
+    "clientId": "carpet-one-maroochydore",
+    "clientName": "Carpet One - Maroochydore",
+    "googleAdsCustomerId": "545-352-0645",
+    "ga4PropertyId": "285770332",
+    "active": true
+  },
+  {
+    "clientId": "carpet-one-rockhampton",
+    "clientName": "Carpet One - Rockhampton",
+    "googleAdsCustomerId": "538-554-2747",
+    "ga4PropertyId": "292304494",
+    "active": true
+  },
+  {
+    "clientId": "carpet-one-bundall",
+    "clientName": "Carpet One - Bundall",
+    "googleAdsCustomerId": "229-901-4578",
+    "ga4PropertyId": "285819372",
+    "active": true
+  },
+  {
+    "clientId": "haus-of-rattan",
+    "clientName": "Haus Of Rattan",
+    "googleAdsCustomerId": "420-948-9195",
+    "ga4PropertyId": "331280849",
+    "active": true
+  },
+  {
+    "clientId": "qld-capital",
+    "clientName": "QLD Capital",
+    "googleAdsCustomerId": "483-764-0439",
+    "ga4PropertyId": "342687688",
+    "active": false,
+    "pausedNote": "Client requested all ads paused until further notice — Apr 24, 2026"
+  }
+]

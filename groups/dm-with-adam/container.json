@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "figma": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "test -n \"$FIGMA_API_KEY\" || { echo 'figma MCP: FIGMA_API_KEY not set on host (.env)' >&2; exit 1; }; unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy; exec figma-developer-mcp --figma-api-key=\"$FIGMA_API_KEY\" --stdio"
+      ],
+      "env": {}
+    }
+  },
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [
+    {
+      "hostPath": "~/nanoclaw-secrets/wordpress",
+      "containerPath": "wordpress-creds",
+      "readonly": true
+    }
+  ],
+  "skills": "all",
+  "groupName": "Janet",
+  "assistantName": "Janet",
+  "agentGroupId": "ag-1777257359331-63ti7x"
+}
