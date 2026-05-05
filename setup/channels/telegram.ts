@@ -149,7 +149,7 @@ async function collectTelegramToken(): Promise<string> {
       "Your assistant talks to you through a Telegram bot you create.",
       "Here's how:",
       '',
-      '  1. Open Telegram and message @BotFather',
+      "  1. Open Telegram and message @BotFather — Telegram's official bot for creating and managing bots",
       '  2. Send /newbot and follow the prompts',
       '  3. Copy the token it gives you (it looks like <digits>:<chars>)',
       '',

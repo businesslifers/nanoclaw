@@ -12,6 +12,7 @@
 import fs from 'fs';
 
 import * as p from '@clack/prompts';
+import { styleText } from 'node:util';
 
 const CHANNELS = [
   { value: 'telegram',       label: 'Telegram' },
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
   }
 
   const selected = await p.multiselect({
-    message: 'Which channels do you want to set up?',
+    message: 'Which channels do you want to set up?\n' + styleText('dim', '  space to select, enter to confirm') + '\n',
     options: CHANNELS,
     required: false,
   });

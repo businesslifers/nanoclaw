@@ -5,6 +5,8 @@
 # Run from the v2 directory:
 #   bash migrate-v2.sh
 #
+# If you're in Claude Code, exit first or open a separate terminal.
+#
 # Finds v1 automatically (sibling directory, or $NANOCLAW_V1_PATH).
 # Installs prerequisites (Node, pnpm, deps) via the existing setup.sh
 # bootstrap, then runs the migration steps.
@@ -16,6 +18,19 @@ set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_ROOT"
+
+# This script has interactive prompts (channel selection, service switchover)
+# and streams progress output — it must run in a real terminal, not inside
+# a tool subprocess (e.g. Claude Code's Bash tool, which collapses output).
+if ! [ -t 0 ] || ! [ -t 1 ]; then
+  echo "This script requires an interactive terminal."
+  echo ""
+  echo "If you're in Claude Code, exit first or open a separate terminal,"
+  echo "then run:"
+  echo "  bash migrate-v2.sh"
+  echo ""
+  exit 1
+fi
 
 LOGS_DIR="$PROJECT_ROOT/logs"
 STEPS_DIR="$LOGS_DIR/migrate-steps"
@@ -547,6 +562,26 @@ echo
 echo "$(bold 'Service switchover')"
 echo
 
+# Disable the v1 service so it doesn't auto-start, but leave the unit file
+# on disk so the user can rollback with: systemctl --user start nanoclaw
+# Idempotent — safe to call multiple times.
+disable_v1_service() {
+  if [ "$PLATFORM_SERVICE" = "systemd" ]; then
+    local v1_file="$HOME/.config/systemd/user/${V1_SERVICE}.service"
+    if [ -f "$v1_file" ] || [ -L "$v1_file" ]; then
+      systemctl --user stop "$V1_SERVICE" 2>/dev/null || true
+      systemctl --user disable "$V1_SERVICE" 2>/dev/null || true
+      step_ok "Disabled $V1_SERVICE (unit file kept for rollback)"
+    fi
+  elif [ "$PLATFORM_SERVICE" = "launchd" ]; then
+    local v1_plist="$HOME/Library/LaunchAgents/${V1_SERVICE}.plist"
+    if [ -f "$v1_plist" ] || [ -L "$v1_plist" ]; then
+      launchctl unload "$v1_plist" 2>/dev/null || true
+      step_ok "Unloaded $V1_SERVICE (plist kept for rollback)"
+    fi
+  fi
+}
+
 # Detect platform and service names
 V1_SERVICE=""
 V2_SERVICE=""
@@ -635,16 +670,14 @@ if [ "$V1_RUNNING" = "true" ]; then
       SERVICE_SWITCHED=false
     else
       step_ok "Keeping v2 service"
-      # Disable v1 from auto-starting
-      if [ "$PLATFORM_SERVICE" = "systemd" ]; then
-        systemctl --user disable "$V1_SERVICE" 2>/dev/null || true
-      fi
+      disable_v1_service
     fi
   else
     step_skip "Service switchover skipped"
   fi
 else
   step_skip "v1 service not running — nothing to switch"
+  disable_v1_service
 fi
 
 echo
@@ -676,6 +709,16 @@ echo "    $(green '✓')  Channels installed: ${SELECTED_CHANNELS[*]}"
 fi
 echo "    $(green '✓')  Container skills copied"
 echo "    $(green '✓')  Container image built"
+if [ "$SERVICE_SWITCHED" = "true" ] && [ -n "$V2_SERVICE" ]; then
+echo "    $(green '✓')  Service switched to v2 $(dim "($V2_SERVICE)")"
+echo
+echo "  $(bold 'Rollback to v1:')"
+if [ "$PLATFORM_SERVICE" = "systemd" ]; then
+echo "    $(dim '$') systemctl --user stop $V2_SERVICE && systemctl --user start $V1_SERVICE"
+elif [ "$PLATFORM_SERVICE" = "launchd" ]; then
+echo "    $(dim '$') launchctl unload ~/Library/LaunchAgents/${V2_SERVICE}.plist && launchctl load ~/Library/LaunchAgents/${V1_SERVICE}.plist"
+fi
+fi
 echo
 echo "  $(bold 'What still needs a human:')"
 if [ "$ONECLI_OK" = "false" ]; then

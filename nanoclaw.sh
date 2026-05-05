@@ -137,6 +137,96 @@ write_header
 # NANOCLAW_BOOTSTRAPPED=1 and skips re-printing the wordmark.
 cat "$PROJECT_ROOT/assets/setup-splash.txt"
 
+# ─── pre-flight: minimum hardware specs ────────────────────────────────
+# NanoClaw runs an agent container per session. Below these thresholds the
+# host + container + agent will struggle (OOM under load, image + session
+# DBs filling the disk). Soft warn — `df` only sees the partition that
+# $PROJECT_ROOT lives on, which can underreport on hosts with separate
+# /home or /var mounts, so the user can override.
+
+# RAM floor is set below 4 GB because "4 GB" VMs typically report 3700–3900 MB
+# after kernel reserves (e.g. Hetzner CX21 ≈ 3814, AWS t3.medium ≈ 3800).
+MIN_MEM_MB=3700
+MIN_DISK_GB=20
+
+detect_mem_mb() {
+  case "$(uname -s)" in
+    Linux)
+      awk '/^MemTotal:/ {printf "%d", $2 / 1024}' /proc/meminfo 2>/dev/null
+      ;;
+    Darwin)
+      local bytes
+      bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+      echo $(( bytes / 1024 / 1024 ))
+      ;;
+  esac
+}
+
+detect_disk_gb() {
+  # -P: POSIX format (no line-wrapping); -k: 1024-byte blocks. Avail is col 4.
+  df -Pk "$PROJECT_ROOT" 2>/dev/null \
+    | awk 'NR==2 { printf "%d", $4 / 1024 / 1024 }'
+}
+
+MEM_MB=$(detect_mem_mb)
+DISK_GB=$(detect_disk_gb)
+: "${MEM_MB:=0}"
+: "${DISK_GB:=0}"
+
+LOW_MEM=false; LOW_DISK=false
+[ "$MEM_MB"  -gt 0 ] && [ "$MEM_MB"  -lt "$MIN_MEM_MB" ]  && LOW_MEM=true
+[ "$DISK_GB" -gt 0 ] && [ "$DISK_GB" -lt "$MIN_DISK_GB" ] && LOW_DISK=true
+
+if [ "$LOW_MEM" = true ] || [ "$LOW_DISK" = true ]; then
+  printf '  %s\n' "$(red 'Warning: this machine likely cannot run NanoClaw.')"
+  printf '  %s\n' "$(dim 'NanoClaw recommends a 4 GB+ machine with 20 GB+ free disk. Below this,')"
+  printf '  %s\n' "$(dim 'the host + agent container will run out of memory or disk under most')"
+  printf '  %s\n' "$(dim 'workloads. A stronger machine is strongly recommended.')"
+  [ "$LOW_MEM"  = true ] && printf '  %s\n' "$(dim "  · Detected RAM:                 ${MEM_MB} MB")"
+  [ "$LOW_DISK" = true ] && printf '  %s\n' "$(dim "  · Free disk on $PROJECT_ROOT: ${DISK_GB} GB")"
+  printf '\n'
+  read -r -p "  $(bold 'Try anyway?') [y/N] " SPECS_ANS </dev/tty
+
+  case "${SPECS_ANS:-N}" in
+    [Yy]*)
+      ph_event setup_low_specs_continued mem_mb="$MEM_MB" disk_gb="$DISK_GB" low_mem="$LOW_MEM" low_disk="$LOW_DISK"
+      printf '\n'
+      ;;
+    *)
+      ph_event setup_low_specs_aborted mem_mb="$MEM_MB" disk_gb="$DISK_GB" low_mem="$LOW_MEM" low_disk="$LOW_DISK"
+      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run after upgrading the host or freeing disk space.')"
+      exit 1
+      ;;
+  esac
+fi
+
+# ─── pre-flight: Google Cloud VM warning (Linux) ──────────────────────
+# NanoClaw is known to not run reliably on Google Compute Engine instances.
+# Warn early — before the root check or bootstrap spinner — so users can
+# switch providers before sinking time into setup. Detection uses DMI
+# (no network round-trip), which on GCE reports "Google" / "Google
+# Compute Engine".
+if [ "$(uname -s)" = "Linux" ] \
+  && { grep -qi 'Google' /sys/class/dmi/id/product_name 2>/dev/null \
+    || grep -qi 'Google' /sys/class/dmi/id/sys_vendor   2>/dev/null; }; then
+  printf '  %s\n' "$(red 'Warning: Google Cloud VM detected.')"
+  printf '  %s\n' "$(dim 'Google blocks sudo commands, so NanoClaw is unlikely to run successfully on this VM.')"
+  printf '  %s\n\n' "$(dim 'If you want to run NanoClaw successfully, switch to a different provider (Hetzner, Hostinger, exe.dev and others..).')"
+  read -r -p "  $(bold 'Try anyway?') [y/N] " GCE_ANS </dev/tty
+
+  case "${GCE_ANS:-N}" in
+    [Yy]*)
+      ph_event setup_gce_continued
+      printf '\n'
+      ;;
+    *)
+      ph_event setup_gce_aborted
+      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run on a non-GCE host to continue.')"
+      exit 1
+      ;;
+  esac
+fi
+
 # ─── pre-flight: root user warning (Linux) ────────────────────────────
 if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" -eq 0 ]; then
   printf '  %s\n' \
