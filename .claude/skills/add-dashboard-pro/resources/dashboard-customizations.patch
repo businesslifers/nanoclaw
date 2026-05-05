@@ -542,7 +542,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 -    { href: '/dashboard/agent-groups', label: 'Agent Groups', icon: '&#9654;' },
 -    { href: '/dashboard/sessions', label: 'Sessions', icon: '&#8635;' },
 -    { href: '/dashboard/channels', label: 'Channels', icon: '&#8644;' },
-+    { href: '/dashboard/agent-groups', label: 'Agent Groups', icon: '&#9654;', countKey: 'agentGroups' },
++    { href: '/dashboard/agent-groups', label: 'Teams', icon: '&#9654;', countKey: 'agentGroups' },
 +    { href: '/dashboard/sessions', label: 'Sessions', icon: '&#8635;', countKey: 'sessions' },
 +    { href: '/dashboard/tasks', label: 'Tasks', icon: '&#9202;' },
 +    { href: '/dashboard/channels', label: 'Channels', icon: '&#8644;', countKey: 'channels' },
@@ -4204,7 +4204,8 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 @@ -1,9 +1,8 @@
  import { layout } from '../layout.js';
  export function agentGroupsPage() {
-     return layout('Agent Groups', '/dashboard/agent-groups', `
+-    return layout('Agent Groups', '/dashboard/agent-groups', `
++    return layout('Teams', '/dashboard/agent-groups', `
 -    <h2 class="page-title">Agent Groups</h2>
 -    <div id="content"><div class="loading">Loading...</div></div>
 -    <div id="detail" style="display:none"></div>
@@ -4243,7 +4244,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +          api('/api/tokens/summary').catch(function(){ return null; }),
 +        ]);
 +        if (!groups || groups.length === 0) {
-+          document.getElementById('ag-index').innerHTML = '<div class="ov-loading">No agent groups configured</div>';
++          document.getElementById('ag-index').innerHTML = '<div class="ov-loading">No teams configured</div>';
            return;
          }
 -        document.getElementById('content').innerHTML =
@@ -4283,11 +4284,11 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +        var headerHtml =
 +          '<header class="ov-header">' +
 +            '<div class="ov-header-title">' +
-+              '<h2>Agent Groups</h2>' +
++              '<h2>Teams</h2>' +
 +              '<p class="ov-subtitle">Organize and manage your AI agents</p>' +
 +            '</div>' +
 +            '<div class="ag-toolbar">' +
-+              '<input type="search" id="ag-search" class="ag-search" placeholder="Search groups…" autocomplete="off">' +
++              '<input type="search" id="ag-search" class="ag-search" placeholder="Search teams…" autocomplete="off">' +
 +              '<select id="ag-model-filter" class="ag-select">' +
 +                '<option value="">All Models</option>' + modelOpts +
 +              '</select>' +
@@ -4315,7 +4316,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +            '<table class="ag-table">' +
 +              '<thead><tr>' +
 +                '<th>Name</th><th>Folder</th><th>Model</th>' +
-+                '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this agent group">Usage</th>' +
++                '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this team">Usage</th>' +
 +                '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
 +                '<th>Created</th><th class="ag-actions"></th>' +
 +              '</tr></thead>' +
@@ -6109,7 +6110,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b4833
 +        </div>
 +      </section>
 +
-+      <h3 class="ov-section">Agent Groups</h3>
++      <h3 class="ov-section">Teams</h3>
 +      <div id="ov-groups"><div class="ov-loading">Loading…</div></div>
 +    </div>
  
@@ -6216,8 +6217,8 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b4833
 +        detailHtml += '</tbody></table></div>';
 +
 +        var groupsRoll = tokenData.byGroup || {};
-+        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Agent Group</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Group</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th><th>Cost</th></tr></thead><tbody>';
++        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Team</h3>' +
++          '<table class="ov-table"><thead><tr><th>Team</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th><th>Cost</th></tr></thead><tbody>';
 +        for (var gid in groupsRoll) {
 +          var gv = groupsRoll[gid];
            detailHtml += '<tr><td><a href="/dashboard/agent-groups?id=' + esc(gid) + '">' + esc(gv.name) + '</a></td>' +
@@ -6343,7 +6344,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b4833
 +
 +        var agentGroupsList = Array.isArray(agentGroups) ? agentGroups : [];
 +        if (agentGroupsList.length === 0) {
-+          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No agent groups</div>';
++          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No teams</div>';
 +        } else {
 +          // Order leads first, with sub-agents immediately under their lead, mirroring
 +          // the Agent Groups page list view. Reuses the .agent-groups-v2 CSS scope so
@@ -6634,7 +6635,7 @@ index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052e
 +        '<div class="ov-panel se-table-panel">' +
 +        '<table class="se-table">' +
 +          '<thead><tr>' +
-+            '<th>Agent group</th>' +
++            '<th>Team</th>' +
 +            '<th>Channel</th>' +
 +            '<th>Destination</th>' +
 +            '<th>Status</th>' +
@@ -7571,7 +7572,7 @@ index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876
 +          '<div class="task-drawer-value">' + (t.nextRun ? esc(t.nextRun) + ' <span class="task-drawer-rel">(' + esc(timeAgo(t.nextRun, true)) + ')</span>' : '—') + '</div>' +
 +        '</div>' +
 +        '<div class="task-drawer-section">' +
-+          '<label class="task-drawer-label">Agent group</label>' +
++          '<label class="task-drawer-label">Team</label>' +
 +          '<div class="task-drawer-value">' + esc(t.agentGroupName) + '</div>' +
 +        '</div>' +
 +        '<div class="task-drawer-section">' +
@@ -7872,7 +7873,7 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9
 +              '<th>Channel</th>' +
 +              '<th>Privilege</th>' +
 +              '<th>Roles</th>' +
-+              '<th>Groups</th>' +
++              '<th>Teams</th>' +
 +              '<th>DMs</th>' +
 +              '<th>Joined</th>' +
 +              '<th class="us-col-actions"></th>' +
