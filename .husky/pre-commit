@@ -1,1 +1,9 @@
 pnpm run format:fix
+
+# Refresh central-DB identity dumps so they snapshot the current state.
+# Live data/v2.db is gitignored; data/dumps/*.sql is committed as text.
+# No-op if the DB doesn't exist (e.g. fresh clone before first run).
+if [ -f data/v2.db ]; then
+  bash scripts/dump-central-db.sh >/dev/null
+  git add data/dumps/
+fi
