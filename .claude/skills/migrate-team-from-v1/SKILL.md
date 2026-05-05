@@ -17,6 +17,7 @@ You (Claude) walk the user through 12 phases, asking only the decisions that gen
 - **One team at a time.** Don't try to batch multiple teams in one invocation.
 - **Lanes by default.** Translate v1 sub-agents to lane agents unless the user opts out. See phase 4.
 - **Channel-agnostic.** Detect installed channels; let the user pick. No baked channel preference.
+- **Scripts are sacred.** Copy team `*.mjs` / `*.js` / `*.ts` / `*.sh` files verbatim. Do not refactor auth setup, "simplify" client construction, or modernize imports during a port — visually-equivalent code may behave differently because library APIs drift between v1's pinned versions and v2's container resolution. Path-sweep them in 7e; otherwise leave alone. (See marketing-team port: `collector.mjs`'s `createAdsClient()` was simplified during port and silently broke Google Ads auth for 6 days.)
 
 ## Phase 0 — Preflight
 
@@ -141,7 +142,8 @@ Note which of these exist (skip the ones marked skip):
 - `memory.md` — curated persona / hard rules (imported into `CLAUDE.local.md` in phase 7f)
 - `wiki/` — knowledge base (copied verbatim)
 - `sources/`, `self-review-proposals.json` — reference material (copied to `sources/`)
-- **Any other directory or `*.md` file** (`voices/`, `client-notes/`, `clients/`, `people.md`, `preferences.md`, `mettro-voice.md`, etc.) — team-curated knowledge. Copy verbatim in phase 7d. The role spec almost always references these by path, so they're load-bearing even if the standard list above doesn't name them.
+- **Any other directory or `*.md` file** (`voices/`, `client-notes/`, `clients/`, `people.md`, `preferences.md`, `mettro-voice.md`, etc.) — team-curated knowledge. Copy verbatim in phase 7c.bis. The role spec almost always references these by path, so they're load-bearing even if the standard list above doesn't name them.
+- **Scripts and dep manifests** (`*.mjs`, `*.js`, `*.ts`, `*.sh`, `package.json`, lockfiles, in-folder `credentials/`) — runtime artifacts. Copied verbatim in phase 7c.bis with a dep-drift check.
 - `conversations/`, `logs/`, empty `scripts/` — **skip these**
 
 ### 2b. v1 DB row + scheduled tasks
@@ -513,6 +515,63 @@ If v1 had no per-team npm deps, leave `packages.npm` as `[]`. If no extra mounts
 
 > **Don't clobber host-managed fields.** After the first container spawn, v2 adds `groupName`, `assistantName`, and `agentGroupId` to `container.json`. Leave those alone on subsequent edits.
 
+### 7c.bis. Copy team runtime + curated artifacts
+
+Phase 7d covers wiki + sources; this step covers everything else under `groups/<v1-folder>/` that the agent needs at runtime — scripts, dep manifests, in-folder credentials, knowledge files. **Copy verbatim** — see "Scripts are sacred" in Operating principles. Refactoring during the port is what broke marketing-team's collector.
+
+```bash
+cd "$V1_PATH/groups/$V1_FOLDER"
+
+# Scripts + dep manifests at the top level (max depth 2)
+find . -maxdepth 2 -type f \
+  \( -name '*.mjs' -o -name '*.js' -o -name '*.ts' -o -name '*.sh' \
+     -o -name 'package.json' -o -name 'package-lock.json' -o -name 'pnpm-lock.yaml' \) \
+  -not -path './node_modules/*' -not -path './data/*' -not -path './logs/*' \
+  -not -path './conversations/*' -not -path './wiki/*' -not -path './sources/*' \
+  -print0 | while IFS= read -r -d '' f; do
+    target="$OLDPWD/groups/$V2_FOLDER/${f#./}"
+    mkdir -p "$(dirname "$target")"
+    cp "$f" "$target"
+  done
+
+# Folders the agent reads as state
+for d in credentials clients voices client-notes roles specs; do
+  [ -d "$d" ] && cp -r "$d" "$OLDPWD/groups/$V2_FOLDER/"
+done
+
+# Loose top-level knowledge files (extend per phase 2a's findings)
+for f in clients.json people.md preferences.md mettro-voice.md; do
+  [ -f "$f" ] && cp "$f" "$OLDPWD/groups/$V2_FOLDER/"
+done
+
+cd "$OLDPWD"
+```
+
+Skip `node_modules/` — v2 reinstalls from `package.json` via `container.json.packages.npm` (or per-spawn install). Skip `data/` and `logs/` — historical output, not configuration.
+
+#### Dependency drift check
+
+Before phase 7d, diff v1's *installed* dep versions against what v2 will resolve. Major-version jumps in auth/SDK packages cause silent runtime regressions that no other gate in this skill catches.
+
+```bash
+[ -f "groups/$V2_FOLDER/package.json" ] && pnpm exec tsx -e "
+const fs = require('fs'); const path = require('path');
+const v1Root = '$V1_PATH/groups/$V1_FOLDER';
+const pkg = JSON.parse(fs.readFileSync(path.join(v1Root, 'package.json'), 'utf8'));
+const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+console.log('package\trange\tv1-installed');
+for (const [name, range] of Object.entries(deps || {})) {
+  let actual = '?';
+  try { actual = JSON.parse(fs.readFileSync(path.join(v1Root, 'node_modules', name, 'package.json'), 'utf8')).version; } catch {}
+  console.log([name, range, actual].join('\t'));
+}
+"
+```
+
+Surface the table to the operator. For any package matching auth / SDK / HTTP-client patterns — `google-auth-library`, `googleapis`, `@google-cloud/*`, `@aws-sdk/*`, `axios`, `node-fetch`, `undici`, `grpc`, `@grpc/*`, `google-gax`, `google-ads-*` — **pin to v1's exact installed version** in `container.json.packages.npm` (e.g. `"google-auth-library@9.15.1"`). For everything else, accept whatever resolves and rely on phase 10f to catch breakage.
+
+> Why this matters: `groups/<team>/package.json` is what gets installed into the container at startup. If v1 had `"google-auth-library": "^9.0.0"` and v1's lockfile resolved to `9.15.1`, but v2's pnpm picks up `10.6.2` for the same range, behaviour can diverge in non-obvious ways. The marketing-team regression: `google-auth-library 10.x` JWTs no longer flow through `google-gax 5.x`'s `createFromGoogleCredential` bridge → silent `gRPC code 16 UNAUTHENTICATED` on every Google Ads call. Pinning v1's exact version is the safe default; you can let it drift later once 10f passes.
+
 ### 7d. wiki + sources
 
 ```bash
@@ -772,7 +831,27 @@ Then in the wired channel, send to the parent:
 
 > @<assistant> read `sources/v1-scheduled-tasks.md` and schedule each cron task listed there (specify the timezone if non-default). Confirm each one back to me.
 
-The agent confirms; verify the recurrence landed by inspecting `messages_in.recurrence` in the session DB if needed.
+The agent confirms each registration. **Verification is mandatory, not optional** — count what landed.
+
+```bash
+# Count registered tasks across all of the parent's session inbound.dbs
+TOTAL=0
+for f in data/v2-sessions/$V2_AGENT_GROUP_ID/*/inbound.db; do
+  [ -f "$f" ] || continue
+  N=$(pnpm exec tsx -e "
+    const Database = require('better-sqlite3');
+    const db = new Database('$f', { readonly: true });
+    const r = db.prepare(\"SELECT COUNT(DISTINCT series_id) AS n FROM messages_in WHERE kind='task' AND status IN ('pending','paused')\").get();
+    console.log(r.n);
+  ")
+  TOTAL=$((TOTAL + N))
+done
+echo "v2 registered tasks: $TOTAL (expected: <phase 2b's count>)"
+```
+
+Compare to phase 2b's `active scheduled_tasks` count. **Mismatch is a blocker** — find which schedules didn't land and re-prompt the agent. Don't proceed to phase 10 until counts match.
+
+This was the silent failure in the marketing-team port: phase 9 ran, the operator didn't verify the count, and the daily reporting pipeline schedule was missing for 6 days before anyone noticed (combined with the 7c.bis dep-drift bug, which is why 10f also matters even when counts match).
 
 **Fallback** (only worth it for >5 schedules being recreated en masse): direct insert into the session's `inbound.db messages_in` with `recurrence` set. Fiddly; skip unless scripting many ports.
 
@@ -827,6 +906,40 @@ Ask: "summarize wiki/<some-file>.md" — confirm the agent reads the file.
 ### 10e. Schedule fires
 
 Schedule a one-off task for `now + 2 minutes`. Wait. The host sweep wakes the session at the scheduled time and the agent posts. Confirm in `logs/nanoclaw.log`.
+
+### 10f. Team scripts smoke-test
+
+For teams whose primary purpose is a script (data collection, reporting pipelines, periodic checks), the chat-reply gate (10a) doesn't prove the agent's actual job works. Run the team's scripts inside a live container and confirm they succeed.
+
+```bash
+# Locate test/probe-style scripts at the top level — safe to run unconditionally
+TEST_SCRIPTS=$(find "groups/$V2_FOLDER" -maxdepth 1 -type f -name '*.mjs' \
+  | xargs grep -l -iE 'test|check|probe' 2>/dev/null)
+
+# A live container — spawn one via the 10a smoke message if none is up
+CONTAINER=$(docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.Names}}' | head -1)
+
+for s in $TEST_SCRIPTS; do
+  fname=$(basename "$s")
+  echo "=== $fname ==="
+  docker exec "$CONTAINER" node "/workspace/agent/$fname" 2>&1 | tail -20
+  echo "exit: $?"
+done
+```
+
+For non-test-named scripts (the daily pipelines themselves — `collector.mjs`, `analyst.mjs`, `reporter.mjs`, etc.), prompt the operator: *"Run `<script>` as part of verification? It will [side effects]. [Y/n]"*. If yes, run via `docker exec`. If no, note in the port log that the script wasn't smoke-tested.
+
+**Failure patterns — any of these blocks v1 retirement:**
+
+| Stderr pattern | Likely cause |
+|---|---|
+| `UNAUTHENTICATED` / `PERMISSION_DENIED` | Auth chain broken — check 7c.bis dep-drift (especially `google-auth-library` major bump) |
+| `MetadataLookupWarning` followed by an auth error | google-auth-library@10.x JWT not flowing through gax bridge — pin `google-auth-library@9.15.1` and rerun |
+| `ENOENT.*workspace/group` | Phase 7e path sweep missed a file — re-run the sed from 7e |
+| `Cannot find module` | 7c.bis missed a dep, or `container.json.packages.npm` is incomplete — add to package list and rebuild |
+| Script silently exits 0 with no output | Common when a `try/catch` swallows the auth error — read the script and check its error-reporting path |
+
+This gate would have caught the marketing-team port's silent auth break on day one rather than 6 days later.
 
 If any check fails, **do not retire v1**. Diagnose with `/debug` and fix before continuing.
 
