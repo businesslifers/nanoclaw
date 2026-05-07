@@ -790,12 +790,100 @@ const path = require('path');
 
 v1 tracked schedules globally; v2 tracks them per-session in the session's `inbound.db messages_in.recurrence`, woken by the host's 60-second sweep.
 
-**Recommended:** save the v1 prompt bodies and let the parent agent register the schedules through its own MCP tools.
+**Auto-port deterministically.** Read v1's `scheduled_tasks` for the team's `chat_jid` and insert each one directly into the V2 session's `inbound.db`. Don't ask the parent agent to register them — the marketing-team port did exactly that, the operator never sent the prompt, and the daily reporting pipeline schedule was silently missing for 6 days before anyone noticed. (The install-level `setup/migrate-v2/tasks.ts` already does this, but only fires when `migrate-v2.sh` is the entrypoint, and it keys on `t.group_folder` which doesn't survive a per-team rename. Per-team ports need their own deterministic insert keyed on the V2 ids we have in hand.)
+
+### 9a. Insert v1 tasks into the V2 session
+
+Idempotent — re-runs skip task IDs already present.
 
 ```bash
-# Save schedules to a file the parent agent can read
+pnpm exec tsx -e "
+const path = require('path');
+const Database = require('better-sqlite3');
+
+(async () => {
+  const [v1Path, v1Jid, v2AgentGroupId, channel, platformId] = process.argv.slice(1);
+
+  const { initDb } = await import('./src/db/connection.js');
+  const { runMigrations } = await import('./src/db/migrations/index.js');
+  const { DATA_DIR } = await import('./src/config.js');
+  const { getMessagingGroupByPlatform } = await import('./src/db/messaging-groups.js');
+  const { resolveSession, openInboundDb } = await import('./src/session-manager.js');
+  const { insertTask } = await import('./src/modules/scheduling/db.js');
+
+  const v2Db = initDb(path.join(DATA_DIR, 'v2.db'));
+  runMigrations(v2Db);
+
+  const mg = getMessagingGroupByPlatform(channel, platformId);
+  if (!mg) { console.error('No messaging_group for ' + channel + ' ' + platformId); process.exit(1); }
+
+  const v1Db = new Database(path.join(v1Path, 'store/messages.db'), { readonly: true });
+  const tasks = v1Db.prepare(\"SELECT * FROM scheduled_tasks WHERE chat_jid = ? AND status='active'\").all(v1Jid);
+  v1Db.close();
+  console.log('v1 active tasks for ' + v1Jid + ': ' + tasks.length);
+
+  // Use 'shared' session_mode — phase 6's init-group-agent.ts always wires this way.
+  // If you've manually flipped a wiring to 'per-thread' or 'agent-shared', resolve the
+  // session yourself and pass it to insertTask directly instead of this block.
+  const { session } = resolveSession(v2AgentGroupId, mg.id, null, 'shared');
+  const inb = openInboundDb(v2AgentGroupId, session.id);
+
+  const toRecurrence = (t) => {
+    if (t.schedule_type === 'cron') {
+      const fields = t.schedule_value.trim().split(/\\s+/).length;
+      return fields >= 5 && fields <= 6 ? t.schedule_value.trim() : undefined;
+    }
+    if (t.schedule_type === 'interval') {
+      const m = /^(\\d+)([smhd])$/.exec(t.schedule_value.trim());
+      if (!m) return undefined;
+      const n = parseInt(m[1], 10), u = m[2];
+      if (u === 'm' && n >= 1 && n < 60) return '*/' + n + ' * * * *';
+      if (u === 'h' && n >= 1 && n < 24) return '0 */' + n + ' * * *';
+      if (u === 'd' && n >= 1 && n < 28) return '0 0 */' + n + ' * *';
+      return undefined;
+    }
+    if (t.schedule_type === 'once' || t.schedule_type === 'at') return null;
+    return undefined;
+  };
+
+  let migrated = 0, skipped = 0;
+  try {
+    for (const t of tasks) {
+      const exists = inb.prepare(\"SELECT id FROM messages_in WHERE id = ? AND kind = 'task'\").get(t.id);
+      if (exists) { skipped++; console.log('skip(exists): ' + t.id); continue; }
+      const recurrence = toRecurrence(t);
+      if (recurrence === undefined) { skipped++; console.log('skip(unparseable schedule): ' + t.id + ' ' + t.schedule_type + ' ' + t.schedule_value); continue; }
+      insertTask(inb, {
+        id: t.id,
+        processAfter: t.next_run || new Date().toISOString(),
+        recurrence,
+        platformId,
+        channelType: channel,
+        threadId: null,
+        content: JSON.stringify({
+          prompt: t.prompt,
+          script: t.script ?? null,
+          migrated_from_v1: { original_id: t.id, context_mode: t.context_mode ?? null },
+        }),
+      });
+      migrated++;
+      console.log('ported: ' + t.id + ' (' + t.schedule_type + ' ' + t.schedule_value + ')');
+    }
+  } finally { inb.close(); }
+  console.log('result: migrated=' + migrated + ' skipped=' + skipped + ' total=' + tasks.length);
+})().catch(e => { console.error(e); process.exit(1); });
+" "$V1_PATH" "$V1_JID" "$V2_AGENT_GROUP_ID" "$CHANNEL" "$PLATFORM_ID"
+```
+
+`$V1_JID` is `grp.jid` from phase 2b. `$CHANNEL` and `$PLATFORM_ID` are from phase 3. `$V2_AGENT_GROUP_ID` is from phase 6.
+
+### 9b. Save a human-readable reference (optional but useful)
+
+For the agent and future operators to reason about what's scheduled. Not load-bearing for execution — 9a already inserted the rows.
+
+```bash
 cat > "groups/$V2_FOLDER/sources/v1-scheduled-tasks.md" <<'EOF'
-# v1 scheduled tasks (to register in v2)
+# v1 scheduled tasks (auto-ported to v2)
 
 <for each task from phase 2b, write:>
 ## <one-line description>
@@ -805,33 +893,30 @@ cat > "groups/$V2_FOLDER/sources/v1-scheduled-tasks.md" <<'EOF'
 EOF
 ```
 
-Then in the wired channel, send to the parent:
-
-> @<assistant> read `sources/v1-scheduled-tasks.md` and schedule each cron task listed there (specify the timezone if non-default). Confirm each one back to me.
-
-The agent confirms each registration. **Verification is mandatory, not optional** — count what landed.
+### 9c. Verification gate (mandatory)
 
 ```bash
-# Count registered tasks across all of the parent's session inbound.dbs
-TOTAL=0
-for f in data/v2-sessions/$V2_AGENT_GROUP_ID/*/inbound.db; do
-  [ -f "$f" ] || continue
-  N=$(pnpm exec tsx -e "
-    const Database = require('better-sqlite3');
-    const db = new Database('$f', { readonly: true });
-    const r = db.prepare(\"SELECT COUNT(DISTINCT series_id) AS n FROM messages_in WHERE kind='task' AND status IN ('pending','paused')\").get();
-    console.log(r.n);
-  ")
-  TOTAL=$((TOTAL + N))
-done
-echo "v2 registered tasks: $TOTAL (expected: <phase 2b's count>)"
+pnpm exec tsx -e "
+const Database = require('better-sqlite3');
+const fs = require('fs'); const path = require('path');
+const sessDir = 'data/v2-sessions/' + process.argv[1];
+let total = 0;
+for (const s of fs.readdirSync(sessDir)) {
+  const f = path.join(sessDir, s, 'inbound.db');
+  if (!fs.existsSync(f)) continue;
+  const db = new Database(f, { readonly: true });
+  total += db.prepare(\"SELECT COUNT(DISTINCT series_id) AS n FROM messages_in WHERE kind='task' AND status IN ('pending','paused')\").get().n;
+  db.close();
+}
+console.log('v2 registered tasks: ' + total);
+" "$V2_AGENT_GROUP_ID"
 ```
 
-Compare to phase 2b's `active scheduled_tasks` count. **Mismatch is a blocker** — find which schedules didn't land and re-prompt the agent. Don't proceed to phase 10 until counts match.
+Compare to phase 2b's `active scheduled_tasks` count. **Mismatch is a blocker** — investigate before phase 10. Common causes:
 
-This was the silent failure in the marketing-team port: phase 9 ran, the operator didn't verify the count, and the daily reporting pipeline schedule was missing for 6 days before anyone noticed (combined with the 7c.bis dep-drift bug, which is why 10f also matters even when counts match).
-
-**Fallback** (only worth it for >5 schedules being recreated en masse): direct insert into the session's `inbound.db messages_in` with `recurrence` set. Fiddly; skip unless scripting many ports.
+- `skip(unparseable schedule)` in 9a's output — v1 has an interval/cron format the converter didn't handle (e.g. interval `2w`). Translate by hand and re-insert.
+- v1's `chat_jid` doesn't match the team's actual jid (multi-channel teams in v1, or jid drift across v1 versions). Re-check phase 2b's `grp.jid`.
+- A wiring isn't `shared` session_mode (rare — `init-group-agent.ts` only writes `shared`). If so, 9a inserted into the wrong session; resolve the right one and re-run.
 
 ## Phase 10 — Verification
 
