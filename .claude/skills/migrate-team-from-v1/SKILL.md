@@ -247,6 +247,43 @@ If overlay (either form), apply these adjustments downstream:
 
 - **Skip phase 5b** — OneCLI agent already exists. List its current assigned secrets (`onecli agents secrets --id <id>`) and confirm they match the v1 twin's set. No `onecli agents create` call.
 - **Skip phase 6 (`init-group-agent.ts`)** — agent group + scaffold already in place. Capture the existing `agent_groups.id` as `V2_AGENT_GROUP_ID`. Run phase 6a's wiring audit anyway — re-ports often inherit a stray default-DM-agent wiring on the same messaging group.
+- **Verify the `agent_destinations` self-row exists** — `init-group-agent.ts` auto-creates a central `agent_destinations` row when it wires a fresh agent to its messaging group, but skeleton v2 agents that pre-existed via other paths (dashboard, manual scripting, channel adapter auto-create + later manual `messaging_group_agents` insert) often end up wired *without* this row. Skipping phase 6 means you skip that auto-create — and an empty `agent_destinations` is a silent phase 10 blocker: the agent runs and produces correct answers, but the runtime addendum tells it "you have no configured destinations," `dispatchResultText`'s strict `<message to="...">` parser finds no blocks to route, and the reply lands in scratchpad with `WARNING: agent output had no <message to="..."> blocks — nothing was sent`. Check and fix before phase 10:
+
+  ```bash
+  pnpm exec tsx -e "
+  const Database = require('better-sqlite3');
+  const db = new Database('data/v2.db', { readonly: true });
+  console.log(db.prepare('SELECT * FROM agent_destinations WHERE agent_group_id = ?').all('$V2_AGENT_GROUP_ID'));
+  "
+  ```
+
+  Empty for a `messaging_group_agents`-wired agent → insert the self-destination and project to active sessions:
+
+  ```bash
+  pnpm exec tsx -e "
+  const path = require('path');
+  (async () => {
+    const { initDb } = await import('./src/db/connection.js');
+    const { runMigrations } = await import('./src/db/migrations/index.js');
+    const { createDestination } = await import('./src/modules/agent-to-agent/db/agent-destinations.js');
+    const { writeDestinations } = await import('./src/modules/agent-to-agent/write-destinations.js');
+    const { DATA_DIR } = await import('./src/config.js');
+    const db = initDb(path.join(DATA_DIR, 'v2.db')); runMigrations(db);
+    createDestination({
+      agent_group_id: '$V2_AGENT_GROUP_ID',
+      local_name: '<channel-slug>',     // typically the messaging_groups.name (e.g. 'project-management-team')
+      target_type: 'channel',
+      target_id: '<MESSAGING_GROUP_ID>',
+      created_at: new Date().toISOString(),
+    });
+    const fs = require('fs');
+    const sessDir = path.join(DATA_DIR, 'v2-sessions/$V2_AGENT_GROUP_ID');
+    if (fs.existsSync(sessDir)) for (const s of fs.readdirSync(sessDir)) if (s.startsWith('sess-')) writeDestinations('$V2_AGENT_GROUP_ID', s);
+  })().catch(e => { console.error(e); process.exit(1); });
+  "
+  ```
+
+  Then stop any running container so the next inbound rebuilds the system prompt with the populated destinations table. The strict `<message to="...">` requirement lives in `container/agent-runner/src/poll-loop.ts:dispatchResultText` — there is no bare-text fallback even with a single destination, so missing this row turns every reply into scratchpad. Hit on briefmate → project-management-team port (#4, 2026-05-08).
 - **Phase 7a clobber check** — before overwriting `CLAUDE.role.md` / `CLAUDE.local.md`, read the existing `CLAUDE.local.md`. If it's the bare-imports skeleton (just `@./CLAUDE.role.md` and maybe `@./memory.md`), overlay freely. If it contains hand-authored v2 content, surface to the operator: discard (common — v1's CLAUDE.md usually covers the same ground), preserve verbatim by copying to `CLAUDE.local-v2-authored.md.bak` for later manual merge, or abort.
 - **Phase 7d wiki overlay** — `find groups/<V2_FOLDER>/wiki -type f | wc -l`. If <5 files, it's a `/add-karpathy-llm-wiki` skeleton; overlay v1's wiki freely. If ≥5 files or any file outside `index.md`/`log.md`, pause and ask the operator how to merge.
 - **Phase 7e.bis container restart** — required regardless of whether you smoke-tested mid-port. The broadened trigger in 7e.bis covers this.
