@@ -284,7 +284,10 @@ If overlay (either form), apply these adjustments downstream:
   ```
 
   Then stop any running container so the next inbound rebuilds the system prompt with the populated destinations table. The strict `<message to="...">` requirement lives in `container/agent-runner/src/poll-loop.ts:dispatchResultText` — there is no bare-text fallback even with a single destination, so missing this row turns every reply into scratchpad. Hit on briefmate → project-management-team port (#4, 2026-05-08).
-- **Phase 7a clobber check** — before overwriting `CLAUDE.role.md` / `CLAUDE.local.md`, read the existing `CLAUDE.local.md`. If it's the bare-imports skeleton (just `@./CLAUDE.role.md` and maybe `@./memory.md`), overlay freely. If it contains hand-authored v2 content, surface to the operator: discard (common — v1's CLAUDE.md usually covers the same ground), preserve verbatim by copying to `CLAUDE.local-v2-authored.md.bak` for later manual merge, or abort.
+- **Phase 7a clobber check** — `CLAUDE.local.md` alone isn't a sufficient signal. Inspect all three: `CLAUDE.local.md`, `CLAUDE.role.md`, and `memory.md`.
+  - **Bare init-group-agent.ts scaffold** — `CLAUDE.role.md` is the stock 1–2 KB stub ("You are X, a personal assistant…"), `memory.md` absent or stub, `CLAUDE.local.md` bare-imports → overlay v1 freely.
+  - **Hand-authored v2 content** (the per-person Janet pattern is the common case: `dm-with-<firstname>` scaffolded by copying `dm-with-adam`'s role+memory as the base) — `CLAUDE.role.md` is substantial (>5 KB, uses `/workspace/agent/` paths, references `send_message`/`agent_destinations`, has a fleshed-out persona / standing rules) and `memory.md` carries real team context (people, channels, secrets table) even though `CLAUDE.local.md` is still bare-imports. **Default to merge, not clobber** — preserve v2's `CLAUDE.role.md` and `memory.md`, then in phase 7a append v1's missing Standing Rules into v2's Standing Rules section. v1's CLAUDE.md is full of v1-only references (`/workspace/group/`, `register_group`, `ask_group`, `target_group_jid`, `available_groups.json`) that would *regress* a v2-correct role spec if clobbered.
+  - **Anything ambiguous** — surface to the operator with `AskUserQuestion`: clobber, merge (preserve v2 + add missing v1 standing rules + overlay v1 wiki/sources), or stop and let them review the diff first. Don't decide silently.
 - **Phase 7d wiki overlay** — `find groups/<V2_FOLDER>/wiki -type f | wc -l`. If <5 files, it's a `/add-karpathy-llm-wiki` skeleton; overlay v1's wiki freely. If ≥5 files or any file outside `index.md`/`log.md`, pause and ask the operator how to merge.
 - **Phase 7e.bis container restart** — required regardless of whether you smoke-tested mid-port. The broadened trigger in 7e.bis covers this.
 
@@ -472,6 +475,10 @@ Repeat for each wiring that isn't the one for `$V2_AGENT_GROUP_ID`. Don't blanke
 ## Phase 7 — Drop the v1 filesystem in
 
 ### 7a. CLAUDE.role.md (team identity)
+
+**If phase 2e flagged a "merge, not clobber" branch** (per-person Janet or any other hand-authored v2 role spec), skip the `cp` below. Instead: read v1's `CLAUDE.md`, diff its Standing Rules section against v2's `CLAUDE.role.md`, and append the v1 rules that aren't already covered. Don't rewrite the v2 role spec. Then continue to phase 7c (mounts) — the rest of phase 7a (channel rewrite, `/workspace/group/` sweep, v1-only-section strip, "Improvement Backlog" move) doesn't apply because v2's role spec is already v2-correct.
+
+**Otherwise (clobber path — fresh v2 stub or operator explicitly opted in):**
 
 ```bash
 cp "$V1_PATH/groups/$V1_FOLDER/CLAUDE.md" "groups/$V2_FOLDER/CLAUDE.role.md"
