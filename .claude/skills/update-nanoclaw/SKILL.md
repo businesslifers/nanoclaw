@@ -275,8 +275,3 @@ Tell the user:
   - **Linux**: detect the service name with `systemctl --user list-units --type=service | grep nanoclaw | awk '{print $1}'`, then `systemctl --user restart <detected-name>`
   - **Manual** (no service found): restart `pnpm run dev`
 
-
-## Diagnostics
-
-1. Use the Read tool to read `.claude/skills/update-nanoclaw/diagnostics.md`.
-2. Follow every step in that file before finishing.
