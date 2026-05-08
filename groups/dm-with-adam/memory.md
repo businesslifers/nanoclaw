@@ -34,6 +34,7 @@
 ## Admin
 
 - **Admins (control permissions & settings)**: Adam Jowett and Raels (Raeleen)
+- **Raeleen's role**: global owner in `user_roles` — confirmed by operator (May 8 2026). Can grant/revoke roles, approve credentialed actions, register channels, and run admin slash commands in any agent group.
 - **Primary day-to-day contacts**: Raels (Raeleen) and Tracey
 
 ## Communication Channels (current — v2)
