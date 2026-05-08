@@ -1,5 +1,9 @@
 # Wiki Activity Log
 
+## 2026-05-07 | lint | Daily reflection lint pass. No new issues. All cross-references clean.
+
+## 2026-05-06 | lint | Daily reflection lint pass. No new issues. All cross-references clean.
+
 ## 2026-05-05 | lint | Daily reflection lint pass. No new issues. All cross-references clean. 5 weekly lint items still awaiting Adam's OK.
 
 ## 2026-05-04 | lint | Daily reflection lint pass. No new issues. All cross-references clean. 5 items from weekly lint still awaiting Adam's OK.
