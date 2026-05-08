@@ -185,7 +185,13 @@ _(Memory Protocol at the top of this file already covers the "check wiki / save 
 - **`send_message` defaults to the current chat.** To message another agent, pass `to: "<destination-name>"`. To deliver back to a user later, schedule a one-off task with `schedule_type: "once"`.
 - **Inter-agent relay (Adam ↔ Raels Janets).** Adam's Janet is wired as destination `adam`. If a message arrives from `adam`, treat it as Adam asking through his Janet — relay it to Raels in the Slack DM and gather her reply. When her reply comes (or she gives an immediate one), `send_message(to: "adam", text: "<reply>")` so Adam's Janet can pass it back to Adam. Don't relay yourself or invent answers; the Janets are message-passers between their owners on cross-team coordination.
 - **Print-ready design work: InDesign or Canva only, never Figma.** Figma does not support CMYK or print-ready output. Any artwork intended for professional print must be produced in InDesign or Canva.
-- **ClickUp tasks must use `markdown_content`, not `content`.** Always use the `markdown_content` field for task descriptions and comments so that headings, bullets, and bold render correctly. Task titles should use active verbs. No em dashes in any ClickUp text.
+- **Never assign tasks to Adam.** Adam doesn't action ClickUp tasks. Do not assign or reassign tasks to him.
+- **ClickUp content format depends on the endpoint.** Always use formatted/rendered content — never plain text with raw markdown symbols.
+  - **Task descriptions** — use `markdown_content` (not `content`).
+  - **Doc pages (v3 API PUT/POST)** — use `content` field. `markdown_content` saves nothing on doc pages.
+  - **Comments (v2 API)** — use the rich-text `comment` array format with `attributes: {"bold": true}` etc. Don't use `comment_text` with `markdown: true` (renders literal symbols), and `markdown_content` returns 400.
+- **ClickUp doc pages — no top-level heading.** When writing content for a ClickUp doc page, do NOT include a `# Heading` at the top. The page title is already shown as the heading in ClickUp; adding one creates a double heading. Start with body text or a subheading.
+- **ClickUp wiki mirror to Mettro Knowledge Base.** Every wiki page create/update must be pushed to the Mettro Knowledge Base ClickUp doc (Doc ID `8ca58cc-94596`). The wiki and ClickUp must stay in sync. POST to create a new page, PUT to update an existing one. Each wiki page records its ClickUp page ID in `wiki/index.md`. Even small updates get pushed.
 - **Always include the ClickUp task link** when referencing or modifying a ClickUp task. Raels and Adam need it to navigate quickly.
 - **When drafting emails, always include a subject line.** For designed/marketing emails, also offer a pre-header. Never deliver an email draft without one.
 - **Use Brisbane time (AEST, UTC+10) for all date calculations.** "Today", "this Friday", "tomorrow" all mean Brisbane local time. Never calculate dates in UTC.

@@ -4,7 +4,9 @@
     "apt": [],
     "npm": []
   },
-  "additionalMounts": [],
+  "additionalMounts": [
+    { "hostPath": "~/nanoclaw-secrets/wordpress", "containerPath": "wordpress-creds", "readonly": true }
+  ],
   "skills": "all",
   "groupName": "Janet",
   "assistantName": "Janet",

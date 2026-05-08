@@ -123,3 +123,44 @@ This file tracks teams ported from the v1 install at `/home/admin/Agents/janet/`
 - v1 trigger pattern was `@Janet` with `requires_trigger=0` — meaning the field was a fallback hint, not a gate (every message processed). v2 wiring flipped from `mention-sticky` (skeleton default) to `pattern` `/./` to match v1 behaviour exactly. Channel is dedicated to the team so noise isn't a concern.
 - ClickUp secret: v1 had Anthropic + ClickUp API; v2 only had Anthropic before port. Added ClickUp via `onecli agents set-secrets --secret-ids 4032b812...,1496e2b7...`. Without this, ClickUp API calls would have returned 401 — the team's main job depends on ClickUp.
 - **Missing `agent_destinations` row blocked first smoke test.** First two test messages (`read clients/arrow-energy.md` / `read wiki/index.md`) reached the agent and produced correct answers, but the agent-runner logged `WARNING: agent output had no <message to="..."> blocks — nothing was sent` and dropped the reply into scratchpad. Cause: the v2 agent group existed before the port (skeleton from earlier `init-group-agent.ts` run) but its central `agent_destinations` row was never created, so `writeDestinations` projected an empty `destinations` table into `inbound.db`, the system prompt told the agent "you have no configured destinations," and `dispatchResultText`'s strict `<message to="...">` parser found nothing to route. Fix: inserted `agent_destinations(agent_group_id='ag-1778203406039-nhnh92', local_name='project-management-team', target_type='channel', target_id='mg-1778202109644-wu0hza')` via `createDestination`, called `writeDestinations` for the 3 active sessions, stopped both running containers so the next inbound rebuilds the system prompt. Smoke tests passed on retry. **Re-port detection (phase 2e) should grep `agent_destinations` for the candidate `agent_groups.id` — empty → fix before phase 10.**
+
+---
+
+### Raels' Janet (`dm-with-raeleen`) — 2026-05-08 (port #5)
+
+| Field | Value |
+|---|---|
+| v1 folder | `/home/admin/Agents/janet/groups/slack_raels_dm/` |
+| v1 channel | Slack — `slack:D0APJ2CLK4M` (Raels' Slack DM), trigger `@Janet`, `requires_trigger=0` (fired on every message) |
+| v1 secrets | One filesystem-mounted credential dir: `~/nanoclaw-secrets/wordpress` → `wordpress-creds`. v1 OneCLI agent had Anthropic + ClickUp API. |
+| v1 sub-agents | None — no `agents.json` |
+| v1 npm deps | None |
+| v1 active schedules | 0 |
+| v2 parent folder | `groups/dm-with-raeleen` (`agent_groups.id = ag-1778215787818-bncghq`, name "Janet") — pre-existed, scaffolded from `dm-with-adam` per the per-person Janet pattern (commit `12a2106`) |
+| v2 channel | Slack — `messaging_groups.platform_id = slack:D0B1JV7GJH3` (Raels' *current* Slack DM in this v2 install, `mg-1778215735145-qty9u2`), engage_mode `mention-sticky` (left as-is, intentional for DM), session_mode `shared` |
+| v2 mount path | `/workspace/extra/wordpress-creds` (re-mounted same `containerPath` from v1 — Raels uses WP creds in this DM) |
+| Delegation model chosen | **N/A** — solo agent, no sub-agents in v1 |
+| v2 lanes | None |
+| OneCLI | Existing agent `ca4aa329-535f-46db-a505-0ecb287523c6` already had identical secret set (Anthropic + ClickUp) to v1 twin `aea2cbac-...`. No changes. |
+
+**Outstanding on the user:**
+- Send a smoke-test `@Janet hi` in Raels' Slack DM to confirm the fresh container spawns with the new wiki + role spec + WP mount.
+- Ask Janet to `read wiki/index.md` to verify the v1 wiki overlaid cleanly (should show 4 entities, 3 concepts, 2 topics).
+- Ask Janet to `ls /workspace/extra/wordpress-creds/` to verify the WP mount.
+- Ask Janet about a Mettro client (e.g. La Petite Boudoir, Queensland Capital) to verify she pulls from the wiki entity pages.
+
+**Caveats:**
+- **Overlay onto existing scaffolded agent**, not a fresh init. The v2 agent was deliberately created from `dm-with-adam` as the seed for the per-person Janet pattern (validated 2026-05-08 per memory entry `feedback_per_person_janet_pattern`). The existing v2 `CLAUDE.role.md` (12.6KB) was already v2-correct (`/workspace/agent/` paths, `send_message` model, Slack mrkdwn, inter-agent relay rule for Adam ↔ Raels) — clobbering with v1's 17KB CLAUDE.md would have *regressed* the agent (v1 had `/workspace/group/`, `register_group`, `ask_group`, `target_group_jid`, `available_groups.json`). Strategy: PRESERVE existing v2 role spec + memory; MERGE v1's missing standing rules into the existing `Standing Rules` section.
+- **Standing rules merged from v1** (4 new entries appended): "Never assign tasks to Adam"; "ClickUp content format depends on the endpoint" (markdown_content for tasks, content for doc pages, comment array for comments); "ClickUp doc pages — no top-level heading"; "ClickUp wiki mirror to Mettro Knowledge Base" (Doc ID `8ca58cc-94596`).
+- **Wiki overlay**: v2 had only Karpathy skeleton stubs. v1 wiki (13 pages — 4 entities, 3 concepts, 2 summaries) replaced it wholesale. Renamed `summaries/` → `topics/` to match v2 role spec's expected directory naming; updated `wiki/index.md` references accordingly.
+- **`/workspace/group/` → `/workspace/agent/` sweep** caught two refs in `wiki/topics/{content-team-spec.md, crm-spec.md}` after the rename. Final grep returned `(clean)`.
+- **Sources/ overlay**: copied v1 `sources/` (case studies + `mettro-content-guidelines/`), all top-level `*.docx` (PPC kits, email kits, sales pages, story pages, packages — 12 files), `case-study-*.txt`, `mettro-sitemap.md`, `postmate-brief.md`, `drive_files/` (17 marketing files), `drive_screenshot.png` into `groups/dm-with-raeleen/sources/`.
+- **`people.md`** copied to team root (referenced unprefixed in v1 standing rules; Mettro people facts incl. "Adam doesn't action ClickUp tasks").
+- **Conversations**: copied v1 `conversations/` (14 files, 5.3MB, last May 7) to `groups/dm-with-raeleen/sources/v1-conversations/` as reference per operator pick. Not auto-loaded; grep'able on demand. Caveat: transcripts are Slack mrkdwn — same channel as v2, so no formatting drift risk.
+- **Memory.md preserved** — existing v2 `memory.md` (4.1KB, full Mettro context: team roster, admin roles, current channels, historical channel reference table, secrets vault) was already richer than v1's `memory.md` (508 bytes — just Janet personality blurb, already covered in v2 memory.md `## Identity` section). No merge needed.
+- **CLAUDE.local.md untouched** — already had the correct bare-imports skeleton (`@./CLAUDE.role.md` + `@./memory.md`), which is what the merge strategy preserved.
+- **`agent_destinations` already correct** (per phase 2e re-port checklist): `adam` → `ag-1777257359331-63ti7x` for the inter-Janet relay + `slack-mg-17782` self-channel destination. Both rows present, no insert needed (briefmate port #4 hit this; this one was clean because the per-person Janet pattern wired destinations explicitly via `init-group-agent.ts` 2026-05-08T04:49:47Z).
+- **Wiring audit (phase 6a)**: exactly one `messaging_group_agents` row on `mg-1778215735145-qty9u2` for our agent. Clean.
+- **Container restart**: stopped running `nanoclaw-v2-dm-with-raeleen-1778216713978` (Up 34 minutes). Did NOT clear SDK session transcripts — the agent hadn't done meaningful pre-port work that needed wiping; a plain restart suffices. Next inbound respawns with new role spec + WP mount.
+- **Phase 9 no-op**: 0 active scheduled tasks in v1.
+- **Phase 10f no-op**: DM agent has no team scripts.
