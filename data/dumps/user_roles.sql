@@ -9,4 +9,5 @@ CREATE TABLE user_roles (
         PRIMARY KEY (user_id, role, agent_group_id)
       );
 INSERT INTO user_roles VALUES('slack:U0AD5J35TFA','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T01:10:55.000Z');
+INSERT INTO user_roles VALUES('slack:UAMCT083F','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T04:36:42.127Z');
 COMMIT;

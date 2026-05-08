@@ -117,6 +117,7 @@ CREATE TABLE users (
 INSERT INTO users VALUES('cli:local','cli','Adam','2026-04-27T02:00:49.927Z');
 INSERT INTO users VALUES('telegram:7466423983','telegram','Adam','2026-04-27T02:35:40.816Z');
 INSERT INTO users VALUES('slack:U0AD5J35TFA','slack','Adam Jowett','2026-05-05T05:03:14.563Z');
+INSERT INTO users VALUES('slack:UAMCT083F','slack','Raels','2026-05-08T03:32:02.578Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -129,6 +130,7 @@ CREATE TABLE user_roles (
         PRIMARY KEY (user_id, role, agent_group_id)
       );
 INSERT INTO user_roles VALUES('slack:U0AD5J35TFA','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T01:10:55.000Z');
+INSERT INTO user_roles VALUES('slack:UAMCT083F','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T04:36:42.127Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -143,6 +145,7 @@ INSERT INTO agent_group_members VALUES('telegram:7466423983','ag-1777257359331-6
 INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1777257359331-63ti7x','telegram:7466423983','2026-05-05T05:05:37.563Z');
 INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1777429834314-u4riyu','telegram:7466423983','2026-05-05T05:11:55.683Z');
 INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1778203406039-nhnh92','slack:U0AD5J35TFA','2026-05-08T01:23:26.039Z');
+INSERT INTO agent_group_members VALUES('slack:UAMCT083F','ag-1778203406039-nhnh92','slack:U0AD5J35TFA','2026-05-08T03:40:19.851Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
