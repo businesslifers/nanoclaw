@@ -14,5 +14,5 @@ INSERT INTO messaging_group_agents VALUES('mga-1777601813160-ew67xa','mg-1777601
 INSERT INTO messaging_group_agents VALUES('mga-1777607105029-5wpulm','mg-1777607057297-8k2t6h','ag-1777607105027-isi0rv','shared',0,'2026-05-01T03:45:05.026Z','pattern','.','all','drop');
 INSERT INTO messaging_group_agents VALUES('mga-1777957537561-m0w5f7','mg-1777957394563-jfn9s6','ag-1777257359331-63ti7x','shared',0,'2026-05-05T05:05:37.561Z','mention-sticky',NULL,'known','accumulate');
 INSERT INTO messaging_group_agents VALUES('mga-1777957915682-2rumxc','mg-1777957905683-uxjv20','ag-1777429834314-u4riyu','shared',0,'2026-05-05T05:11:55.682Z','mention-sticky',NULL,'known','accumulate');
-INSERT INTO messaging_group_agents VALUES('mga-1778203406041-z7d4na','mg-1778202109644-wu0hza','ag-1778203406039-nhnh92','shared',0,'2026-05-08T01:23:26.039Z','mention-sticky',NULL,'known','accumulate');
+INSERT INTO messaging_group_agents VALUES('mga-1778203406041-z7d4na','mg-1778202109644-wu0hza','ag-1778203406039-nhnh92','shared',0,'2026-05-08T01:23:26.039Z','pattern','.','known','accumulate');
 COMMIT;

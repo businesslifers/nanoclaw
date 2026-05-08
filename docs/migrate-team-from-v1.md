@@ -88,3 +88,38 @@ This file tracks teams ported from the v1 install at `/home/admin/Agents/janet/`
 - The existing v2 wiki had a `[2026-05-01] lint | 0 issues found, 0 fixed` log entry written ~10 minutes before the port (clean empty scaffold); that log was overwritten by v1's richer log. No real wiki content was lost.
 - `/workspace/group/` → `/workspace/agent/` sweep completed cleanly across all team files. `grep -rln /workspace/group groups/dm-with-adam | grep -vE '/(data|logs|conversations|v1-conversations)/'` returned `(clean)`.
 - Stopped the running container (`nanoclaw-v2-dm-with-adam-1777609777989`) so the next inbound message spawns a fresh container with the new wordpress-creds mount + new role spec. Existing SDK conversation transcripts (244K of jsonl in `.claude-shared/projects/`) preserved — Adam's recent chat memory is intact, only the system prompt changes.
+
+### BriefMate → Project Management Team — 2026-05-08 (port #4)
+
+| Field | Value |
+|---|---|
+| v1 folder | `/home/admin/Agents/janet/groups/slack_briefmate/` |
+| v1 channel | Slack — `slack:C0APY2JNW0P` (`#briefmate`), trigger `@Janet`, `requires_trigger=0` (fired on every message) |
+| v1 secrets | None filesystem-mounted. v1 OneCLI agent `slack-briefmate` had Anthropic + ClickUp API (`api.clickup.com` Authorization injection) |
+| v1 sub-agents | None — no `agents.json` |
+| v1 npm deps | None — `container_config IS NULL` |
+| v1 active schedules | 0 |
+| v2 parent folder | `groups/project-management-team` (`agent_groups.id = ag-1778203406039-nhnh92`) — pre-existed; this port overlaid v1 content onto a skeleton v2 agent rather than creating a new one |
+| v2 channel | Slack — `messaging_groups.platform_id = slack:C0B2E8Z2HQA` (`#project-management-team`, `mg-1778202109644-wu0hza`), engage_mode flipped from `mention-sticky` to `pattern` `/./` to match v1's "every message" behaviour, sender_scope `known`, ignored_message_policy `accumulate`, unknown_sender_policy `request_approval` |
+| v2 mount path | None — no extra mounts (v1 had `container_config IS NULL`) |
+| Delegation model chosen | **N/A** — solo agent, no sub-agents in v1 |
+| v2 lanes | None |
+| OneCLI | Existing agent `bc6000dd-0388-4273-87af-1ce91d3de956`, `mode=selective`, 2 secrets assigned (Anthropic + ClickUp API) — cloned from v1's exact set. v2 had only Anthropic before this port. |
+
+**Outstanding on the user:**
+- Send a smoke-test message in `#project-management-team` Slack channel to confirm the fresh container spawns with the new role spec + wiki + clients/ access. Janet should sound like Janet from The Good Place (Mettro warm persona) and offer to help with client work / ClickUp tasks.
+- Ask Janet to `read clients/arrow-energy.md and summarise it` to verify the clients folder loaded correctly.
+- Ask Janet to `read wiki/index.md` to verify the v1 wiki overlaid cleanly (should show `concepts/clickup-api.md` listed).
+- Test ClickUp auth by asking Janet to `fetch a ClickUp task` (any task URL) — verify the Authorization header injects without 401.
+
+**Caveats:**
+- This was an **overlay onto an existing v2 agent**, not a fresh init. Skipped phase 6 (`init-group-agent.ts`) entirely. The v2 agent group + Slack wiring + OneCLI agent all pre-existed from earlier setup (created 2026-05-08T01:23:26Z, ~11 hours before port). Phase 7 dropped v1 content (CLAUDE.md → CLAUDE.role.md, memory.md, wiki/, clients/, qa/, sources/) on top of skeleton v2 files. The v2 wiki was a Karpathy skeleton (just `index.md` + `log.md`); v1's wiki (entities/concepts/summaries directories with real ClickUp-api content) replaced it wholesale.
+- Role spec was rebranded from "BriefMate" → "Project Management Team" throughout. Channel reference updated from `#briefmate` to `#project-management-team`. Slack mrkdwn formatting block kept (still on Slack — same channel platform). Removed v1-only sections: "Replying to Dispatches from Main" (no parent in v2), `ask_group`/`reply_to_lead` references (v2 uses `send_message`), `/workspace/global/wiki/` reference (no global wiki concept in v2), the `conversations/` reference replaced with `sources/v1-conversations/` to match the new path.
+- `CLAUDE.local.md` previously empty (skeleton); replaced with `@./CLAUDE.role.md` + `@./memory.md` imports per the v2 convention.
+- `memory.md` carried verbatim from v1 — Janet (Good Place) personality, ClickUp rules (markdown_content / status PUT / time_estimate ms), Time Budget mandatory format, People (Luis = designer ID 88905307). No channel-specific content needed reframing — clean copy.
+- Conversations: copied v1's `conversations/` (3 files, 240K) to `groups/project-management-team/sources/v1-conversations/` as reference (not auto-loaded, agent grep'able on demand). User picked "Same + conversations as sources/v1-conversations/".
+- `/workspace/group/` → `/workspace/agent/` sweep completed cleanly across all team files. `grep -rln /workspace/group groups/project-management-team | grep -vE '/(data|logs|conversations|v1-conversations)/'` returned `(clean)` after the sed sweep (caught one ref in `wiki/index.md`).
+- Stopped the running container (`nanoclaw-v2-project-management-team-1778207741566`, Up 8 minutes) so the next inbound message spawns a fresh container with the new role spec + wiki + clients/. The existing session (`sess-1778207546383-yo0u0n`) had 2 inbound messages and 0 outbound — the agent had loaded the empty role spec and never managed to reply. Per phase 7e.bis Step 2, cleared the SDK session transcripts (`projects/-workspace-agent/*.jsonl`) AND the SDK PID pointer (`sessions/24.json`) to prevent stale-session resume errors. The 2 pending inbound messages remain in `messages_in` for the new container to pick up.
+- v1 trigger pattern was `@Janet` with `requires_trigger=0` — meaning the field was a fallback hint, not a gate (every message processed). v2 wiring flipped from `mention-sticky` (skeleton default) to `pattern` `/./` to match v1 behaviour exactly. Channel is dedicated to the team so noise isn't a concern.
+- ClickUp secret: v1 had Anthropic + ClickUp API; v2 only had Anthropic before port. Added ClickUp via `onecli agents set-secrets --secret-ids 4032b812...,1496e2b7...`. Without this, ClickUp API calls would have returned 401 — the team's main job depends on ClickUp.
+- **Missing `agent_destinations` row blocked first smoke test.** First two test messages (`read clients/arrow-energy.md` / `read wiki/index.md`) reached the agent and produced correct answers, but the agent-runner logged `WARNING: agent output had no <message to="..."> blocks — nothing was sent` and dropped the reply into scratchpad. Cause: the v2 agent group existed before the port (skeleton from earlier `init-group-agent.ts` run) but its central `agent_destinations` row was never created, so `writeDestinations` projected an empty `destinations` table into `inbound.db`, the system prompt told the agent "you have no configured destinations," and `dispatchResultText`'s strict `<message to="...">` parser found nothing to route. Fix: inserted `agent_destinations(agent_group_id='ag-1778203406039-nhnh92', local_name='project-management-team', target_type='channel', target_id='mg-1778202109644-wu0hza')` via `createDestination`, called `writeDestinations` for the 3 active sessions, stopped both running containers so the next inbound rebuilds the system prompt. Smoke tests passed on retry. **Re-port detection (phase 2e) should grep `agent_destinations` for the candidate `agent_groups.id` — empty → fix before phase 10.**

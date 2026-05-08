@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "Project Management Team",
+  "assistantName": "Project Management Team",
+  "agentGroupId": "ag-1778203406039-nhnh92"
+}
