@@ -27,6 +27,7 @@ IDENTITY_TABLES=(
   agent_groups
   messaging_groups
   messaging_group_agents
+  agent_destinations
   users
   user_roles
   agent_group_members
