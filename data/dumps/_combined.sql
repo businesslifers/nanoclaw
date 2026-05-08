@@ -39,6 +39,7 @@ INSERT INTO agent_groups VALUES('ag-1777429951298-sb2cr5','Collector','marketing
 INSERT INTO agent_groups VALUES('ag-1777429952193-oeprs7','Reporter','marketingteam-reporter','claude','2026-04-29T02:32:32.192Z');
 INSERT INTO agent_groups VALUES('ag-1777601813158-ualv4y','CRM','crm',NULL,'2026-05-01T02:16:53.158Z');
 INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientmate',NULL,'2026-05-01T03:45:05.026Z');
+INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -53,12 +54,13 @@ CREATE TABLE messaging_groups (
         UNIQUE(channel_type, platform_id)
       );
 INSERT INTO messaging_groups VALUES('mg-1777255249930-a6z6ke','cli','local','Local CLI',0,'public','2026-04-27T02:00:49.927Z',NULL);
-INSERT INTO messaging_groups VALUES('mg-1777256921639-x18t1p','telegram','telegram:7466423983',NULL,0,'request_approval','2026-04-27T02:28:41.639Z',NULL);
+INSERT INTO messaging_groups VALUES('mg-1777256921639-x18t1p','telegram','telegram:7466423983',NULL,0,'request_approval','2026-04-27T02:28:41.639Z','2026-05-08T01:12:27.000Z');
 INSERT INTO messaging_groups VALUES('mg-1777429771946-afqaze','telegram','telegram:-5055500128','Marketing Team',1,'request_approval','2026-04-29T02:29:31.946Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1777601737339-kdt2fr','telegram','telegram:-5116329515','CRM',1,'request_approval','2026-05-01T02:15:37.339Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1777607057297-8k2t6h','telegram','telegram:-5293085842','clientmate',1,'request_approval','2026-05-01T03:44:17.297Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1777957394563-jfn9s6','slack','slack:D0B16TLGLJ3',NULL,0,'request_approval','2026-05-05T05:03:14.563Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1777957905683-uxjv20','slack','slack:C0B1LB9T26A','marketing-team',1,'request_approval','2026-05-05T05:11:45.683Z',NULL);
+INSERT INTO messaging_groups VALUES('mg-1778202109644-wu0hza','slack','slack:C0B2E8Z2HQA','project-management-team',1,'request_approval','2026-05-08T01:01:49.644Z',NULL);
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -72,11 +74,11 @@ CREATE TABLE messaging_group_agents (
         UNIQUE(messaging_group_id, agent_group_id)
       );
 INSERT INTO messaging_group_agents VALUES('mga-1777255249930-9llpd0','mg-1777255249930-a6z6ke','ag-1777255249928-wmdu63','shared',0,'2026-04-27T02:00:49.927Z','pattern','.','all','drop');
-INSERT INTO messaging_group_agents VALUES('mga-1777257359333-0ktkjn','mg-1777256921639-x18t1p','ag-1777257359331-63ti7x','shared',0,'2026-04-27T02:35:59.331Z','pattern','.','all','drop');
 INSERT INTO messaging_group_agents VALUES('mga-1777601813160-ew67xa','mg-1777601737339-kdt2fr','ag-1777601813158-ualv4y','shared',0,'2026-05-01T02:16:53.158Z','mention',NULL,'all','drop');
 INSERT INTO messaging_group_agents VALUES('mga-1777607105029-5wpulm','mg-1777607057297-8k2t6h','ag-1777607105027-isi0rv','shared',0,'2026-05-01T03:45:05.026Z','pattern','.','all','drop');
 INSERT INTO messaging_group_agents VALUES('mga-1777957537561-m0w5f7','mg-1777957394563-jfn9s6','ag-1777257359331-63ti7x','shared',0,'2026-05-05T05:05:37.561Z','mention-sticky',NULL,'known','accumulate');
 INSERT INTO messaging_group_agents VALUES('mga-1777957915682-2rumxc','mg-1777957905683-uxjv20','ag-1777429834314-u4riyu','shared',0,'2026-05-05T05:11:55.682Z','mention-sticky',NULL,'known','accumulate');
+INSERT INTO messaging_group_agents VALUES('mga-1778203406041-z7d4na','mg-1778202109644-wu0hza','ag-1778203406039-nhnh92','shared',0,'2026-05-08T01:23:26.039Z','mention-sticky',NULL,'known','accumulate');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -100,7 +102,7 @@ CREATE TABLE user_roles (
         granted_at     TEXT NOT NULL,
         PRIMARY KEY (user_id, role, agent_group_id)
       );
-INSERT INTO user_roles VALUES('telegram:7466423983','owner',NULL,NULL,'2026-04-27T02:35:40.816Z');
+INSERT INTO user_roles VALUES('slack:U0AD5J35TFA','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T01:10:55.000Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -114,6 +116,7 @@ CREATE TABLE agent_group_members (
 INSERT INTO agent_group_members VALUES('telegram:7466423983','ag-1777257359331-63ti7x',NULL,'2026-04-27T02:35:59.331Z');
 INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1777257359331-63ti7x','telegram:7466423983','2026-05-05T05:05:37.563Z');
 INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1777429834314-u4riyu','telegram:7466423983','2026-05-05T05:11:55.683Z');
+INSERT INTO agent_group_members VALUES('slack:U0AD5J35TFA','ag-1778203406039-nhnh92','slack:U0AD5J35TFA','2026-05-08T01:23:26.039Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -124,6 +127,6 @@ CREATE TABLE user_dms (
         resolved_at        TEXT NOT NULL,
         PRIMARY KEY (user_id, channel_type)
       );
-INSERT INTO user_dms VALUES('telegram:7466423983','telegram','mg-1777256921639-x18t1p','2026-04-29T02:29:31.949Z');
+INSERT INTO user_dms VALUES('slack:U0AD5J35TFA','slack','mg-1777957394563-jfn9s6','2026-05-08T01:10:55.000Z');
 COMMIT;
 COMMIT;

@@ -138,16 +138,13 @@ write_header
 cat "$PROJECT_ROOT/assets/setup-splash.txt"
 
 # ─── pre-flight: minimum hardware specs ────────────────────────────────
-# NanoClaw runs an agent container per session. Below these thresholds the
-# host + container + agent will struggle (OOM under load, image + session
-# DBs filling the disk). Soft warn — `df` only sees the partition that
-# $PROJECT_ROOT lives on, which can underreport on hosts with separate
-# /home or /var mounts, so the user can override.
+# NanoClaw runs an agent container per session. Below this threshold the
+# host + container + agent will struggle (OOM under load). Soft warn — the
+# user can override.
 
 # RAM floor is set below 4 GB because "4 GB" VMs typically report 3700–3900 MB
 # after kernel reserves (e.g. Hetzner CX21 ≈ 3814, AWS t3.medium ≈ 3800).
 MIN_MEM_MB=3700
-MIN_DISK_GB=20
 
 detect_mem_mb() {
   case "$(uname -s)" in
@@ -162,39 +159,29 @@ detect_mem_mb() {
   esac
 }
 
-detect_disk_gb() {
-  # -P: POSIX format (no line-wrapping); -k: 1024-byte blocks. Avail is col 4.
-  df -Pk "$PROJECT_ROOT" 2>/dev/null \
-    | awk 'NR==2 { printf "%d", $4 / 1024 / 1024 }'
-}
-
 MEM_MB=$(detect_mem_mb)
-DISK_GB=$(detect_disk_gb)
 : "${MEM_MB:=0}"
-: "${DISK_GB:=0}"
 
-LOW_MEM=false; LOW_DISK=false
-[ "$MEM_MB"  -gt 0 ] && [ "$MEM_MB"  -lt "$MIN_MEM_MB" ]  && LOW_MEM=true
-[ "$DISK_GB" -gt 0 ] && [ "$DISK_GB" -lt "$MIN_DISK_GB" ] && LOW_DISK=true
+LOW_MEM=false
+[ "$MEM_MB" -gt 0 ] && [ "$MEM_MB" -lt "$MIN_MEM_MB" ] && LOW_MEM=true
 
-if [ "$LOW_MEM" = true ] || [ "$LOW_DISK" = true ]; then
+if [ "$LOW_MEM" = true ]; then
   printf '  %s\n' "$(red 'Warning: this machine likely cannot run NanoClaw.')"
-  printf '  %s\n' "$(dim 'NanoClaw recommends a 4 GB+ machine with 20 GB+ free disk. Below this,')"
-  printf '  %s\n' "$(dim 'the host + agent container will run out of memory or disk under most')"
-  printf '  %s\n' "$(dim 'workloads. A stronger machine is strongly recommended.')"
-  [ "$LOW_MEM"  = true ] && printf '  %s\n' "$(dim "  · Detected RAM:                 ${MEM_MB} MB")"
-  [ "$LOW_DISK" = true ] && printf '  %s\n' "$(dim "  · Free disk on $PROJECT_ROOT: ${DISK_GB} GB")"
+  printf '  %s\n' "$(dim 'NanoClaw recommends a 4 GB+ RAM machine. Below this, the host + agent')"
+  printf '  %s\n' "$(dim 'container will run out of memory under most workloads. A stronger')"
+  printf '  %s\n' "$(dim 'machine is strongly recommended.')"
+  printf '  %s\n' "$(dim "  · Detected RAM: ${MEM_MB} MB")"
   printf '\n'
   read -r -p "  $(bold 'Try anyway?') [y/N] " SPECS_ANS </dev/tty
 
   case "${SPECS_ANS:-N}" in
     [Yy]*)
-      ph_event setup_low_specs_continued mem_mb="$MEM_MB" disk_gb="$DISK_GB" low_mem="$LOW_MEM" low_disk="$LOW_DISK"
+      ph_event setup_low_specs_continued mem_mb="$MEM_MB" low_mem="$LOW_MEM"
       printf '\n'
       ;;
     *)
-      ph_event setup_low_specs_aborted mem_mb="$MEM_MB" disk_gb="$DISK_GB" low_mem="$LOW_MEM" low_disk="$LOW_DISK"
-      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run after upgrading the host or freeing disk space.')"
+      ph_event setup_low_specs_aborted mem_mb="$MEM_MB" low_mem="$LOW_MEM"
+      printf '\n  %s\n\n' "$(dim 'Aborted. Re-run after upgrading the host.')"
       exit 1
       ;;
   esac

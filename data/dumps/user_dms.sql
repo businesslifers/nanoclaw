@@ -7,5 +7,5 @@ CREATE TABLE user_dms (
         resolved_at        TEXT NOT NULL,
         PRIMARY KEY (user_id, channel_type)
       );
-INSERT INTO user_dms VALUES('telegram:7466423983','telegram','mg-1777256921639-x18t1p','2026-04-29T02:29:31.949Z');
+INSERT INTO user_dms VALUES('slack:U0AD5J35TFA','slack','mg-1777957394563-jfn9s6','2026-05-08T01:10:55.000Z');
 COMMIT;

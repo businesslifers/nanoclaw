@@ -8,5 +8,5 @@ CREATE TABLE user_roles (
         granted_at     TEXT NOT NULL,
         PRIMARY KEY (user_id, role, agent_group_id)
       );
-INSERT INTO user_roles VALUES('telegram:7466423983','owner',NULL,NULL,'2026-04-27T02:35:40.816Z');
+INSERT INTO user_roles VALUES('slack:U0AD5J35TFA','owner',NULL,'slack:U0AD5J35TFA','2026-05-08T01:10:55.000Z');
 COMMIT;
