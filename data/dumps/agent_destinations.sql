@@ -23,4 +23,5 @@ INSERT INTO agent_destinations VALUES('ag-1777607105027-isi0rv','clientmate','ch
 INSERT INTO agent_destinations VALUES('ag-1777257359331-63ti7x','slack-mg-17779','channel','mg-1777957394563-jfn9s6','2026-05-05T05:05:37.561Z');
 INSERT INTO agent_destinations VALUES('ag-1777429834314-u4riyu','marketing-team','channel','mg-1777957905683-uxjv20','2026-05-05T05:11:55.682Z');
 INSERT INTO agent_destinations VALUES('ag-1778203406039-nhnh92','project-management-team','channel','mg-1778202109644-wu0hza','2026-05-08T02:57:31.528Z');
+INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','slack-mg-17782','channel','mg-1778215735145-qty9u2','2026-05-08T04:49:47.820Z');
 COMMIT;

@@ -16,4 +16,5 @@ INSERT INTO agent_groups VALUES('ag-1777429952193-oeprs7','Reporter','marketingt
 INSERT INTO agent_groups VALUES('ag-1777601813158-ualv4y','CRM','crm',NULL,'2026-05-01T02:16:53.158Z');
 INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientmate',NULL,'2026-05-01T03:45:05.026Z');
 INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z');
+INSERT INTO agent_groups VALUES('ag-1778215787818-bncghq','Janet','dm-with-raeleen',NULL,'2026-05-08T04:49:47.818Z');
 COMMIT;

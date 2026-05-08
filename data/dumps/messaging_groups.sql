@@ -18,4 +18,5 @@ INSERT INTO messaging_groups VALUES('mg-1777607057297-8k2t6h','telegram','telegr
 INSERT INTO messaging_groups VALUES('mg-1777957394563-jfn9s6','slack','slack:D0B16TLGLJ3',NULL,0,'request_approval','2026-05-05T05:03:14.563Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1777957905683-uxjv20','slack','slack:C0B1LB9T26A','marketing-team',1,'request_approval','2026-05-05T05:11:45.683Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1778202109644-wu0hza','slack','slack:C0B2E8Z2HQA','project-management-team',1,'request_approval','2026-05-08T01:01:49.644Z',NULL);
+INSERT INTO messaging_groups VALUES('mg-1778215735145-qty9u2','slack','slack:D0B1JV7GJH3',NULL,0,'request_approval','2026-05-08T04:48:55.145Z',NULL);
 COMMIT;
