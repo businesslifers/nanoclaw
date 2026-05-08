@@ -65,7 +65,7 @@ You have three specialist lane agents available for ad-hoc delegation:
 |---|---|---|
 | **analyst** | Interpret raw Google Ads / GA4 data, flag anomalies, classify conversion actions | `send_message to="analyst": "<question + relevant data inline>"` |
 | **collector** | Run/troubleshoot the data-collection scripts, validate Google Ads connectivity | `send_message to="collector": "<task>"` |
-| **reporter** | Format analysis JSON into channel-ready text. State the target channel ("Telegram" or "Slack") in the prompt, they format differently. | `send_message to="reporter": "Format for Slack: <analysis JSON inline>"` |
+| **reporter** | Format analysis JSON into Slack-ready mrkdwn text. | `send_message to="reporter": "<analysis JSON inline>"` |
 
 Lanes are isolated from your filesystem — paste any data they need into the message, don't ask them to read paths from `/workspace/agent/`. Their replies come back to you via `send_message to="parent"`; you decide whether to relay to the channel.
 
@@ -134,28 +134,15 @@ You maintain a compounding wiki. Knowledge integrates once and stays current —
 
 ## Message Formatting
 
-The Marketing Team channel is wired on **two platforms**, Telegram and Slack. Look at the inbound message's channel before formatting your reply; the rules differ.
-
-### Telegram
-
-Write standard Markdown, the channel adapter translates to Telegram's MarkdownV2 with proper escaping.
-
-- `*bold*`, `_italic_`, `[text](url)`, `` `code` ``, ```` ```fenced``` ````, `>` quotes
-- Bullets with `-` or `•` (numbered lists also work)
-- Emoji as native Unicode (👀 ✅ ⚙️); do NOT use `:shortcode:` syntax
-- 4096-char limit per message, split or use `send_file` if longer
-
-### Slack
-
-Slack uses **mrkdwn**, not standard markdown. Key differences:
+The Marketing Team channel runs on Slack. Slack uses **mrkdwn**, not standard markdown:
 
 - Links use angle-bracket syntax: `<https://url|link text>`, NOT `[text](url)`
 - Bullets are `•`, NOT `- `; no numbered lists
-- `:emoji:` shortcodes work, but a few aliases don't render, prefer Unicode or test the shortcode
-- No `##` headings, use `*Bold text*` for section headers
+- `:emoji:` shortcodes work, but a few aliases don't render — prefer Unicode or test the shortcode
+- No `##` headings; use `*Bold text*` for section headers
 - No `**double asterisks**`; `*bold*` and `_italic_` only
 
-If formatting looks garbled, the most common cause on Slack is `[text](url)` link syntax leaking through.
+If formatting looks garbled, the most common cause is `[text](url)` link syntax leaking through.
 
 ---
 
@@ -225,4 +212,4 @@ _(Memory Protocol at the top of this file already covers the "check wiki / save 
   Your time to complete: X hrs
   If you reach your time and aren't done, stop and message the project manager.
   ```
-- **Daily pipeline output goes to the original Telegram channel.** The cron pipeline at 06:00 (`collector → analyst → reporter`) posts to the Telegram Marketing Team chat. Don't change that without explicit approval, Slack reception of the daily report has not been signed off.
+- **Daily pipeline output goes to the Slack `#marketing-team` channel (top-level, not in a thread).** The cron pipeline at 06:00 (`collector → analyst → reporter`) posts to Slack `C0B1LB9T26A`. If `send_message` is being called from inside a Slack thread, pass an explicit `to` that targets the channel top-level rather than letting the default thread context inherit.
