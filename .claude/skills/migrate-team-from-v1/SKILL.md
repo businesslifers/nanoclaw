@@ -269,7 +269,7 @@ If the user picks **WhatsApp (Baileys)**, surface this constraint:
 
 > Baileys WhatsApp can only own one session per WhatsApp number. If v1 is currently running on the team's WhatsApp account, you must stop v1 before scanning the QR for v2 — there is no graceful handover. Plan ~30 minutes downtime. Alternatively: spin up v2 on a second WhatsApp number and add it to the same group. Or: switch to WhatsApp Cloud (Meta API) via /add-whatsapp-cloud.
 
-If the user picks **Telegram**, capture the chat ID. The fast path: if the bot has been added to the new Telegram group and any message was sent there, v2's adapter already auto-created a `messaging_groups` row. Look for the most recent unnamed/new-titled telegram row:
+If the user picks **Telegram**, capture the chat ID. The fast path: if the bot has been added to the new Telegram chat and any message was sent there, v2's adapter already auto-created a `messaging_groups` row. Look for the most recent unnamed/new-titled telegram row:
 
 ```bash
 pnpm exec tsx -e "
@@ -280,7 +280,7 @@ for (const r of rows) console.log(JSON.stringify(r));
 "
 ```
 
-The negative integer in `platform_id` (`telegram:-1001234567890`) is the chat ID. **Do not approve any channel-registration card** that landed in the operator's DM — phase 6 wires the right agent group and clears stale approvals automatically.
+The integer in `platform_id` is the chat ID. **Groups have negative IDs** (e.g. `telegram:-1001234567890`); **personal DMs have positive IDs** (the user's Telegram ID, e.g. `telegram:7466423983`). Both flow through `--platform-id` to `init-group-agent.ts` unchanged. Personal-DM ports — porting a v1 1:1 chat like `whatsapp_<owner>` — land in the second case; the row may also already exist from a prior `/init-first-agent` or `/add-karpathy-llm-wiki` run, which makes phase 2e re-port detection important. **Do not approve any channel-registration card** that landed in the operator's DM — phase 6 wires the right agent group and clears stale approvals automatically.
 
 For Slack/Discord/WhatsApp/etc., follow that channel's specific path to obtain the platform ID. If the user doesn't know, search the install for that channel's setup skill (`grep '/add-<channel>' .claude/skills/`).
 
@@ -582,17 +582,40 @@ mkdir -p "groups/$V2_FOLDER/sources"
 [ -d "$V1_PATH/groups/$V1_FOLDER/sources" ] && cp -r "$V1_PATH/groups/$V1_FOLDER/sources/." "groups/$V2_FOLDER/sources/"
 ```
 
+**Top-level `*.md` files** flagged in phase 2a (e.g. `people.md`, `clients.md`, `preferences.md`, `mettro-voice.md`, `SOUL.md`, `<team>_research.md`) — default to copying these into `sources/`. They're reference material the agent reads on demand; in `sources/` they cost no context budget unless the agent reaches for them. Two exceptions where you should keep them at the team root instead:
+
+1. The role spec or v1 scripts reference them by an unprefixed path (e.g. `Read people.md` rather than `Read sources/people.md`). Keeping them at the root preserves those references; otherwise update the references during phase 7e.
+2. The file is small (<1KB) and load-bearing on every turn (true persona/memory). Treat as a `memory.md`-equivalent and handle in phase 7f.
+
+```bash
+# Copy top-level *.md (excluding CLAUDE.md and memory.md, which are special-cased
+# in phases 7a and 7f) into sources/ by default.
+shopt -s nullglob
+for f in "$V1_PATH/groups/$V1_FOLDER"/*.md; do
+  base=$(basename "$f")
+  case "$base" in CLAUDE.md|memory.md) continue ;; esac
+  cp "$f" "groups/$V2_FOLDER/sources/$base"
+done
+shopt -u nullglob
+```
+
+If 7a's edit of `CLAUDE.role.md` doesn't already mention these files, add a short "Reference Material" section there pointing at `sources/<name>.md` so the agent knows they exist and what each one contains.
+
 Always skip `logs/` — operational noise, never useful.
 
-**Conversation transcripts are a decision** — ask the operator. v1 stored Slack/WhatsApp transcripts in `conversations/`; some teams have rich history worth preserving, others are noisy enough that a clean start is better. Show the size and let the operator pick:
+**Conversation transcripts are a decision** — ask the operator (only if there's anything to copy). v1 stored Slack/WhatsApp transcripts in `conversations/`; some teams have rich history worth preserving, others are noisy enough that a clean start is better. Check first, then ask only if non-empty:
 
 ```bash
 SIZE=$(du -sh "$V1_PATH/groups/$V1_FOLDER/conversations" 2>/dev/null | cut -f1)
 COUNT=$(find "$V1_PATH/groups/$V1_FOLDER/conversations" -type f 2>/dev/null | wc -l | tr -d ' ')
-echo "v1 conversations: $COUNT files, $SIZE total"
+if [ "${COUNT:-0}" -eq 0 ]; then
+  echo "v1 conversations: empty (or missing) — skipping, no operator question needed"
+else
+  echo "v1 conversations: $COUNT files, $SIZE total"
+fi
 ```
 
-Use AskUserQuestion (or plain prompt) with these three options. Default recommendation is skip; bring if the operator answers a clear use case ("yes, the agent needs to recall what was discussed about X").
+If `COUNT=0` (or the directory doesn't exist), **skip the operator question** — there's nothing to copy. Otherwise, use AskUserQuestion (or plain prompt) with these three options. Default recommendation is skip; bring if the operator answers a clear use case ("yes, the agent needs to recall what was discussed about X").
 
 | Option | Where it lands | When to pick |
 |---|---|---|
@@ -678,20 +701,27 @@ The next inbound message spawns a new container and reloads the role spec. `.mjs
 
 Skip this for fresh ports where the operator hasn't smoke-tested yet — there's nothing to clear and you don't want to wipe legit memory.
 
-If the agent was tested mid-port (saw real messages, ran tools, quoted file content), the transcripts persist its stale reads. Optional aggressive reset:
+If the agent was tested mid-port (saw real messages, ran tools, quoted file content), the transcripts persist its stale reads. Optional aggressive reset — **clear both the projects/ transcripts AND the SDK's per-PID pointer**:
 
 ```bash
 # Find the session id(s) for this agent group
 SESSION_DIRS=$(find data/v2-sessions/ -maxdepth 1 -type d -name "ag-*" 2>/dev/null)
 # (or filter to a specific agent_groups.id if you've ported many)
 
-# Clear only the SDK's transcripts; keep inbound.db / outbound.db / heartbeat
+# Clear BOTH:
+#  - projects/<cwd>/<sessionId>.jsonl — the conversation transcripts
+#  - sessions/<pid>.json              — the SDK's per-PID pointer that names which sessionId to resume
+# Keep inbound.db / outbound.db / heartbeat. Stop any live container first so the SDK isn't holding sessions/<pid>.json open.
 for d in $SESSION_DIRS; do
   rm -rf "$d/.claude-shared/projects" 2>/dev/null
+  rm -f  "$d/.claude-shared/sessions"/*.json 2>/dev/null
 done
 ```
 
 This wipes the agent's conversation memory for that session — it forgets earlier turns entirely. Use only when the agent's stale-content quoting is causing real confusion that a plain restart didn't fix.
+
+> **Why both files matter** (hustle-lab port, 2026-05-08): deleting only `projects/` leaves `sessions/<pid>.json` (typically `sessions/31.json` — PID 31 = the agent-runner, stable across container restarts because Docker) pointing at the now-missing JSONL. The next container spawn reads that pointer, the SDK tries to resume the deleted transcript, and surfaces `Error: Claude Code returned an error result: No conversation found with session ID: <id>` as a chat message before clearing its own continuation. The agent-runner's stale-session detector (`STALE_SESSION_RE` in `container/agent-runner/src/providers/claude.ts` + the `isSessionInvalid` branch in `poll-loop.ts`) catches it and clears its `session_state` row, but doesn't touch the SDK's pointer file — so subsequent messages re-trip the same error until the operator manually deletes `sessions/`.
+
 
 #### Step 3: Tell the user how to verify
 
@@ -738,7 +768,7 @@ The agent will append its own observations / preferences below these imports ove
 
 ### 7f.bis — Other v1 memory artifacts
 
-If v1 had additional team-specific memory files (`people.md`, `clients.md`, `preferences.md`, `customers.md`, etc.), the rsync in 7d already copied them. They live as separate files at `/workspace/agent/<name>.md` and the agent reads them on demand (the role spec usually points to them). Don't auto-import these into `CLAUDE.local.md` unless they're small (<1KB) and load-bearing on every turn — keeping them as on-demand-readable files saves context budget.
+If v1 had additional team-specific reference files (`people.md`, `clients.md`, `preferences.md`, `customers.md`, etc.), 7d's top-level `*.md` snippet copied them into `groups/$V2_FOLDER/sources/`. They live at `/workspace/agent/sources/<name>.md` and the agent reads them on demand (the role spec usually points to them; if it doesn't, add a "Reference Material" section in 7a). Don't auto-import these into `CLAUDE.local.md` unless they're small (<1KB) and load-bearing on every turn — keeping them as on-demand-readable files saves context budget. If a file is genuinely persona/memory rather than reference (small, declarative, "always X / never Y" rules), move it from `sources/` back to the team root and import it via `CLAUDE.local.md` like 7f's `memory.md` flow.
 
 ## Phase 8 — Lane agents (only if phase 4 = lane path)
 
