@@ -21,6 +21,9 @@ INSERT INTO schema_version VALUES(9,'pending-sender-approvals','2026-04-27T02:00
 INSERT INTO schema_version VALUES(10,'channel-registration','2026-04-27T02:00:36.857Z');
 INSERT INTO schema_version VALUES(11,'approval-render-metadata','2026-04-27T02:00:36.858Z');
 INSERT INTO schema_version VALUES(12,'dashboard-audit','2026-04-30T04:41:27.838Z');
+INSERT INTO schema_version VALUES(13,'container-configs','2026-05-11T01:02:02.903Z');
+INSERT INTO schema_version VALUES(14,'cli-scope','2026-05-11T01:02:02.910Z');
+INSERT INTO schema_version VALUES(15,'agent-group-hidden-dashboard','2026-05-11T01:42:25.493Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -30,17 +33,17 @@ CREATE TABLE agent_groups (
         folder           TEXT NOT NULL UNIQUE,
         agent_provider   TEXT,
         created_at       TEXT NOT NULL
-      );
-INSERT INTO agent_groups VALUES('ag-1777255249928-wmdu63','CLI Agent','cli-with-adam',NULL,'2026-04-27T02:00:49.927Z');
-INSERT INTO agent_groups VALUES('ag-1777257359331-63ti7x','Janet','dm-with-adam',NULL,'2026-04-27T02:35:59.331Z');
-INSERT INTO agent_groups VALUES('ag-1777429834314-u4riyu','Marketing Team','marketingteam',NULL,'2026-04-29T02:30:34.313Z');
-INSERT INTO agent_groups VALUES('ag-1777429950395-mfpkc5','Analyst','marketingteam-analyst','claude','2026-04-29T02:32:30.395Z');
-INSERT INTO agent_groups VALUES('ag-1777429951298-sb2cr5','Collector','marketingteam-collector','claude','2026-04-29T02:32:31.298Z');
-INSERT INTO agent_groups VALUES('ag-1777429952193-oeprs7','Reporter','marketingteam-reporter','claude','2026-04-29T02:32:32.192Z');
-INSERT INTO agent_groups VALUES('ag-1777601813158-ualv4y','CRM','crm',NULL,'2026-05-01T02:16:53.158Z');
-INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientmate',NULL,'2026-05-01T03:45:05.026Z');
-INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z');
-INSERT INTO agent_groups VALUES('ag-1778215787818-bncghq','Janet','dm-with-raeleen',NULL,'2026-05-08T04:49:47.818Z');
+      , hidden_in_dashboard INTEGER NOT NULL DEFAULT 0);
+INSERT INTO agent_groups VALUES('ag-1777255249928-wmdu63','CLI Agent','cli-with-adam',NULL,'2026-04-27T02:00:49.927Z',1);
+INSERT INTO agent_groups VALUES('ag-1777257359331-63ti7x','Janet','dm-with-adam',NULL,'2026-04-27T02:35:59.331Z',0);
+INSERT INTO agent_groups VALUES('ag-1777429834314-u4riyu','Marketing Team','marketingteam',NULL,'2026-04-29T02:30:34.313Z',0);
+INSERT INTO agent_groups VALUES('ag-1777429950395-mfpkc5','Analyst','marketingteam-analyst','claude','2026-04-29T02:32:30.395Z',0);
+INSERT INTO agent_groups VALUES('ag-1777429951298-sb2cr5','Collector','marketingteam-collector','claude','2026-04-29T02:32:31.298Z',0);
+INSERT INTO agent_groups VALUES('ag-1777429952193-oeprs7','Reporter','marketingteam-reporter','claude','2026-04-29T02:32:32.192Z',0);
+INSERT INTO agent_groups VALUES('ag-1777601813158-ualv4y','CRM','crm',NULL,'2026-05-01T02:16:53.158Z',0);
+INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientmate',NULL,'2026-05-01T03:45:05.026Z',0);
+INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z',0);
+INSERT INTO agent_groups VALUES('ag-1778215787818-bncghq','Janet','dm-with-raeleen',NULL,'2026-05-08T04:49:47.818Z',0);
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;

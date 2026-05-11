@@ -11,7 +11,7 @@ index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11b
 +export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse, req?: http.IncomingMessage): Promise<void>;
 +export declare function dispatchMutating(method: string, path: string, body: any, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d184af3d5496de61b07c79bca0ceff7e7f..782111c971660a78cb760dc936dd4089cc177b93 100644
+index 326434d184af3d5496de61b07c79bca0ceff7e7f..51e32a8fd77e660cf51272e977f21d1abecb5d1e 100644
 --- a/dist/router.js
 +++ b/dist/router.js
 @@ -6,6 +6,14 @@ import { channelsPage } from './ui/pages/channels.js';
@@ -167,7 +167,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..782111c971660a78cb760dc936dd4089
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +243,72 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +243,87 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -181,6 +181,21 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..782111c971660a78cb760dc936dd4089
 + * the HTTP response. Any unrecognised throw becomes a 500.
 + */
 +export async function dispatchMutating(method, path, body, actorUserId, mutators, res) {
++    if (method === 'PATCH' && /^\/api\/agent-groups\/[^/]+\/hidden$/.test(path)) {
++        const id = decodeURIComponent(path.split('/')[3]);
++        const fn = mutators && mutators.setAgentGroupHidden;
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator setAgentGroupHidden not configured' }, 503);
++        }
++        try {
++            const after = fn({ id, hidden: !!(body && body.hidden) }, actorUserId);
++            return json(res, { ok: true, after });
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
 +    if (method === 'PATCH' && path.startsWith('/api/agent-groups/')) {
 +        const id = decodeURIComponent(path.slice('/api/agent-groups/'.length));
 +        if (!id || id.includes('/')) return json(res, { error: 'Invalid agent group id' }, 400);
@@ -428,7 +443,7 @@ index b12b787287c1cc6389280fc422b2dcba69697559..697c55eaba9c457997c501394018bda6
  const LOG_BUFFER_MAX = 500;
  const logBuffer = [];
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcbedf1e7db 100644
+index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..128122bb017af9a2486ae6906cf3dda20554a85d 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -16,6 +16,26 @@ export interface DashboardSnapshot {
@@ -458,7 +473,7 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
  }
  export interface AgentGroupInfo {
      id: string;
-@@ -139,7 +159,68 @@ export interface ActivityBucket {
+@@ -139,7 +159,77 @@ export interface ActivityBucket {
      inbound: number;
      outbound: number;
  }
@@ -493,8 +508,17 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    ok: true;
 +    task: TaskRowSummary | null;
 +}
++export interface AgentGroupSetHiddenArgs {
++    id: string;
++    hidden: boolean;
++}
++export interface AgentGroupSetHiddenResult {
++    id: string;
++    hidden: boolean;
++}
 +export interface DashboardMutators {
 +    renameAgentGroup(args: AgentGroupRenameArgs, actorUserId: string): AgentGroupRenameResult;
++    setAgentGroupHidden(args: AgentGroupSetHiddenArgs, actorUserId: string): AgentGroupSetHiddenResult;
 +    cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
 +    pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
 +    resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
@@ -528,10 +552,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..60ba3378066b65d6a1d2efece2942bcb
 +    permissions?: DashboardPermissions;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba3795a827a8b 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..ee904bfcc16e736abdc5a972dc2671bc963db6e8 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3430 @@
+@@ -2,172 +2,3496 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -3155,12 +3179,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    background: var(--msg-surface-2);
 +    padding: 14px 16px;
 +    border-radius: 8px;
-   }
--  .sidebar h1 {
--    font-size: 16px;
--    padding: 0 20px 16px;
--    color: #fff;
--    border-bottom: 1px solid #2a2a2a;
++  }
 +  .messages-v2 .mdt-meta-list { display: flex; flex-direction: column; gap: 8px; }
 +  .messages-v2 .mdt-meta-row {
 +    display: grid;
@@ -3195,36 +3214,20 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    padding: 8px 12px;
 +    background: var(--msg-surface-2);
 +    border-radius: 6px;
-     margin-bottom: 8px;
++    margin-bottom: 8px;
 +    font-size: 12.5px;
-   }
--  .sidebar nav a {
++  }
 +  .messages-v2 .mdt-thread-item.mdt-thread-in  { border-left-color: #7dd3fc; }
 +  .messages-v2 .mdt-thread-item.mdt-thread-out { border-left-color: var(--msg-green); }
 +  .messages-v2 .mdt-thread-current { background: rgba(45, 212, 191, 0.08); }
 +  .messages-v2 .mdt-thread-head {
-     display: flex;
-     align-items: center;
--    gap: 10px;
--    padding: 10px 20px;
--    color: #999;
--    font-size: 14px;
--    transition: background 0.15s, color 0.15s;
++    display: flex;
++    align-items: center;
 +    gap: 8px;
 +    font-size: 11px;
 +    color: var(--msg-text-dim);
 +    margin-bottom: 4px;
-   }
--  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
--  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
--  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
--
--  /* Main */
--  .main {
--    margin-left: 220px;
--    padding: 24px 32px;
--    flex: 1;
--    min-width: 0;
++  }
 +  .messages-v2 .mdt-thread-dir { font-weight: 700; color: var(--msg-text-label); }
 +  .messages-v2 .mdt-thread-current-tag {
 +    margin-left: auto;
@@ -3237,37 +3240,41 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    text-transform: uppercase;
 +    letter-spacing: 0.5px;
    }
--  .page-title {
--    font-size: 22px;
--    font-weight: 600;
--    margin-bottom: 20px;
+-  .sidebar h1 {
+-    font-size: 16px;
+-    padding: 0 20px 16px;
 -    color: #fff;
+-    border-bottom: 1px solid #2a2a2a;
+-    margin-bottom: 8px;
 +  .messages-v2 .mdt-thread-body {
 +    color: var(--msg-text);
 +    line-height: 1.5;
 +    white-space: pre-wrap;
 +    word-break: break-word;
    }
- 
--  /* Cards */
--  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
--  .card {
--    background: #1a1a1a;
--    border: 1px solid #2a2a2a;
+-  .sidebar nav a {
++
 +  /* Raw JSON viewer */
 +  .messages-v2 .mdt-raw-head {
-+    display: flex;
+     display: flex;
 +    justify-content: space-between;
-+    align-items: center;
-+  }
+     align-items: center;
+-    gap: 10px;
+-    padding: 10px 20px;
+-    color: #999;
+-    font-size: 14px;
+-    transition: background 0.15s, color 0.15s;
+   }
+-  .sidebar nav a:hover { background: #252525; color: #e0e0e0; text-decoration: none; }
+-  .sidebar nav a.active { background: #1e2a35; color: #7eb8da; border-right: 2px solid #7eb8da; }
+-  .sidebar nav a .icon { width: 18px; text-align: center; font-size: 12px; }
 +  .messages-v2 .mdt-raw-head .ov-section { margin: 0 !important; }
 +  .messages-v2 .mdt-raw-body {
 +    margin-top: 10px;
 +    background: #0a0e1a;
 +    color: #cbd5e1;
 +    padding: 12px;
-     border-radius: 8px;
--    padding: 16px;
++    border-radius: 8px;
 +    border: 1px solid var(--msg-border);
 +    font-family: 'Cascadia Code', 'Fira Code', monospace;
 +    font-size: 11.5px;
@@ -3275,19 +3282,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    max-height: 360px;
 +    overflow: auto;
 +    white-space: pre;
-   }
--  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
--  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
--  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
--
--  /* Tables */
--  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
--  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
--  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
--  tr:hover td { background: #151515; }
++  }
  
--  /* Badges */
--  .badge {
+-  /* Main */
+-  .main {
+-    margin-left: 220px;
+-    padding: 24px 32px;
 +  /* Audit page */
 +  .audit-v2 .audit-toolbar {
 +    display: flex;
@@ -3296,7 +3296,8 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    margin-bottom: 16px;
 +  }
 +  .audit-v2 .audit-search {
-+    flex: 1;
+     flex: 1;
+-    min-width: 0;
 +    min-width: 240px;
 +    background: #0f172a;
 +    color: #e2e8f0;
@@ -3305,7 +3306,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    padding: 8px 12px;
 +    font-size: 13px;
 +    font-family: inherit;
-+  }
+   }
+-  .page-title {
+-    font-size: 22px;
+-    font-weight: 600;
+-    margin-bottom: 20px;
+-    color: #fff;
 +  .audit-v2 .audit-search:focus { outline: none; border-color: #2dd4bf; }
 +  .audit-v2 .audit-filter {
 +    background: #0f172a;
@@ -3315,7 +3321,13 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    padding: 7px 10px;
 +    font-size: 12.5px;
 +    font-family: inherit;
-+  }
+   }
+-
+-  /* Cards */
+-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+-  .card {
+-    background: #1a1a1a;
+-    border: 1px solid #2a2a2a;
 +  .audit-v2 .audit-count {
 +    margin-left: auto;
 +    font-size: 11.5px;
@@ -3327,10 +3339,23 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    border-collapse: collapse;
 +    background: #0f172a;
 +    border: 1px solid #1e293b;
-+    border-radius: 8px;
+     border-radius: 8px;
+-    padding: 16px;
 +    overflow: hidden;
 +    table-layout: fixed;
-+  }
+   }
+-  .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+-  .card .value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 4px; }
+-  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
+-
+-  /* Tables */
+-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+-  th { text-align: left; padding: 10px 12px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2a2a2a; }
+-  td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e1e; }
+-  tr:hover td { background: #151515; }
+-
+-  /* Badges */
+-  .badge {
 +  .audit-v2 .audit-table th {
 +    text-align: left;
 +    padding: 10px 12px;
@@ -3473,6 +3498,76 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 -  .chart-bar-in { background: #3b82f6; }
 -  .chart-bar-out { background: #22c55e; }
 -  .chart-value { font-size: 11px; color: #666; }
++  /* Hide-team button — sibling of the rename pencil. */
++  .ag-name-hide-btn {
++    background: transparent;
++    border: 0;
++    color: #64748b;
++    cursor: pointer;
++    padding: 2px 4px;
++    border-radius: 3px;
++    line-height: 0;
++    opacity: 0;
++    transition: opacity 0.12s, color 0.12s, background 0.12s;
++    display: inline-flex;
++    align-items: center;
++  }
++  .ag-name-edit:hover .ag-name-hide-btn { opacity: 1; }
++  .ag-name-hide-btn:hover { color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
++  .ag-name-hide-btn[disabled] { opacity: 0.4; cursor: wait; }
++  /* When the team is already hidden, keep the eye visible at low opacity so
++     unhide is discoverable even without hovering. */
++  .ag-row-hidden .ag-name-hide-btn,
++  .ag-card-hidden .ag-name-hide-btn { opacity: 0.7; }
+ 
+-  /* Log viewer */
+-  .log-container {
+-    background: #0a0a0a;
+-    border: 1px solid #2a2a2a;
++  /* "Show hidden" toolbar toggle — same visual rhythm as the view toggle. */
++  .agent-groups-v2 .ag-show-hidden-toggle {
++    background: transparent;
++    border: 1px solid #1f2937;
++    color: #64748b;
++    cursor: pointer;
++    border-radius: 6px;
++    padding: 6px 10px;
++    display: inline-flex;
++    align-items: center;
++    gap: 6px;
++    font-family: inherit;
++    font-size: 12px;
++    line-height: 1;
++    transition: color 0.12s, background 0.12s, border-color 0.12s;
++  }
++  .agent-groups-v2 .ag-show-hidden-toggle:hover {
++    color: #e2e8f0;
++    border-color: #334155;
++  }
++  .agent-groups-v2 .ag-show-hidden-toggle[aria-pressed="true"] {
++    color: #2dd4bf;
++    border-color: rgba(45, 212, 191, 0.35);
++    background: rgba(45, 212, 191, 0.08);
++  }
++  .agent-groups-v2 .ag-show-hidden-count { color: inherit; opacity: 0.85; }
++
++  /* Hidden teams: clip from default view; reveal dim when show-hidden is on. */
++  .ag-row[data-hidden="1"],
++  .ag-card[data-hidden="1"] { display: none; }
++  body.ag-show-hidden .ag-row[data-hidden="1"] {
++    display: table-row;
++    opacity: 0.55;
++  }
++  body.ag-show-hidden .ag-card[data-hidden="1"] {
++    display: flex;
++    opacity: 0.55;
++  }
++  /* A card-group whose every card is hidden should disappear too so the
++     section header doesn't dangle. The :has() selector keeps this purely
++     declarative — no extra JS bookkeeping. */
++  .ag-cards-group:not(:has(.ag-card[data-hidden="0"])) { display: none; }
++  body.ag-show-hidden .ag-cards-group:not(:has(.ag-card[data-hidden="0"])) { display: block; }
++
 +  /* Tasks page */
 +  .tasks-v2 .ov-header {
 +    display: flex;
@@ -3536,11 +3631,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
 +    font-variant-numeric: tabular-nums;
 +  }
 +  .tasks-v2 .tasks-empty { font-size: 13px; }
- 
--  /* Log viewer */
--  .log-container {
--    background: #0a0a0a;
--    border: 1px solid #2a2a2a;
++
 +  .tasks-v2 .tasks-group {
 +    background: #0f172a;
 +    border: 1px solid #1e293b;
@@ -4066,7 +4157,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3433,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3499,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -4081,7 +4172,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3447,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3513,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -4107,7 +4198,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3473,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3539,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -4126,7 +4217,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3494,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3560,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -4143,7 +4234,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3515,52 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3581,52 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -4198,23 +4289,23 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..14f5adf82877e932cc197bf814eba379
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd8b75dcb2 100644
+index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..8c6c2e6a01a392f9697426ac840fa88b861a8c8e 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
  import { layout } from '../layout.js';
  export function agentGroupsPage() {
 -    return layout('Agent Groups', '/dashboard/agent-groups', `
-+    return layout('Teams', '/dashboard/agent-groups', `
 -    <h2 class="page-title">Agent Groups</h2>
 -    <div id="content"><div class="loading">Loading...</div></div>
 -    <div id="detail" style="display:none"></div>
++    return layout('Teams', '/dashboard/agent-groups', `
 +    <div id="ag-index" class="agent-groups-v2"><div class="ov-loading">Loading…</div></div>
 +    <div id="ag-detail" class="agent-groups-v2" style="display:none"></div>
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,732 @@ export function agentGroupsPage() {
+@@ -16,112 +15,833 @@ export function agentGroupsPage() {
        }
      })();
  
@@ -4229,6 +4320,39 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +    }
 +    function setViewMode(v) {
 +      try { localStorage.setItem('ag-view', v); } catch (e) {}
++    }
++
++    // "Show hidden" toggle persistence. Hidden teams are rendered with
++    // data-hidden="1" and a CSS rule clips them by default; this flag
++    // adds body.ag-show-hidden which un-clips them (and dims them).
++    function getShowHidden() {
++      try { return localStorage.getItem('ag-show-hidden') === '1'; }
++      catch (e) { return false; }
++    }
++    function setShowHidden(v) {
++      try { localStorage.setItem('ag-show-hidden', v ? '1' : '0'); } catch (e) {}
++    }
++    function applyShowHidden(v) {
++      document.body.classList.toggle('ag-show-hidden', !!v);
++      var btns = document.querySelectorAll('[data-ag-show-hidden]');
++      for (var i = 0; i < btns.length; i++) {
++        btns[i].setAttribute('aria-pressed', v ? 'true' : 'false');
++      }
++    }
++    function refreshHiddenCount() {
++      var n = document.querySelectorAll('.ag-row[data-hidden="1"]').length;
++      // Each hidden group appears in both list + cards views, so divide by 2.
++      // Falls back to counting one source if the other isn't rendered yet.
++      var cardsN = document.querySelectorAll('.ag-card[data-hidden="1"]').length;
++      var count = Math.max(n, cardsN);
++      var spans = document.querySelectorAll('[data-hidden-count]');
++      for (var i = 0; i < spans.length; i++) {
++        spans[i].textContent = count > 0 ? ' (' + count + ')' : '';
++      }
++      var btns = document.querySelectorAll('[data-ag-show-hidden]');
++      for (var j = 0; j < btns.length; j++) {
++        btns[j].style.display = count > 0 ? '' : 'none';
++      }
 +    }
 +
      async function loadList() {
@@ -4292,6 +4416,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +              '<select id="ag-model-filter" class="ag-select">' +
 +                '<option value="">All Models</option>' + modelOpts +
 +              '</select>' +
++              '<button class="ag-show-hidden-toggle" type="button" data-ag-show-hidden ' +
++                'aria-pressed="' + (getShowHidden() ? 'true' : 'false') + '" title="Show hidden teams">' +
++                '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>' +
++                '<span class="ag-show-hidden-label">Hidden</span>' +
++                '<span class="ag-show-hidden-count" data-hidden-count></span>' +
++              '</button>' +
 +              '<div class="ag-view-toggle" role="tablist" aria-label="View mode">' +
 +                '<button class="ag-view-btn" data-ag-view="list" role="tab" aria-label="List view" title="List view">' +
 +                  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/></svg>' +
@@ -4339,6 +4469,10 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +
 +        // Apply persisted view mode (defaults to list).
 +        applyViewMode(getViewMode());
++
++        // Apply persisted "show hidden" state + update count + toggle visibility.
++        applyShowHidden(getShowHidden());
++        refreshHiddenCount();
 +
 +        // Wire up search + filter
 +        document.getElementById('ag-search').addEventListener('input', applyFilters);
@@ -4397,10 +4531,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +        : '<span class="ag-usage ag-usage-zero">—</span>';
 +
 +      var modelKey = provider + ':' + model;
-+      return '<tr class="ag-row' + (isSub ? ' ag-row-sub' : '') + '"' +
++      var hiddenFlag = g.hidden_in_dashboard ? '1' : '0';
++      return '<tr class="ag-row' + (isSub ? ' ag-row-sub' : '') + (g.hidden_in_dashboard ? ' ag-row-hidden' : '') + '"' +
 +        ' data-name="' + esc((g.name || '').toLowerCase()) +
 +        '" data-folder="' + esc((g.folder || '').toLowerCase()) +
 +        '" data-model="' + esc(modelKey) + '"' +
++        ' data-hidden="' + hiddenFlag + '"' +
 +        ' data-id="' + esc(g.id) + '">' +
 +        '<td class="ag-cell-name">' + nameCell + '</td>' +
 +        '<td class="ag-cell-folder">' + esc(g.folder) + '</td>' +
@@ -4487,10 +4623,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +      var modelKey = provider + ':' + model;
 +      var created = g.created_at ? formatDate(g.created_at) : '';
 +
-+      return '<article class="ag-card"' +
++      var hiddenFlagCard = g.hidden_in_dashboard ? '1' : '0';
++      return '<article class="ag-card' + (g.hidden_in_dashboard ? ' ag-card-hidden' : '') + '"' +
 +          ' data-name="' + esc((g.name || '').toLowerCase()) +
 +          '" data-folder="' + esc((g.folder || '').toLowerCase()) +
 +          '" data-model="' + esc(modelKey) + '"' +
++          ' data-hidden="' + hiddenFlagCard + '"' +
 +          ' data-id="' + esc(g.id) + '">' +
 +          '<div class="ag-card-head">' +
 +            avatarHtml(g) +
@@ -4628,7 +4766,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +          '<button class="ag-menu-item" data-ag-action="copy" data-ag-id="' + esc(id) + '">Copy ID</button>';
 +        menuBtn.parentElement.appendChild(pop);
 +        return;
-       }
++      }
 +      var actionBtn = ev.target.closest && ev.target.closest('[data-ag-action]');
 +      if (actionBtn) {
 +        ev.preventDefault();
@@ -4653,7 +4791,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +          }
 +        }
 +        return;
-+      }
+       }
 +      // Click outside any menu — close
 +      closeAllMenus();
      }
@@ -4915,11 +5053,11 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +                }).join('') +
 +                '</tbody></table></div>') +
 +          '</section>';
- 
--        document.getElementById('detail').innerHTML = html;
++
 +        document.getElementById('ag-detail').innerHTML =
 +          hero + infoRow + sessionsHtml + wiringsHtml + agentDestsHtml + channelDestsHtml + membersHtml;
-+
+ 
+-        document.getElementById('detail').innerHTML = html;
 +        // Re-wire ⋮ menu (delegated handler already bound from index, but
 +        // index might not have run when navigating direct to detail).
 +        document.removeEventListener('click', handleAgClick);
@@ -4960,10 +5098,18 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +     * delegated listener wired below.
 +     */
 +    function renderEditableAgentName(g, anchorClass) {
++      var isHidden = !!g.hidden_in_dashboard;
++      var hideTitle = isHidden ? 'Unhide team' : 'Hide team from dashboard';
++      var hideIcon = isHidden
++        ? '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>'
++        : '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2l12 12"/><path d="M6.5 6.5a2 2 0 002.83 2.83"/><path d="M9.9 4.2A7 7 0 0115 8s-1.1 2.3-3.3 3.7"/><path d="M11 13a7 7 0 01-3 .5C3.5 13.5 1 8 1 8a13 13 0 013-3.4"/></svg>';
 +      return '<span class="ag-name-edit" data-rename-wrap="' + esc(g.id) + '">' +
 +        '<a class="' + esc(anchorClass) + '" href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a>' +
 +        ' <button class="ag-name-edit-btn" type="button" data-rename-id="' + esc(g.id) +
 +          '" data-rename-current="' + esc(g.name) + '" data-rename-anchor="' + esc(anchorClass) + '" title="Rename" aria-label="Rename">&#x270E;</button>' +
++        ' <button class="ag-name-hide-btn" type="button" data-hide-id="' + esc(g.id) +
++          '" data-hide-name="' + esc(g.name) + '" data-hide-current="' + (isHidden ? '1' : '0') +
++          '" title="' + esc(hideTitle) + '" aria-label="' + esc(hideTitle) + '">' + hideIcon + '</button>' +
 +        '</span>';
 +    }
 +
@@ -4972,6 +5118,52 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..d5597b248341fd95066a4f022e62a8fd
 +      if (!btn) return;
 +      ev.preventDefault();
 +      activateRename(btn);
++    });
++
++    // "Show hidden" toolbar toggle.
++    document.addEventListener('click', function(ev) {
++      var btn = ev.target.closest && ev.target.closest('[data-ag-show-hidden]');
++      if (!btn) return;
++      ev.preventDefault();
++      var next = !getShowHidden();
++      setShowHidden(next);
++      applyShowHidden(next);
++    });
++
++    // Per-row hide/unhide button.
++    document.addEventListener('click', async function(ev) {
++      var btn = ev.target.closest && ev.target.closest('[data-hide-id]');
++      if (!btn) return;
++      ev.preventDefault();
++      var id = btn.dataset.hideId;
++      var name = btn.dataset.hideName || 'team';
++      var currentlyHidden = btn.dataset.hideCurrent === '1';
++      var nextHidden = !currentlyHidden;
++      var verb = nextHidden ? 'Hide' : 'Unhide';
++      if (nextHidden && !confirm(verb + ' "' + name + '" from the dashboard?\\n\\nIt will still run normally; only the dashboard listing is affected. Toggle "Show hidden" in the toolbar to bring it back.')) return;
++      btn.disabled = true;
++      try {
++        await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id) + '/hidden', { hidden: nextHidden });
++        // Update every row + card for this id in place — no full reload.
++        var rows = document.querySelectorAll('[data-id="' + id.replace(/"/g, '\\\\"') + '"]');
++        for (var i = 0; i < rows.length; i++) {
++          rows[i].setAttribute('data-hidden', nextHidden ? '1' : '0');
++          rows[i].classList.toggle('ag-row-hidden', nextHidden && rows[i].classList.contains('ag-row'));
++          rows[i].classList.toggle('ag-card-hidden', nextHidden && rows[i].classList.contains('ag-card'));
++        }
++        // Update every hide-button for this id (both views) so the icon/title flip.
++        var btns = document.querySelectorAll('[data-hide-id="' + id.replace(/"/g, '\\\\"') + '"]');
++        for (var j = 0; j < btns.length; j++) {
++          btns[j].dataset.hideCurrent = nextHidden ? '1' : '0';
++          btns[j].title = nextHidden ? 'Unhide team' : 'Hide team from dashboard';
++          btns[j].setAttribute('aria-label', btns[j].title);
++        }
++        refreshHiddenCount();
++      } catch (e) {
++        alert((e && e.message) ? e.message : 'Failed to update hidden state');
++      } finally {
++        btn.disabled = false;
++      }
 +    });
 +
 +    function activateRename(btn) {
@@ -6062,7 +6254,7 @@ index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b483356b20571 100644
+index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..bd046f55ce23b6b3bb79cf6e893171981445b58c 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
 @@ -1,165 +1,374 @@
@@ -6544,7 +6736,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..29b2005b646e29387737267a050b4833
    `);
  }
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..fbdf77f527cddc1962ea0c80e84b052ee04684b9 100644
+index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..ce5acd6c85c7e19a32b57017faec5ee961044ade 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -6848,7 +7040,7 @@ index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876fa5bf02b
+index 0000000000000000000000000000000000000000..482f03f696dc28b7174adb7ac6057a1f27a156eb
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
 @@ -0,0 +1,921 @@
@@ -7774,7 +7966,7 @@ index 0000000000000000000000000000000000000000..582d6e821e60f0f2461d5c7785891876
 +    }
 +}
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe8a5d6d30e177421c8d7b78af81da78962..f77712cb25c6c4c91e5c9dc681b79bc9de659d44 100644
+index ea390fe8a5d6d30e177421c8d7b78af81da78962..531e82e5e7a7a6d6fc84644528073b9f2dd4a86e 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@

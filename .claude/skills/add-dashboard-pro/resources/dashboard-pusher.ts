@@ -87,7 +87,8 @@ import { getUserRoles, getAdminsOfAgentGroup } from './modules/permissions/db/us
 import { getUserDmsForUser } from './modules/permissions/db/user-dms.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
-import { readContainerConfig } from './container-config.js';
+import { configFromDb, type ContainerConfig } from './container-config.js';
+import { getContainerConfig } from './db/container-configs.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
 import { collectTasks, type SessionRef } from './dashboard-tasks.js';
@@ -264,11 +265,15 @@ function collectSnapshot(): Record<string, unknown> {
     }));
   const tasks = collectTasks(sessionRefs);
 
+  const agentGroups = collectAgentGroups();
+  const hiddenAgentGroupCount = agentGroups.filter((g) => g.hidden_in_dashboard).length;
+
   return {
     timestamp: new Date().toISOString(),
     assistant_name: ASSISTANT_NAME,
     uptime: Math.floor(process.uptime()),
-    agent_groups: collectAgentGroups(),
+    agent_groups: agentGroups,
+    hidden_agent_group_count: hiddenAgentGroupCount,
     sessions,
     channels,
     users: collectUsers(),
@@ -410,10 +415,13 @@ function collectAgentGroups() {
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
-      // V2 stores container config in groups/<folder>/container.json on disk,
-      // not on the agent_groups row — read it from there so the dashboard
-      // sees the real config (or an empty shell if the file is absent).
-      container_config: readContainerConfig(g.folder),
+      // Container config lives in the container_configs table (moved from
+      // groups/<folder>/container.json filesystem in upstream 2.0.48). Pure
+      // read, no side effects — startup backfill ensures a row exists.
+      container_config: ((): ContainerConfig | null => {
+        const row = getContainerConfig(g.id);
+        return row ? configFromDb(row, g) : null;
+      })(),
       sessionCount: sessions.length,
       runningSessions: running.length,
       wirings,
@@ -421,6 +429,7 @@ function collectAgentGroups() {
       members,
       admins,
       created_at: g.created_at,
+      hidden_in_dashboard: (g.hidden_in_dashboard ?? 0) === 1,
     };
   });
 }

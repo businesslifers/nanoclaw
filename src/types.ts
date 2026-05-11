@@ -7,6 +7,8 @@ export interface AgentGroup {
   /** @deprecated Use container_configs.provider instead. */
   agent_provider: string | null;
   created_at: string;
+  /** Dashboard Pro: 1 to hide this group from the dashboard's default view. */
+  hidden_in_dashboard?: number;
 }
 
 /** Per-agent-group container runtime config. Source of truth in the DB;

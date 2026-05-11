@@ -5,7 +5,7 @@ description: Layer the businesslifers customizations onto the base NanoClaw dash
 
 # /add-dashboard-pro — businesslifers dashboard customizations
 
-Adds nine things on top of the base `/add-dashboard` install. The patch also relabels "Agent Groups" as "Teams" everywhere it appears in the UI (sidebar nav, page header, Overview section, table column headers, the "By Team" cost panel, and tasks-page labels). The internal model, API routes (`/api/agent-groups`, `/dashboard/agent-groups`), CSS class names (`.agent-groups-v2`), and source identifiers stay as `agent-group(s)` — this is a display rename only.
+Adds ten things on top of the base `/add-dashboard` install. The patch also relabels "Agent Groups" as "Teams" everywhere it appears in the UI (sidebar nav, page header, Overview section, table column headers, the "By Team" cost panel, and tasks-page labels). The internal model, API routes (`/api/agent-groups`, `/dashboard/agent-groups`), CSS class names (`.agent-groups-v2`), and source identifiers stay as `agent-group(s)` — this is a display rename only.
 
 1. **Wiki page redesign** — restyles the dashboard's `/dashboard/wikis` route (markdown rendering, sidebar layout). Surfaces YAML frontmatter as a metadata bar above the article — `verdict:` (worth-exploring / interesting-but-not-now / pass) as a colored badge, `evaluated:` and `updated:` dates, a clickable source link (preferring `url:` for the href, with `source:` as label fallback), and `tags:` as pills. Code blocks get a hover-revealed copy-to-clipboard button.
 2. **Per-container CPU + memory columns** on the `/dashboard/sessions` table, with bar visualisations and color thresholds.
@@ -15,7 +15,8 @@ Adds nine things on top of the base `/add-dashboard` install. The patch also rel
 6. **Branding** — sidebar header reads "Dashboard Pro" with a logo above it, and the same image serves as the browser favicon. The logo is inlined into the layout as a base64 data URL (no separate static asset to host or route). Defaults to the NanoClaw icon (`resources/nanoclaw-icon.svg`); operators can override per-install by dropping a `dashboard-logo.{svg,png,webp,jpg}` file at the install root before running step 4, or by setting `DASHBOARD_LOGO_PATH=path/to/logo.svg`. The skill bakes the chosen image into the patch at install time. Sidebar slot is 80×80 — square assets render best.
 7. **CRUD foundation + agent/sub-agent rename** — first write capability on the dashboard. Hover any agent (card view, list view, and the Overview hierarchy) and a pencil button activates an inline editor; submit `PATCH /api/agent-groups/:id` with `{ name }` and the host validates, authorizes via `canAccessAgentGroup`/`hasAdminPrivilege`, runs `updateAgentGroup` + audit row in a single transaction, then nudges the pusher so the new name appears in <1s. The `id` and `folder` are immutable; `groups/<folder>/container.json` `groupName`/`assistantName` re-sync on the next container spawn (`src/container-runner.ts:423-428`); OneCLI display name re-applies on the next session via the existing `ensureAgent` call. No container restart required. Foundation pieces also added so future write features layer on cleanly: `mutators` + `resolveActor` options on `startDashboard`, double-submit `nc-csrf` cookie + `X-Dashboard-CSRF` header, and `dispatchMutating` for non-GET routes.
 8. **Audit log + page** — a new `dashboard_audit` table (migration `016-dashboard-audit`) records every mutator call (`actor_user_id`, `action`, `target_type`, `target_id`, before/after JSON, ts). The `/dashboard/audit` page renders the latest rows with action + target filters and search. Visible immediately after the first dashboard write so operators can audit changes without grepping logs.
-9. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. The drawer renders the prompt as **markdown** — headings, bold, italic, fenced/inline code, bulleted/ordered lists, links, and paragraphs are all formatted via a small client-side escape-first renderer (defined inline in `dist/ui/pages/tasks.js` as `renderMarkdown`). Output is HTML-injection safe: every untrusted character is HTML-escaped before any markdown transform; only `https?:`, `mailto:`, and same-origin links are emitted as `<a>` tags (others fall back to plain text). Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
+9. **Hide team from dashboard** — a per-team off-switch for the listing. Hover any team's name (cards, list, or Overview hierarchy) and an eye-strike button appears next to the rename pencil; one click confirms and PATCHes `/api/agent-groups/:id/hidden` with `{ hidden: true }`. The row disappears immediately (no full reload — both the list table row and any matching cards flip via a delegated handler). A "Hidden (N)" pill appears in the toolbar whenever ≥1 team is hidden; toggling it adds `body.ag-show-hidden`, which un-clips hidden rows and renders them at 55% opacity with the eye button persistently visible so unhide is one click. State persists via the `agent_groups.hidden_in_dashboard` column (migration `017-agent-group-hidden-dashboard`) and the toolbar preference under `localStorage.ag-show-hidden`. The flag does **not** affect runtime — hidden teams still receive messages, run sessions, and accept tasks; it only filters the dashboard view. Audited like rename (`action='agent_group.set_hidden_in_dashboard'`). Authorization mirrors rename (`hasAdminPrivilege`). Cards-grid uses a `:has()` selector so a section whose every member is hidden disappears with its header by default.
+10. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. The drawer renders the prompt as **markdown** — headings, bold, italic, fenced/inline code, bulleted/ordered lists, links, and paragraphs are all formatted via a small client-side escape-first renderer (defined inline in `dist/ui/pages/tasks.js` as `renderMarkdown`). Output is HTML-injection safe: every untrusted character is HTML-escaped before any markdown transform; only `https?:`, `mailto:`, and same-origin links are emitted as `<a>` tags (others fall back to plain text). Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
 
 ## What this skill is NOT
 
@@ -81,17 +82,20 @@ If the operator has previously customized `src/dashboard-pusher.ts` themselves, 
 Three host files come from upstream — copy them into place and wire them into `src/index.ts`:
 
 ```bash
-# DB migration + helpers + mutators (skill resources track upstream copies)
-cp .claude/skills/add-dashboard-pro/resources/migrations-016-dashboard-audit.ts src/db/migrations/016-dashboard-audit.ts
-cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.ts            src/db/dashboard-audit.ts
-cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.test.ts       src/db/dashboard-audit.test.ts
-cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.ts            src/dashboard-mutators.ts
-cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts       src/dashboard-mutators.test.ts
+# DB migrations + helpers + mutators (skill resources track upstream copies)
+cp .claude/skills/add-dashboard-pro/resources/migrations-016-dashboard-audit.ts             src/db/migrations/016-dashboard-audit.ts
+cp .claude/skills/add-dashboard-pro/resources/migrations-017-agent-group-hidden-dashboard.ts src/db/migrations/017-agent-group-hidden-dashboard.ts
+cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.ts                          src/db/dashboard-audit.ts
+cp .claude/skills/add-dashboard-pro/resources/db-dashboard-audit.test.ts                     src/db/dashboard-audit.test.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.ts                          src/dashboard-mutators.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts                     src/dashboard-mutators.test.ts
 
 # Tasks-page collector helper (consumed by the customised pusher) + tests
 cp .claude/skills/add-dashboard-pro/resources/dashboard-tasks.ts               src/dashboard-tasks.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-tasks.test.ts          src/dashboard-tasks.test.ts
 ```
+
+Migration 017 adds an `agent_groups.hidden_in_dashboard INTEGER NOT NULL DEFAULT 0` column. The `AgentGroup` type in `src/types.ts` must include `hidden_in_dashboard?: number;` and `updateAgentGroup`'s parameter type in `src/db/agent-groups.ts` must include `'hidden_in_dashboard'` in the `Partial<Pick<...>>`. Apply both edits manually.
 
 The tasks page also requires a host wiring change: extend the `startDashboard(...)` call in `src/index.ts` to pass a `permissions: { canAccessAgentGroup }` callback so the dashboard's `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package:
 
@@ -107,7 +111,7 @@ startDashboard({
 });
 ```
 
-Then edit `src/db/migrations/index.ts` to register `migration016`, edit `src/dashboard-pusher.ts` to import `getRecentAudit` + export `nudgePusher` + include `audit: getRecentAudit(200)` in the snapshot, and edit `src/index.ts` to pass `mutators` + `resolveActor` into `startDashboard` via `buildDashboardMutatorContext()`. The skill ships these snippets in `resources/` for copy/paste:
+Then edit `src/db/migrations/index.ts` to register `migration016` and `migration017`, edit `src/dashboard-pusher.ts` to import `getRecentAudit` + export `nudgePusher` + include `audit: getRecentAudit(200)` in the snapshot, and edit `src/index.ts` to pass `mutators` + `resolveActor` into `startDashboard` via `buildDashboardMutatorContext()`. The skill ships these snippets in `resources/` for copy/paste:
 
 ```bash
 # index.ts wiring
@@ -121,7 +125,8 @@ Verify after editing:
 ```bash
 grep -q 'buildDashboardMutatorContext' src/index.ts && \
   grep -q 'nudgePusher' src/dashboard-pusher.ts && \
-  grep -q 'migration016' src/db/migrations/index.ts && echo OK
+  grep -q 'migration016' src/db/migrations/index.ts && \
+  grep -q 'migration017' src/db/migrations/index.ts && echo OK
 ```
 
 ### 3. Add the `getActiveContainerNames()` export to `src/container-runner.ts`

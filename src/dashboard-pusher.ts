@@ -265,11 +265,15 @@ function collectSnapshot(): Record<string, unknown> {
     }));
   const tasks = collectTasks(sessionRefs);
 
+  const agentGroups = collectAgentGroups();
+  const hiddenAgentGroupCount = agentGroups.filter((g) => g.hidden_in_dashboard).length;
+
   return {
     timestamp: new Date().toISOString(),
     assistant_name: ASSISTANT_NAME,
     uptime: Math.floor(process.uptime()),
-    agent_groups: collectAgentGroups(),
+    agent_groups: agentGroups,
+    hidden_agent_group_count: hiddenAgentGroupCount,
     sessions,
     channels,
     users: collectUsers(),
@@ -425,6 +429,7 @@ function collectAgentGroups() {
       members,
       admins,
       created_at: g.created_at,
+      hidden_in_dashboard: (g.hidden_in_dashboard ?? 0) === 1,
     };
   });
 }
