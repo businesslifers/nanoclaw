@@ -41,7 +41,7 @@ import { runTelegramChannel } from './channels/telegram.js';
 import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { brightSelect } from './lib/bright-select.js';
-import { offerClaudeAssist } from './lib/claude-assist.js';
+import { offerClaudeOnFailure } from './lib/claude-handoff.js';
 import {
   applyToEnv,
   parseFlags,
@@ -418,7 +418,7 @@ async function main(): Promise<void> {
       } else {
         phEmit('first_chat_failed', { reason: ping });
         renderPingFailureNote(ping);
-        await offerClaudeAssist({
+        await offerClaudeOnFailure({
           stepName: 'cli-agent',
           msg:
             ping === 'socket_error'
@@ -530,7 +530,7 @@ async function main(): Promise<void> {
         service_running: res.terminal?.fields.SERVICE === 'running',
         has_credentials: res.terminal?.fields.CREDENTIALS === 'configured',
       });
-      await offerClaudeAssist({
+      await offerClaudeOnFailure({
         stepName: 'verify',
         msg: summary || 'Verification completed with unresolved issues.',
         hint: `Terminal block: ${JSON.stringify(res.terminal?.fields ?? {})}`,

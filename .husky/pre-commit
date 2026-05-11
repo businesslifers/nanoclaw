@@ -1,4 +1,9 @@
+staged=$(git diff --cached --name-only --diff-filter=ACM -- 'src/**/*.ts')
 pnpm run format:fix
+
+if [ -n "$staged" ]; then
+  echo "$staged" | xargs git add
+fi
 
 # Refresh central-DB identity dumps so they snapshot the current state.
 # Live data/v2.db is gitignored; data/dumps/*.sql is committed as text.

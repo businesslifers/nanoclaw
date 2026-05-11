@@ -317,9 +317,9 @@ async function collectSlackUserId(): Promise<string> {
     [
       "To get your Slack member ID:",
       '',
-      '  1. In Slack, click your profile picture (top right)',
+      '  1. In Slack, click your profile picture (bottom left)',
       '  2. Click "Profile"',
-      '  3. Click the three dots (⋯) → "Copy member ID"',
+      '  3. Click the three dots (⋮) → "Copy member ID"',
     ].join('\n'),
     'Find your Slack user ID',
   );
