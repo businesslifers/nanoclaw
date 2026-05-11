@@ -1,6 +1,6 @@
 # Wiki Index
 
-Last updated: 2026-05-03
+Last updated: 2026-05-08
 
 ## Pages
 
@@ -21,3 +21,5 @@ Last updated: 2026-05-03
 | [mettro-tools.md](mettro-tools.md) | Media Mate, Squishmate, Figma, GreyboxPro, Mettro dev site URL | 2026-05-01 |
 | [new-service-concepts.md](new-service-concepts.md) | Service concepts — Concept 1: AI SEO/GEO; Concept 2: AI Design Team | 2026-04-28 |
 | [mettro-brand-voice.md](mettro-brand-voice.md) | Mettro copywriting voice, rules (no colons, no "users", no "partners"), brand facts, structural rules, Carpet One board meeting notes | 2026-05-01 |
+| [qld-capital-client.md](qld-capital-client.md) | QLD Capital client intelligence — PPC/strategy client, ads paused Apr 24, marketing outreach research, Zoho Campaigns context, pending ClickUp folder tabs question | 2026-05-07 |
+| [zoho-platform.md](zoho-platform.md) | Zoho Campaigns (no preview links) + Zoho CRM conditional workflow pattern (wait-condition drip sequences) | 2026-05-07 |

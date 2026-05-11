@@ -3,7 +3,7 @@ scope: group
 group: marketingteam
 title: Marketing Team
 description: Marketing Team wiki — Janet maintains; entries scoped to Mettro Digital marketing operations (Google Ads, GA4, clients, conversion analysis).
-updated: 2026-05-05
+updated: 2026-05-08
 ---
 
 # Marketing Team Wiki — Index

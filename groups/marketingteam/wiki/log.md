@@ -23,6 +23,12 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
 
+## [2026-05-08] lint | 2 issues found, 0 fixed
+
+Index is current and all 7 content pages are indexed. No broken cross-references, no orphan pages, no unprocessed sources, no contradictions detected. Two issues flagged for future action:
+1. Missing entity pages for 7 clients (6 Carpet One locations + Haus Of Rattan) — client-list topic covers them but no per-client entity pages exist.
+2. Index `updated` date bumped to today.
+
 ## [2026-05-05] ingest | v1-conversations/2026-04-08-conversation-2312.md
 
 Filed 5 pages: reporting-pipeline (topic), client-list (topic), analyst-spec (concept), collector-data-schema (concept), qld-capital (entity), plus source summary. Index updated.
