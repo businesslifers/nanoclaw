@@ -59,11 +59,17 @@ export interface RenameAgentGroupArgs {
   name: string;
 }
 
+export interface SetAgentGroupHiddenArgs {
+  id: string;
+  hidden: boolean;
+}
+
 export interface MutatorContext {
   /** Resolves an inbound HTTP request to a NanoClaw user_id, or undefined if no actor can be inferred. */
   resolveActor(req: IncomingMessage): string | undefined;
   mutators: {
     renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string): { id: string; name: string };
+    setAgentGroupHidden(args: SetAgentGroupHiddenArgs, actorUserId: string): { id: string; hidden: boolean };
     cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
@@ -128,12 +134,56 @@ export function renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string
   return { id: args.id, name: newName };
 }
 
+export function setAgentGroupHidden(
+  args: SetAgentGroupHiddenArgs,
+  actorUserId: string,
+): { id: string; hidden: boolean } {
+  if (!args || typeof args.id !== 'string' || args.id.length === 0) {
+    throw new MutatorValidationError('id is required');
+  }
+  if (typeof args.hidden !== 'boolean') {
+    throw new MutatorValidationError('hidden must be a boolean');
+  }
+
+  const before = getAgentGroup(args.id);
+  if (!before) throw new MutatorNotFoundError('agent group not found');
+
+  if (!hasAdminPrivilege(actorUserId, args.id)) {
+    throw new MutatorAuthError('actor lacks admin privilege over this agent group');
+  }
+
+  const beforeHidden = (before.hidden_in_dashboard ?? 0) === 1;
+  if (beforeHidden === args.hidden) {
+    return { id: before.id, hidden: beforeHidden };
+  }
+
+  const db = getDb();
+  db.transaction(() => {
+    updateAgentGroup(args.id, { hidden_in_dashboard: args.hidden ? 1 : 0 });
+    appendAudit(
+      {
+        actor_user_id: actorUserId,
+        action: 'agent_group.set_hidden_in_dashboard',
+        target_type: 'agent_group',
+        target_id: args.id,
+        before: { hidden: beforeHidden },
+        after: { hidden: args.hidden },
+      },
+      db,
+    );
+  })();
+
+  nudgePusher();
+  return { id: args.id, hidden: args.hidden };
+}
+
 /** The mutator bundle the host hands to the dashboard server. */
 export function buildDashboardMutatorContext(): MutatorContext {
   return {
     resolveActor: resolveDashboardActor,
     mutators: {
       renameAgentGroup,
+      setAgentGroupHidden,
       cancelTask,
       pauseTask,
       resumeTask,
