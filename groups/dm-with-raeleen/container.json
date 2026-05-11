@@ -1,11 +1,18 @@
 {
   "mcpServers": {},
   "packages": {
-    "apt": [],
+    "apt": [
+      "poppler-utils"
+    ],
     "npm": []
   },
+  "imageTag": "nanoclaw-agent-v2-8aa0b4e2:ag-1778215787818-bncghq",
   "additionalMounts": [
-    { "hostPath": "~/nanoclaw-secrets/wordpress", "containerPath": "wordpress-creds", "readonly": true }
+    {
+      "hostPath": "~/nanoclaw-secrets/wordpress",
+      "containerPath": "wordpress-creds",
+      "readonly": true
+    }
   ],
   "skills": "all",
   "groupName": "Janet",

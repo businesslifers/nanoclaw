@@ -9,6 +9,7 @@
 - **Status:** Paused (as of 2026-05-11)
 - **Paused by:** Client's own request
 - **Note:** This is a campaign Logan City turns on and off depending on how busy the business is. Pausing is routine — not a performance issue.
+- **Reporting rule:** Still flag in daily reports if the campaign is observed turning on and then back off again (pattern changes are worth surfacing).
 
 ## History
 
