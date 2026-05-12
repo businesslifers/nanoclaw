@@ -6,14 +6,19 @@ Every task description must open with a Time Budget block — no exceptions.
 
 **Format (exact):**
 ```
-⏱ Time Budget
-Total: X hrs (includes briefing, doing, QA and review)
-Your time to complete: X hrs
+## ⏱ Time Budget
+
+| Person | Time |
+|---|---|
+| [Name] | X hr |
+| [Name] | X hr |
+| **Total** | **X hrs** |
+
 If you reach your time and aren't done — stop and message the project manager.
 ```
 
-- Total = all roles combined
-- Your time to complete = executor's portion only
+- Each person involved gets their own row
+- Total row is always last and bolded
 
 ---
 

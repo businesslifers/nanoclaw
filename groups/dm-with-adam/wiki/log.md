@@ -2,6 +2,10 @@
 
 ## 2026-05-08 | fix | channel-architecture.md: replaced fabricated short IDs (telegram-mg-17772, telegram-mg-17774, slack-mg-17779) with real `mg-<timestamp>-<random>` IDs from the v2 DB. Added explicit "ID format" section warning never to abbreviate or invent these. Added Slack DM, Marketing Team Slack, CRM, ClientMate rows. Trigger: Adam noticed Janet citing fake IDs in Slack reply on 2026-05-08.
 
+## 2026-05-11 | lint | Daily reflection lint pass. All 17 pages indexed, all cross-references clean.
+
+## 2026-05-10 | lint | Daily reflection lint pass. All 17 pages indexed, all cross-references clean. Nothing new to ingest.
+
 ## 2026-05-09 | lint | Daily reflection lint pass. All 17 pages indexed, all cross-references clean. Nothing new to ingest.
 
 ## 2026-05-08 | lint | Daily reflection. Found 2 orphan pages not in index (qld-capital-client.md, zoho-platform.md — created by another session May 6-7). Added both to index. All cross-references clean. 17 pages now indexed.

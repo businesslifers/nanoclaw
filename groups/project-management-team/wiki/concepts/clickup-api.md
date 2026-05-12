@@ -1,5 +1,46 @@
 # ClickUp API — Formatting & Usage
 
+## Required Task Format — Every Task, Every Time
+
+Every ClickUp task must have all four of these:
+
+### 1. Task Name
+Start with an action verb: **Plan**, **Build**, **Review**, **Write**, etc.
+> ✅ "Plan Carpet One Member Surveys"
+> ❌ "Work with Liam to create surveys for Carpet One members"
+
+### 2. Formatted Description (`markdown_content`)
+Use proper markdown with `##` section headers. The **Time Budget block must come first** — no exceptions. Do NOT include a Due Date section (due date is set as a field, not in the description).
+
+```markdown
+## ⏱ Time Budget
+
+| Person | Time |
+|---|---|
+| [Name] | X hr |
+| [Name] | X hr |
+| **Total** | **X hrs** |
+
+If you reach your time and aren't done — stop and message the project manager.
+
+---
+
+## Overview
+[One paragraph describing the purpose and scope of the task.]
+
+## Objectives
+- [What needs to be done — bullet list]
+- [Each discrete deliverable or action]
+```
+
+### 3. Time Estimate
+Always set `time_estimate` in milliseconds (see table below). Use the Total value from the Time Budget block.
+
+### 4. Status — Always Set to "to do" (unless told otherwise)
+Default status for all new tasks is **to do**. Always force-set via PUT after creation (ClickUp ignores status on POST).
+
+---
+
 ## Task Description Formatting
 
 **Always use `markdown_content`** (not `description`) to write formatted task content.
@@ -17,9 +58,9 @@ _italic_
 ---  (horizontal rule / divider)
 ```
 
-### Status — Always Ask, Always Force-Set
+### Status — Always Set to "to do", Always Force-Set via PUT
 
-**Before creating any task:** if the requester has not specified a status, ask them what status it should be.
+**Default status for all tasks is "to do"** unless the requester specifies otherwise.
 
 **After creating any task:** always send a separate PUT to force-set the status. ClickUp ignores the `status` field on POST and defaults to the list's first status ("planning" in most Mettro lists). The PUT is required every time.
 
@@ -113,4 +154,5 @@ Use Python `urllib.request` (not curl) for multi-line descriptions to avoid shel
 |---|---|
 | Business Lifers > businesslifers.com | 901602099087 |
 | Arrow Energy Support | 901610574349 |
-| Launchpoint Golf > Quality Assurance | 901602098671 |
+| Launchpoint Golf > launchpointgolf.com | 901602099164 |
+| Mettro Repo > Mettro AI | 901614510925 |
