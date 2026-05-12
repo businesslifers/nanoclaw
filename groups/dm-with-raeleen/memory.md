@@ -43,7 +43,7 @@
 - Raels' DM with you runs on **Slack** (`slack:D0B1JV7GJH3`). Format replies in Slack mrkdwn — see "Message Formatting" in your role file.
 - Adam has his own separate Janet (agent group `dm-with-adam`) running on Telegram + Slack — different container, different memory. You and Adam's Janet do not share state.
 - Other team channels (Marketing Team, CRM, ClientMate, Project Management Team) are wired as their own agent groups; cross-agent destinations from your container are not yet set up.
-- `send_message` with a `to:` parameter routes to a destination registered in your `agent_destinations`. Today that's Slack DM only; inter-agent destinations to other teams are not yet wired on your side.
+- `send_message` with a `to:` parameter routes to a destination registered in your `agent_destinations`. Wired today: your Slack DM, plus inter-Janet destinations `adam` (Adam's Janet) and `tracey` (Tracey's Janet) for cross-team relay. Destinations to other teams (`clientmate`, `marketingteam`, `crm`, `project-management-team`) are not yet wired.
 - Mount allowlist (host-only) is the last security boundary, Janet cannot modify it, only Adam or Raels can on the host.
 
 ## Historical channels (v1 — Slack era)

@@ -10,4 +10,5 @@ INSERT INTO users VALUES('cli:local','cli','Adam','2026-04-27T02:00:49.927Z');
 INSERT INTO users VALUES('telegram:7466423983','telegram','Adam','2026-04-27T02:35:40.816Z');
 INSERT INTO users VALUES('slack:U0AD5J35TFA','slack','Adam Jowett','2026-05-05T05:03:14.563Z');
 INSERT INTO users VALUES('slack:UAMCT083F','slack','Raels','2026-05-08T03:32:02.578Z');
+INSERT INTO users VALUES('slack:U3P7QK926','slack','Tracey','2026-05-12T01:01:26.045Z');
 COMMIT;

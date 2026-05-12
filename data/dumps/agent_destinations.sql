@@ -26,4 +26,9 @@ INSERT INTO agent_destinations VALUES('ag-1778203406039-nhnh92','project-managem
 INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','slack-mg-17782','channel','mg-1778215735145-qty9u2','2026-05-08T04:49:47.820Z');
 INSERT INTO agent_destinations VALUES('ag-1777257359331-63ti7x','raels','agent','ag-1778215787818-bncghq','2026-05-08T05:02:40.524Z');
 INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','adam','agent','ag-1777257359331-63ti7x','2026-05-08T05:02:40.524Z');
+INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','slack-mg-17785','channel','mg-1778547686046-hy2q7l','2026-05-12T01:34:48.241Z');
+INSERT INTO agent_destinations VALUES('ag-1777257359331-63ti7x','tracey','agent','ag-1778549688239-0u5g1v','2026-05-12T01:44:14.000Z');
+INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','tracey','agent','ag-1778549688239-0u5g1v','2026-05-12T01:44:14.000Z');
+INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','adam','agent','ag-1777257359331-63ti7x','2026-05-12T01:44:14.000Z');
+INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','raels','agent','ag-1778215787818-bncghq','2026-05-12T01:44:14.000Z');
 COMMIT;

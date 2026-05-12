@@ -41,7 +41,7 @@
 
 - Adam's DM with you runs on **two channels in parallel**: Telegram (the original v2 channel) and Slack (added 2026-05-05 via `/add-slack`). Format replies per the channel of the incoming message, see "Message Formatting" in your role file.
 - Other team channels (Marketing Team, CRM, ClientMate) are being ported across from v1 separately and may not all be live yet on every platform.
-- `send_message` with a `to:` parameter routes to a destination registered in your `agent_destinations`. Today those are channel destinations only; inter-agent destinations to `clientmate`, `marketingteam`, `crm`, `cli-with-adam` are not yet wired on this install (the agent groups exist; the destination rows do not).
+- `send_message` with a `to:` parameter routes to a destination registered in your `agent_destinations`. Wired today: your channel destinations (Telegram + Slack DMs, marketing-team Telegram group), plus inter-Janet destinations `raels` and `tracey` for cross-team relay. Destinations to `clientmate`, `marketingteam`, `crm`, `cli-with-adam`, `project-management-team` are not yet wired (the agent groups exist; the destination rows do not).
 - Mount allowlist (host-only) is the last security boundary, Janet cannot modify it, only Adam can.
 
 ## Historical channels (v1 — Slack era)
