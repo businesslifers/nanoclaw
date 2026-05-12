@@ -265,6 +265,7 @@ async function processQuery(
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
+  let unwrappedNudged = false;
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -338,6 +339,7 @@ async function processQuery(
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
+        unwrappedNudged = false;
         query.push(prompt);
         markCompleted(keptIds);
       } catch (err) {
@@ -376,24 +378,18 @@ async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          dispatchResultText(event.text, routing);
-        }
-      } else if (event.type === 'compacted') {
-        // The SDK auto-compacted the conversation. After compaction the
-        // model often drops the learned `<message to="…">` wrapping
-        // discipline (the destinations are still in the system prompt,
-        // but the behavioral pattern is summarized away). Inject a
-        // reminder back into the live query so the next turn re-anchors
-        // on the destination model. Only do this when there's >1
-        // destination — single-destination groups have a fallback that
-        // works without wrapping. See qwibitai/nanoclaw#2325.
-        const destinations = getAllDestinations();
-        if (destinations.length > 1) {
-          const names = destinations.map((d) => d.name).join(', ');
-          query.push(
-            `[system] Context was just compacted. Reminder: you have ${destinations.length} destinations (${names}). ` +
-              `Use <message to="name"> blocks to address them. Bare text goes to the scratchpad fallback only.`,
-          );
+          const { hasUnwrapped } = dispatchResultText(event.text, routing);
+          if (hasUnwrapped && !unwrappedNudged) {
+            unwrappedNudged = true;
+            const destinations = getAllDestinations();
+            const names = destinations.map((d) => d.name).join(', ');
+            query.push(
+              `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
+                `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
+                `Your destinations: ${names}. ` +
+                `Please re-send your response with the correct wrapping.</system>`,
+            );
+          }
         }
       }
     }
@@ -421,9 +417,6 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
     case 'progress':
       log(`Progress: ${event.message}`);
       break;
-    case 'compacted':
-      log(`Compacted: ${event.text}`);
-      break;
   }
 }
 
@@ -435,7 +428,7 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * The agent must always wrap output in <message to="name">...</message>
  * blocks, even with a single destination. Bare text is scratchpad only.
  */
-function dispatchResultText(text: string, routing: RoutingContext): void {
+function dispatchResultText(text: string, routing: RoutingContext): { sent: number; hasUnwrapped: boolean } {
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
@@ -470,9 +463,11 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
 
-  if (sent === 0 && text.trim()) {
+  const hasUnwrapped = sent === 0 && !!scratchpad;
+  if (hasUnwrapped) {
     log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
   }
+  return { sent, hasUnwrapped };
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {

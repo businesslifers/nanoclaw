@@ -115,10 +115,9 @@ function buildDestinationsSection(): string {
     }
   }
   lines.push('');
-  lines.push('**Every response must be wrapped** in a `<message to="name">...</message>` block.');
+  lines.push('**All output must be wrapped.** Use `<message to="name">...</message>` for content to send, or `<internal>...</internal>` for scratchpad.');
   lines.push('You can include multiple `<message>` blocks in one response to send to multiple destinations.');
-  lines.push('Text outside of `<message>` blocks is scratchpad — logged but not sent anywhere.');
-  lines.push('Use `<internal>...</internal>` to make scratchpad intent explicit.');
+  lines.push('Bare text (outside of `<message>` or `<internal>` blocks) is not allowed and will not be delivered.');
   lines.push('');
   lines.push(
     '**Default routing**: when replying to an incoming message, address the same destination the message came `from` — every inbound `<message>` tag carries a `from="name"` attribute that names the origin destination. Only address a different destination when the request itself asks you to (e.g., "tell Laura that…").',

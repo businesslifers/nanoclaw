@@ -38,7 +38,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
 
     const prompt = buildSystemPromptAddendum('Casa');
 
-    expect(prompt).toContain('Every response must be wrapped');
+    expect(prompt).toContain('All output must be wrapped');
     expect(prompt).toContain('<message to="name">');
     expect(prompt).toContain('`casa`');
   });
@@ -55,7 +55,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
 
     const prompt = buildSystemPromptAddendum('Casa');
 
-    expect(prompt).toContain('Every response must be wrapped');
+    expect(prompt).toContain('All output must be wrapped');
     expect(prompt).toContain('<message to="name">');
     expect(prompt).toContain('Default routing');
     expect(prompt).toContain('`casa`');
