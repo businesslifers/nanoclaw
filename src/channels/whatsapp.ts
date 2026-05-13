@@ -67,6 +67,7 @@ const AUTH_DIR = path.join(process.cwd(), 'store', 'auth');
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
 const GROUP_METADATA_CACHE_TTL_MS = 60_000; // 1 min for outbound sends
 const SENT_MESSAGE_CACHE_MAX = 256;
+const INBOUND_KEY_CACHE_MAX = 512;
 const RECONNECT_DELAY_MS = 5000;
 const PENDING_QUESTIONS_MAX = 64;
 
@@ -173,6 +174,11 @@ registerChannelAdapter('whatsapp', {
 
     // Sent message cache for retry/re-encrypt requests
     const sentMessageCache = new Map<string, any>();
+
+    // Inbound message-key cache — keyed by `${chatJid}:${msg.key.id}`.
+    // Baileys reactions need the original key (incl. participant for groups);
+    // setReaction only receives platformId+platformMsgId so we look it up here.
+    const inboundKeyCache = new Map<string, WAMessageKey>();
 
     // Group metadata cache with TTL
     const groupMetadataCache = new Map<string, { metadata: GroupMetadata; expiresAt: number }>();
@@ -584,6 +590,14 @@ registerChannelAdapter('whatsapp', {
               timestamp,
             };
 
+            if (msg.key.id) {
+              inboundKeyCache.set(`${chatJid}:${msg.key.id}`, msg.key);
+              if (inboundKeyCache.size > INBOUND_KEY_CACHE_MAX) {
+                const oldest = inboundKeyCache.keys().next().value!;
+                inboundKeyCache.delete(oldest);
+              }
+            }
+
             // WhatsApp doesn't use threads — threadId is null
             setupConfig.onInbound(chatJid, null, inbound);
           } catch (err) {
@@ -700,6 +714,16 @@ registerChannelAdapter('whatsapp', {
           await sock.sendPresenceUpdate('composing', platformId);
         } catch (err) {
           log.debug('Failed to update typing status', { jid: platformId, err });
+        }
+      },
+
+      async setReaction(platformId: string, _threadId: string | null, platformMsgId: string, emoji: string | null) {
+        const key = inboundKeyCache.get(`${platformId}:${platformMsgId}`);
+        if (!key) return;
+        try {
+          await sock.sendMessage(platformId, { react: { text: emoji ?? '', key } });
+        } catch (err) {
+          log.debug('Failed to set reaction', { jid: platformId, msgId: platformMsgId, err });
         }
       },
 
