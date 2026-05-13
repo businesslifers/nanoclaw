@@ -415,9 +415,9 @@ function collectAgentGroups() {
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
-      // Container config lives in the container_configs table (moved from
-      // groups/<folder>/container.json filesystem in upstream 2.0.48). Pure
-      // read, no side effects — startup backfill ensures a row exists.
+      // Read from the DB (source of truth). The on-disk container.json
+      // only exists for groups that have spawned a session, so reading
+      // from disk would hide config changes for never-run groups.
       container_config: ((): ContainerConfig | null => {
         const row = getContainerConfig(g.id);
         return row ? configFromDb(row, g) : null;
