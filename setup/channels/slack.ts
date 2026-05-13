@@ -25,10 +25,14 @@ import * as p from '@clack/prompts';
 import k from 'kleur';
 
 import * as setupLog from '../logs.js';
-import { confirmThenOpen } from '../lib/browser.js';
+import { BACK_TO_CHANNEL_SELECTION, type ChannelFlowResult } from '../lib/back-nav.js';
+import { brightSelect } from '../lib/bright-select.js';
+import { openUrl } from '../lib/browser.js';
+import { isHeadless } from '../platform.js';
 import { askOperatorRole } from '../lib/role-prompt.js';
 import { ensureAnswer, fail, runQuietChild } from '../lib/runner.js';
-import { wrapForGutter } from '../lib/theme.js';
+import { readEnvKey } from '../environment.js';
+import { accentGreen, fmtDuration, note, wrapForGutter } from '../lib/theme.js';
 
 const SLACK_API = 'https://slack.com/api';
 const SLACK_APPS_URL = 'https://api.slack.com/apps';
@@ -41,8 +45,9 @@ interface WorkspaceInfo {
   botUserId: string;
 }
 
-export async function runSlackChannel(displayName: string): Promise<void> {
-  await walkThroughAppCreation();
+export async function runSlackChannel(displayName: string): Promise<ChannelFlowResult> {
+  const intro = await walkThroughAppCreation();
+  if (intro === 'back') return BACK_TO_CHANNEL_SELECTION;
 
   const token = await collectBotToken();
   const signingSecret = await collectSigningSecret();
@@ -120,27 +125,48 @@ export async function runSlackChannel(displayName: string): Promise<void> {
   showPostInstallChecklist(info);
 }
 
-async function walkThroughAppCreation(): Promise<void> {
-  p.note(
+async function walkThroughAppCreation(): Promise<'continue' | 'back'> {
+  // Bright-white ANSI overrides the surrounding brand-cyan from `note()`'s
+  // per-line formatter so the URL stands out against the rest of the body.
+  const linkBlock = isHeadless()
+    ? [`\x1b[97mGet started: ${SLACK_APPS_URL}\x1b[39m`, '']
+    : [];
+
+  note(
     [
       "You'll create a Slack app that the assistant talks through.",
       "Free and stays inside the workspaces you pick.",
       '',
+      ...linkBlock,
       '  1. Create a new app "From scratch", name it, pick a workspace',
       '  2. OAuth & Permissions → add Bot Token Scopes:',
-      '     chat:write, im:write, channels:history, groups:history,',
-      '     im:history, channels:read, groups:read, users:read,',
-      '     reactions:write',
+      '     • im:write, im:history',
+      '     • channels:read, channels:history',
+      '     • groups:read, groups:history',
+      '     • chat:write',
+      '     • users:read',
+      '     • reactions:write',
       '  3. App Home → enable "Messages Tab" and "Allow users to send',
       '     slash commands and messages from the messages tab"',
       '  4. Basic Information → copy the "Signing Secret"',
       '  5. Install to Workspace → copy the "Bot User OAuth Token" (xoxb-…)',
-      '',
-      k.dim(SLACK_APPS_URL),
     ].join('\n'),
     'Create a Slack app',
   );
-  await confirmThenOpen(SLACK_APPS_URL, 'Press Enter to open Slack app settings');
+
+  // Back-aware gate replacing the old `confirmThenOpen` "Press Enter to open
+  // Slack app settings" so users can bail out of Slack before we open the
+  // browser or ask for tokens.
+  const choice = ensureAnswer(await brightSelect<'open' | 'back'>({
+    message: 'Open Slack app settings in your browser?',
+    options: [
+      { value: 'open', label: 'Open Slack app settings' },
+      { value: 'back', label: '← Back to channel selection' },
+    ],
+    initialValue: 'open',
+  }));
+  if (choice === 'back') return 'back';
+  if (!isHeadless()) openUrl(SLACK_APPS_URL);
 
   ensureAnswer(
     await p.confirm({
@@ -148,12 +174,26 @@ async function walkThroughAppCreation(): Promise<void> {
       initialValue: true,
     }),
   );
+  return 'continue';
 }
 
 async function collectBotToken(): Promise<string> {
+  const existing = readEnvKey('SLACK_BOT_TOKEN');
+  if (existing && existing.startsWith('xoxb-') && existing.length >= 24) {
+    const reuse = ensureAnswer(await p.confirm({
+      message: `Found an existing Slack bot token (${existing.slice(0, 10)}…). Use it?`,
+      initialValue: true,
+    }));
+    if (reuse) {
+      setupLog.userInput('slack_bot_token', 'reused-existing');
+      return existing;
+    }
+  }
+
   const answer = ensureAnswer(
     await p.password({
       message: 'Paste your Slack bot token',
+      clearOnError: true,
       validate: (v) => {
         const t = (v ?? '').trim();
         if (!t) return 'Token is required';
@@ -172,9 +212,22 @@ async function collectBotToken(): Promise<string> {
 }
 
 async function collectSigningSecret(): Promise<string> {
+  const existing = readEnvKey('SLACK_SIGNING_SECRET');
+  if (existing && /^[a-f0-9]{16,}$/i.test(existing)) {
+    const reuse = ensureAnswer(await p.confirm({
+      message: 'Found an existing Slack signing secret. Use it?',
+      initialValue: true,
+    }));
+    if (reuse) {
+      setupLog.userInput('slack_signing_secret', 'reused-existing');
+      return existing;
+    }
+  }
+
   const answer = ensureAnswer(
     await p.password({
       message: 'Paste your Slack signing secret',
+      clearOnError: true,
       validate: (v) => {
         const t = (v ?? '').trim();
         if (!t) return 'Signing secret is required';
@@ -215,10 +268,9 @@ async function validateSlackToken(token: string): Promise<WorkspaceInfo> {
       user_id?: string;
       error?: string;
     };
-    const elapsedS = Math.round((Date.now() - start) / 1000);
     if (data.ok && data.team && data.user) {
       s.stop(
-        `Connected to ${data.team} as @${data.user}. ${k.dim(`(${elapsedS}s)`)}`,
+        `Connected to ${data.team} as @${data.user}. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`,
       );
       const info: WorkspaceInfo = {
         teamName: data.team,
@@ -247,8 +299,7 @@ async function validateSlackToken(token: string): Promise<WorkspaceInfo> {
         : `Slack said "${reason}". Check the token scopes and workspace install, then retry.`,
     );
   } catch (err) {
-    const elapsedS = Math.round((Date.now() - start) / 1000);
-    s.stop(`Couldn't reach Slack. ${k.dim(`(${elapsedS}s)`)}`, 1);
+    s.stop(`Couldn't reach Slack. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`, 1);
     const message = err instanceof Error ? err.message : String(err);
     setupLog.step('slack-validate', 'failed', Date.now() - start, {
       ERROR: message,
@@ -262,13 +313,13 @@ async function validateSlackToken(token: string): Promise<WorkspaceInfo> {
 }
 
 async function collectSlackUserId(): Promise<string> {
-  p.note(
+  note(
     [
       "To get your Slack member ID:",
       '',
-      '  1. In Slack, click your profile picture (top right)',
+      '  1. In Slack, click your profile picture (bottom left)',
       '  2. Click "Profile"',
-      '  3. Click the three dots (⋯) → "Copy member ID"',
+      '  3. Click the three dots (⋮) → "Copy member ID"',
     ].join('\n'),
     'Find your Slack user ID',
   );
@@ -308,9 +359,8 @@ async function openDmChannel(token: string, userId: string): Promise<string> {
       channel?: { id?: string };
       error?: string;
     };
-    const elapsedS = Math.round((Date.now() - start) / 1000);
     if (data.ok && data.channel?.id) {
-      s.stop(`DM channel ready. ${k.dim(`(${elapsedS}s)`)}`);
+      s.stop(`DM channel ready. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`);
       setupLog.step('slack-open-dm', 'success', Date.now() - start, {
         DM_CHANNEL_ID: data.channel.id,
       });
@@ -334,8 +384,7 @@ async function openDmChannel(token: string, userId: string): Promise<string> {
       `Slack said "${reason}". Check the member ID and app permissions, then retry.`,
     );
   } catch (err) {
-    const elapsedS = Math.round((Date.now() - start) / 1000);
-    s.stop(`Couldn't reach Slack. ${k.dim(`(${elapsedS}s)`)}`, 1);
+    s.stop(`Couldn't reach Slack. ${k.dim(`(${fmtDuration(Date.now() - start)})`)}`, 1);
     const message = err instanceof Error ? err.message : String(err);
     setupLog.step('slack-open-dm', 'failed', Date.now() - start, {
       ERROR: message,
@@ -356,7 +405,7 @@ async function resolveAgentName(): Promise<string> {
   }
   const answer = ensureAnswer(
     await p.text({
-      message: 'What should your assistant be called?',
+      message: `What should your ${accentGreen('assistant')} be called?`,
       placeholder: DEFAULT_AGENT_NAME,
       defaultValue: DEFAULT_AGENT_NAME,
     }),
@@ -367,7 +416,7 @@ async function resolveAgentName(): Promise<string> {
 }
 
 function showPostInstallChecklist(info: WorkspaceInfo): void {
-  p.note(
+  note(
     wrapForGutter(
       [
         `Your agent is wired to Slack and a welcome DM is on its way.`,
