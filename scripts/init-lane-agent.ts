@@ -41,9 +41,15 @@
  *     [--clone-secrets-from-parent]         (run onecli to clone parent's secrets)
  */
 import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-import { DATA_DIR } from '../src/config.js';
+import { DATA_DIR, GROUPS_DIR, MOUNT_ALLOWLIST_PATH } from '../src/config.js';
+import {
+  getContainerConfig,
+  updateContainerConfigJson,
+} from '../src/db/container-configs.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../src/db/agent-groups.js';
 import { getDb, initDb } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
@@ -53,6 +59,7 @@ import {
   getDestinationByName,
 } from '../src/modules/agent-to-agent/db/agent-destinations.js';
 import { writeDestinations } from '../src/modules/agent-to-agent/write-destinations.js';
+import type { AdditionalMountConfig } from '../src/container-config.js';
 import type { AgentGroup, Session } from '../src/types.js';
 
 interface Args {
@@ -64,6 +71,7 @@ interface Args {
   model: string | null;
   instructions: string | null;
   cloneSecretsFromParent: boolean;
+  mountTeamWiki: boolean;
 }
 
 const USAGE = `Usage:
@@ -76,10 +84,11 @@ const USAGE = `Usage:
     [--model sonnet|haiku|opus|...]        (default: null)
     [--instructions '<seed for CLAUDE.role.md>']
     [--clone-secrets-from-parent]
+    [--mount-team-wiki]                    (mount parent's wiki RO at /workspace/extra/team-wiki/)
 `;
 
 function parseArgs(argv: string[]): Args {
-  const out: Partial<Args> = { cloneSecretsFromParent: false };
+  const out: Partial<Args> = { cloneSecretsFromParent: false, mountTeamWiki: false };
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     const val = argv[i + 1];
@@ -115,6 +124,9 @@ function parseArgs(argv: string[]): Args {
       case '--clone-secrets-from-parent':
         out.cloneSecretsFromParent = true;
         break;
+      case '--mount-team-wiki':
+        out.mountTeamWiki = true;
+        break;
       case '--help':
       case '-h':
         console.log(USAGE);
@@ -142,6 +154,7 @@ function parseArgs(argv: string[]): Args {
     model: out.model ?? null,
     instructions: out.instructions ?? null,
     cloneSecretsFromParent: out.cloneSecretsFromParent ?? false,
+    mountTeamWiki: out.mountTeamWiki ?? false,
   };
 }
 
@@ -190,6 +203,96 @@ function cloneOneCliSecrets(parent: AgentGroup, lane: AgentGroup): void {
 
   onecli(['agents', 'set-secrets', '--id', created.id, '--secret-ids', parentSecrets.join(',')]);
   console.log(`  OneCLI secrets cloned: ${parentSecrets.length} from parent.`);
+}
+
+const TEAM_WIKI_CLAUDE_LOCAL_HEADING = '## Team knowledge';
+
+function mountTeamWiki(parent: AgentGroup, lane: AgentGroup, laneFolder: string): void {
+  const wikiAbs = path.resolve(GROUPS_DIR, parent.folder, 'wiki');
+  if (!fs.existsSync(wikiAbs) || !fs.statSync(wikiAbs).isDirectory()) {
+    console.warn(`  ⚠️  Parent has no wiki dir at ${wikiAbs}; skipping team-wiki mount.`);
+    return;
+  }
+
+  // 1. mount-allowlist.json (idempotent by tilde-form path).
+  const home = os.homedir();
+  const tildePath = wikiAbs.startsWith(home + path.sep)
+    ? '~' + wikiAbs.slice(home.length)
+    : wikiAbs;
+
+  let allowlist: {
+    allowedRoots: Array<{ path: string; allowReadWrite: boolean; description?: string }>;
+    blockedPatterns?: string[];
+    nonMainReadOnly?: boolean;
+  };
+  try {
+    allowlist = JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf8'));
+  } catch {
+    console.warn(
+      `  ⚠️  Could not read ${MOUNT_ALLOWLIST_PATH}; skipping allowlist update. Add the entry manually.`,
+    );
+    allowlist = { allowedRoots: [] };
+  }
+  if (!Array.isArray(allowlist.allowedRoots)) allowlist.allowedRoots = [];
+  const alreadyAllowed = allowlist.allowedRoots.some(
+    (r) => r.path === tildePath || r.path === wikiAbs,
+  );
+  if (alreadyAllowed) {
+    console.log(`  allowlist: ${tildePath} already present.`);
+  } else {
+    allowlist.allowedRoots.push({
+      path: tildePath,
+      allowReadWrite: false,
+      description: `${parent.folder} wiki — shared RO across lanes`,
+    });
+    fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(allowlist, null, 2) + '\n');
+    console.log(`  allowlist: added ${tildePath} (RO). Restart host to reload cache.`);
+  }
+
+  // 2. container_configs.additional_mounts (idempotent by containerPath).
+  const cfg = getContainerConfig(lane.id);
+  if (!cfg) {
+    console.warn(`  ⚠️  No container_configs row for lane ${lane.id}; skipping mount.`);
+  } else {
+    const raw = (cfg as { additional_mounts?: string | null }).additional_mounts;
+    let mounts: AdditionalMountConfig[] = [];
+    if (typeof raw === 'string' && raw.length > 0) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) mounts = parsed as AdditionalMountConfig[];
+      } catch {
+        // Treat malformed JSON as empty rather than clobbering with bad data.
+        console.warn(`  ⚠️  additional_mounts JSON malformed for ${lane.id}; replacing with new entry.`);
+      }
+    }
+    const hasTeamWiki = mounts.some((m) => m.containerPath === 'team-wiki');
+    if (hasTeamWiki) {
+      console.log('  additional_mounts: team-wiki already present.');
+    } else {
+      mounts.push({ hostPath: wikiAbs, containerPath: 'team-wiki', readonly: true });
+      updateContainerConfigJson(lane.id, 'additional_mounts', mounts);
+      console.log('  additional_mounts: appended team-wiki (RO).');
+    }
+  }
+
+  // 3. Append "## Team knowledge" to lane's CLAUDE.local.md (idempotent by heading).
+  const claudeLocal = path.join(GROUPS_DIR, laneFolder, 'CLAUDE.local.md');
+  const existing = fs.existsSync(claudeLocal) ? fs.readFileSync(claudeLocal, 'utf8') : '';
+  if (existing.includes(TEAM_WIKI_CLAUDE_LOCAL_HEADING)) {
+    console.log('  CLAUDE.local.md: Team knowledge section already present.');
+  } else {
+    const needsLeadingNewline = existing.length > 0 && !existing.endsWith('\n');
+    const block =
+      (needsLeadingNewline ? '\n' : '') +
+      (existing.endsWith('\n\n') || existing.length === 0 ? '' : '\n') +
+      `${TEAM_WIKI_CLAUDE_LOCAL_HEADING}\n\n` +
+      `The parent's wiki is mounted read-only at \`/workspace/extra/team-wiki/\`. It is the shared source of truth across all ${parent.folder} lanes and the parent.\n\n` +
+      `- **Consult \`team-wiki/index.md\` first** before answering anything that might already be settled team knowledge.\n` +
+      `- **Read-only.** You cannot edit this mount. If you find a contradiction, an outdated entry, or knowledge worth promoting from your own lane wiki, surface it to the parent via \`send_message to="parent"\` rather than silently overriding it. The parent owns the team wiki and decides what gets written.\n` +
+      `- **Lane wiki vs team wiki:** \`/workspace/agent/wiki/\` stays for lane-specific craft. \`/workspace/extra/team-wiki/\` is the team-wide view. When the two disagree, escalate to the parent.\n`;
+    fs.appendFileSync(claudeLocal, block);
+    console.log(`  CLAUDE.local.md: appended Team knowledge section to groups/${laneFolder}/.`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -278,7 +381,13 @@ async function main(): Promise<void> {
     console.log('No active parent sessions — destinations will project on next spawn.');
   }
 
-  // 4. OneCLI: clone secrets if requested.
+  // 4. Optionally mount parent's wiki RO into the lane.
+  if (args.mountTeamWiki) {
+    console.log("Mounting parent's wiki read-only at /workspace/extra/team-wiki/…");
+    mountTeamWiki(parent, lane, args.folder);
+  }
+
+  // 5. OneCLI: clone secrets if requested.
   if (args.cloneSecretsFromParent) {
     console.log('Cloning OneCLI secrets from parent…');
     cloneOneCliSecrets(parent, lane);
