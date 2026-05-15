@@ -206,14 +206,28 @@ function analyzeCampaign(campaign, history, clientName) {
     }
   }
 
-  // ── Warning: disapproved ads (not all) ───────────────────────────────────
+  // ── Critical: disapproved ads (partial) ──────────────────────────────────
   if (disapproved.length > 0 && disapproved.length < totalAds) {
     const topics = [...new Set(disapproved.flatMap(a => a.policyTopics?.map(p => p.topic) || []))].filter(Boolean);
     const topicStr = topics.length > 0 ? ` (${topics.slice(0, 3).join(', ')})` : '';
-    flags.push(flag('warning', 'campaign', campaign,
+    flags.push(flag('critical', 'campaign', campaign,
       'ads_disapproved_partial',
       `${disapproved.length} ad${disapproved.length > 1 ? 's' : ''} in '${campaign.name}' ${disapproved.length > 1 ? 'are' : 'is'} disapproved${topicStr}.`,
       'Review and fix affected ads to restore full delivery.'
+    ));
+  }
+
+  // ── Critical: disapproved PMax assets ────────────────────────────────────
+  const disapprovedAssets = campaign.disapprovedAssets || [];
+  if (disapprovedAssets.length > 0) {
+    const fieldTypes = [...new Set(disapprovedAssets.map(a => a.fieldType).filter(Boolean))];
+    const fieldStr = fieldTypes.length > 0 ? ` (${fieldTypes.slice(0, 4).join(', ')})` : '';
+    const topics = [...new Set(disapprovedAssets.flatMap(a => a.policyTopics?.map(p => p.topic) || []))].filter(Boolean);
+    const topicStr = topics.length > 0 ? ` — policy: ${topics.slice(0, 3).join(', ')}` : '';
+    flags.push(flag('critical', 'campaign', campaign,
+      'assets_disapproved',
+      `${disapprovedAssets.length} asset${disapprovedAssets.length > 1 ? 's' : ''} in '${campaign.name}' ${disapprovedAssets.length > 1 ? 'are' : 'is'} disapproved${fieldStr}${topicStr}.`,
+      'Review asset group content for policy violations and replace or remove the affected assets.'
     ));
   }
 

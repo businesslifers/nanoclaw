@@ -379,6 +379,48 @@ async function fetchDisapprovedAds(adsClient, customerId) {
   return byCampaign;
 }
 
+// ─── Google Ads — Disapproved PMax Assets ────────────────────────────────────
+
+async function fetchDisapprovedPMaxAssets(adsClient, customerId) {
+  const query = `
+    SELECT
+      campaign.id,
+      asset_group.id,
+      asset_group.name,
+      asset_group_asset.field_type,
+      asset_group_asset.policy_summary.approval_status,
+      asset_group_asset.policy_summary.policy_topic_entries,
+      asset.id,
+      asset.name
+    FROM asset_group_asset
+    WHERE asset_group_asset.policy_summary.approval_status != 'APPROVED'
+      AND asset_group_asset.policy_summary.approval_status != 'UNKNOWN'
+      AND asset_group.status != 'REMOVED'
+      AND campaign.status != 'REMOVED'
+  `;
+  const rows = await queryAds(adsClient, customerId, query);
+
+  const byCampaign = {};
+  for (const row of rows) {
+    const campaignId = String(row.campaign?.id);
+    const policyEntries = row.asset_group_asset?.policy_summary?.policy_topic_entries || [];
+    if (!byCampaign[campaignId]) byCampaign[campaignId] = [];
+    byCampaign[campaignId].push({
+      assetGroupId: String(row.asset_group?.id || ''),
+      assetGroupName: row.asset_group?.name || '',
+      assetId: String(row.asset?.id || ''),
+      assetName: row.asset?.name || '',
+      fieldType: row.asset_group_asset?.field_type || '',
+      approvalStatus: row.asset_group_asset?.policy_summary?.approval_status || '',
+      policyTopics: policyEntries.map(e => ({
+        topic: e.topic || '',
+        constraintType: e.type || '',
+      })),
+    });
+  }
+  return byCampaign;
+}
+
 // ─── GA4 REST API ─────────────────────────────────────────────────────────────
 
 async function getGA4Token() {
@@ -555,11 +597,12 @@ async function collectClient(client, periods, adsClient, ga4Token) {
     withRetry(() => fetchConversionsByAction(adsClient, customerId, periods.previousMonth.start, periods.previousMonth.end), 'conversions prev month'),
   ]);
 
-  // Search terms + ad copy + disapproved ads (MTD / current)
-  const [searchTerms, adCopy, disapprovedAds] = await Promise.all([
+  // Search terms + ad copy + disapproved ads + disapproved pmax assets (MTD / current)
+  const [searchTerms, adCopy, disapprovedAds, disapprovedPMaxAssets] = await Promise.all([
     withRetry(() => fetchSearchTerms(adsClient, customerId, periods.currentMonthToDate.start, periods.currentMonthToDate.end), 'search terms'),
     withRetry(() => fetchAdCopy(adsClient, customerId, periods.currentMonthToDate.start, periods.currentMonthToDate.end), 'ad copy'),
     withRetry(() => fetchDisapprovedAds(adsClient, customerId), 'disapproved ads'),
+    withRetry(() => fetchDisapprovedPMaxAssets(adsClient, customerId), 'disapproved pmax assets'),
   ]);
 
   // Merge per-campaign data
@@ -598,6 +641,7 @@ async function collectClient(client, periods, adsClient, ga4Token) {
       searchTerms: searchTerms[id] || [],
       ads: adCopy[id] || [],
       disapprovedAds: disapprovedAds[id] || [],
+      disapprovedAssets: disapprovedPMaxAssets[id] || [],
     });
   }
 

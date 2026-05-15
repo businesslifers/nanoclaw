@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mettro Prompt Engine — Preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; background: #f5f5f5; padding: 20px; }
+  h2 { font-size: 16px; font-weight: bold; margin-bottom: 6px; color: #1a1a1a; }
+  p.sub { font-size: 12px; color: #666; margin-bottom: 16px; }
+
+  /* Tab bar */
+  .tabs { display: flex; gap: 2px; margin-bottom: 0; }
+  .tab { padding: 7px 18px; background: #ddd; border-radius: 4px 4px 0 0; font-size: 12px; cursor: pointer; color: #444; }
+  .tab.active { background: #fff; font-weight: bold; color: #1a1a1a; border-bottom: 2px solid #fff; }
+
+  /* Sheet wrapper */
+  .sheet { background: #fff; border: 1px solid #ccc; overflow-x: auto; }
+
+  /* Row numbers col */
+  table { border-collapse: collapse; width: 100%; }
+  .row-num { background: #f3f3f3; border: 1px solid #d0d0d0; color: #888; text-align: center; padding: 4px 6px; min-width: 32px; font-size: 11px; }
+  td, th { border: 1px solid #d0d0d0; padding: 5px 8px; white-space: nowrap; vertical-align: middle; }
+
+  /* Header styles */
+  .h-required { background: #7f0000; color: #fff; font-weight: bold; font-size: 11px; }
+  .h-optional { background: #1a1a1a; color: #fff; font-weight: bold; font-size: 11px; }
+  .h-prompt   { background: #1B5E20; color: #fff; font-weight: bold; font-size: 11px; }
+
+  /* Data cells */
+  .cell-dropdown { color: #333; }
+  .cell-freetext { color: #333; font-style: italic; }
+  .cell-hint { color: #aaa; font-style: italic; }
+  .cell-prompt { background: #f1f8e9; color: #2e7d32; max-width: 440px; white-space: normal; line-height: 1.4; font-size: 11px; }
+  .cell-empty { color: #ccc; }
+  .cell-warn { background: #fff3e0; color: #e65100; font-style: italic; font-size: 11px; }
+
+  /* Row shading */
+  .row-even td:not(.row-num) { background: #f8f8f8; }
+  .row-even .cell-prompt { background: #f1f8e9; }
+
+  /* Dropdown indicator */
+  .dd::after { content: " ▾"; color: #888; font-size: 10px; }
+
+  /* Lists sheet */
+  .list-header { background: #1a1a1a; color: #fff; font-weight: bold; font-size: 11px; padding: 5px 8px; }
+  .list-val { color: #333; font-size: 11px; }
+  .list-empty { color: #eee; }
+
+  .legend { display: flex; gap: 16px; margin-top: 14px; font-size: 11px; color: #555; }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 2px; }
+
+  .note { margin-top: 12px; font-size: 11px; color: #666; background: #fff; padding: 10px 14px; border-left: 3px solid #1B5E20; }
+
+  /* Page label */
+  .page-label { font-size: 11px; color: #555; margin-bottom: 8px; margin-top: 20px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+</style>
+</head>
+<body>
+
+<h2>Mettro ChatGPT Image Prompt Engine — Blog Post Feature Images</h2>
+<p class="sub">Visual preview of the Google Sheet layout. Red starred columns are required; all others are optional.</p>
+
+<div class="tabs">
+  <div class="tab active">Prompt Builder</div>
+  <div class="tab">Lists</div>
+</div>
+
+<div class="sheet">
+<table>
+  <thead>
+    <tr>
+      <th class="row-num"></th>
+      <th class="h-required">Client / Brand *</th>
+      <th class="h-required">Blog Topic *</th>
+      <th class="h-optional">Destination</th>
+      <th class="h-required">Visual Style *</th>
+      <th class="h-optional">Mood / Tone</th>
+      <th class="h-optional">Colour Palette</th>
+      <th class="h-optional">Composition</th>
+      <th class="h-required">Main Subject *</th>
+      <th class="h-optional">Text Space</th>
+      <th class="h-optional">Aspect Ratio</th>
+      <th class="h-optional">Font Style</th>
+      <th class="h-optional">Avoid</th>
+      <th class="h-optional">Reference Image URL</th>
+      <th class="h-prompt">Generated Prompt ✦</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- Row 2 — sample filled row -->
+    <tr>
+      <td class="row-num">2</td>
+      <td class="cell-dropdown dd">Mettro</td>
+      <td class="cell-freetext">PPC advertising for small business</td>
+      <td class="cell-dropdown dd">Blog hero</td>
+      <td class="cell-dropdown dd">Photographic</td>
+      <td class="cell-dropdown dd">Professional</td>
+      <td class="cell-dropdown dd">Brand colours</td>
+      <td class="cell-dropdown dd">Text space left</td>
+      <td class="cell-freetext">Person at laptop in modern office</td>
+      <td class="cell-dropdown dd">Leave clear space left</td>
+      <td class="cell-dropdown dd">16:9 Landscape</td>
+      <td class="cell-dropdown dd">Bold modern sans-serif</td>
+      <td class="cell-freetext">no hands close-up, no text</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-prompt">Create a <b>Photographic</b> style feature image for <b>Mettro</b>. Topic: <b>PPC advertising for small business</b>. Destination: Blog hero. Main subject: Person at laptop in modern office. Mood: Professional. Colour palette: Brand colours. Composition: Text space left. Leave clear space left. Aspect ratio: 16:9 Landscape. Typography style (if text is included): Bold modern sans-serif. Avoid: no hands close-up, no text. <b>Professional graphic design quality. Commercial photography standard. Not stock imagery.</b></td>
+    </tr>
+
+    <!-- Row 3 — infographic example -->
+    <tr class="row-even">
+      <td class="row-num">3</td>
+      <td class="cell-dropdown dd">Queensland Capital</td>
+      <td class="cell-freetext">5 signs your business needs a commercial loan</td>
+      <td class="cell-dropdown dd">Social share card</td>
+      <td class="cell-dropdown dd">Infographic</td>
+      <td class="cell-dropdown dd">Bold</td>
+      <td class="cell-dropdown dd">Brand colours</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-freetext">Abstract financial growth concept with upward arrows</td>
+      <td class="cell-dropdown dd">No text in image</td>
+      <td class="cell-dropdown dd">1:1 Square</td>
+      <td class="cell-dropdown dd">Clean minimal</td>
+      <td class="cell-freetext">no faces, no hands</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-prompt">Create a <b>Infographic</b> style feature image for <b>Queensland Capital</b>. Topic: <b>5 signs your business needs a commercial loan</b>. Destination: Social share card. Main subject: Abstract financial growth concept with upward arrows. Mood: Bold. Colour palette: Brand colours. No text in image. Aspect ratio: 1:1 Square. Typography style (if text is included): Clean minimal. Avoid: no faces, no hands. <b>Professional graphic design quality. Commercial photography standard. Not stock imagery.</b></td>
+    </tr>
+
+    <!-- Row 4 — partial fill (optional fields blank) -->
+    <tr>
+      <td class="row-num">4</td>
+      <td class="cell-dropdown dd">Business Lifers</td>
+      <td class="cell-freetext">How to survive a business downturn</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-dropdown dd">Editorial</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-freetext">Determined entrepreneur standing at a crossroads</td>
+      <td class="cell-dropdown dd">Leave clear space bottom</td>
+      <td class="cell-dropdown dd">16:9 Landscape</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-prompt">Create a <b>Editorial</b> style feature image for <b>Business Lifers</b>. Topic: <b>How to survive a business downturn</b>. Main subject: Determined entrepreneur standing at a crossroads. Leave clear space bottom. Aspect ratio: 16:9 Landscape. <b>Professional graphic design quality. Commercial photography standard. Not stock imagery.</b></td>
+    </tr>
+
+    <!-- Row 5 — required fields missing warning -->
+    <tr class="row-even">
+      <td class="row-num">5</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-empty">—</td>
+      <td class="cell-warn">⚠️ Fill all required fields (starred columns) to generate prompt</td>
+    </tr>
+
+    <!-- Rows 6–8 empty -->
+    <tr>
+      <td class="row-num">6</td>
+      <td colspan="14" class="cell-empty" style="color:#eee">—</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- LISTS SHEET PREVIEW -->
+<div class="page-label">Lists Sheet (picklist source — edit here to update all dropdowns)</div>
+<div class="sheet">
+<table>
+  <thead>
+    <tr>
+      <th class="row-num"></th>
+      <th class="list-header">Client / Brand</th>
+      <th class="list-header">Visual Style</th>
+      <th class="list-header">Mood / Tone</th>
+      <th class="list-header">Colour Palette</th>
+      <th class="list-header">Composition</th>
+      <th class="list-header">Aspect Ratio</th>
+      <th class="list-header">Destination</th>
+      <th class="list-header">Text Space</th>
+      <th class="list-header">Font Style</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="row-num">2</td><td class="list-val">Mettro</td><td class="list-val">Photographic</td><td class="list-val">Professional</td><td class="list-val">Brand colours</td><td class="list-val">Centred subject</td><td class="list-val">16:9 Landscape</td><td class="list-val">Blog hero</td><td class="list-val">No text in image</td><td class="list-val">Bold modern sans-serif</td></tr>
+    <tr class="row-even"><td class="row-num">3</td><td class="list-val">Queensland Capital</td><td class="list-val">Illustrated</td><td class="list-val">Warm</td><td class="list-val">Warm neutrals</td><td class="list-val">Text space left</td><td class="list-val">1:1 Square</td><td class="list-val">Social share card</td><td class="list-val">Leave clear space left</td><td class="list-val">Clean minimal</td></tr>
+    <tr><td class="row-num">4</td><td class="list-val">La Petite Boudoir</td><td class="list-val">Abstract</td><td class="list-val">Bold</td><td class="list-val">Cool tones</td><td class="list-val">Text space right</td><td class="list-val">4:5 Portrait</td><td class="list-val">LinkedIn featured image</td><td class="list-val">Leave clear space right</td><td class="list-val">Editorial serif</td></tr>
+    <tr class="row-even"><td class="row-num">5</td><td class="list-val">Business Lifers</td><td class="list-val">Flat design</td><td class="list-val">Calm</td><td class="list-val">Monochrome</td><td class="list-val">Text space bottom</td><td class="list-val">9:16 Vertical</td><td class="list-val">Facebook / Instagram post</td><td class="list-val">Leave clear space bottom</td><td class="list-val">Friendly rounded</td></tr>
+    <tr><td class="row-num">6</td><td class="list-val">Carpet One</td><td class="list-val">Editorial</td><td class="list-val">Energetic</td><td class="list-val">Vibrant / bold</td><td class="list-val">Split layout</td><td class="list-empty">—</td><td class="list-val">Email header</td><td class="list-val">Leave clear space top</td><td class="list-val">Corporate formal</td></tr>
+    <tr class="row-even"><td class="row-num">7</td><td class="list-val">Leap in!</td><td class="list-val">3D render</td><td class="list-val">Minimal</td><td class="list-val">Earthy tones</td><td class="list-val">Wide landscape</td><td class="list-empty">—</td><td class="list-val">Website hero / banner</td><td class="list-empty">—</td><td class="list-val">Handwritten / organic</td></tr>
+    <tr><td class="row-num">8</td><td class="list-val">QSBC</td><td class="list-val">Infographic</td><td class="list-val">Playful</td><td class="list-val">Dark / moody</td><td class="list-val">Close-up / macro</td><td class="list-empty">—</td><td class="list-val">Newsletter header</td><td class="list-empty">—</td><td class="list-val">No text in image</td></tr>
+    <tr class="row-even"><td class="row-num">9</td><td class="list-val">Arrow Energy</td><td class="list-val">Graphic design / collage</td><td class="list-val">Sophisticated</td><td class="list-val">Pastel</td><td class="list-val">Overhead / flat lay</td><td class="list-empty">—</td><td class="list-val">Display ad creative</td><td class="list-empty">—</td><td class="list-empty">—</td></tr>
+    <tr><td class="row-num">10</td><td class="list-val">Other (specify)</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-val">Landing page hero</td><td class="list-empty">—</td><td class="list-empty">—</td></tr>
+    <tr class="row-even"><td class="row-num">11</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-val">Case study cover</td><td class="list-empty">—</td><td class="list-empty">—</td></tr>
+    <tr><td class="row-num">12</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-empty">—</td><td class="list-val">Presentation slide</td><td class="list-empty">—</td><td class="list-empty">—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#7f0000"></div> Required field</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#1a1a1a"></div> Optional field</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#1B5E20"></div> Auto-generated prompt</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#f1f8e9; border:1px solid #ccc"></div> Prompt output (copy + paste into ChatGPT)</div>
+</div>
+
+<div class="note">
+  <b>How it works:</b> Fill in the starred columns. Optional columns: leave blank and they're skipped — the prompt won't mention them. The Generated Prompt column assembles everything automatically. Copy it and paste straight into ChatGPT Images. Update any dropdown list by editing the Lists sheet.
+</div>
+
+</body>
+</html>
