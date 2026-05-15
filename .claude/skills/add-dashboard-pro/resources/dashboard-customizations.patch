@@ -1,5 +1,5 @@
 diff --git a/dist/router.d.ts b/dist/router.d.ts
-index ba5d893..b4a572c 100644
+index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11bfdffda6a 100644
 --- a/dist/router.d.ts
 +++ b/dist/router.d.ts
 @@ -3,4 +3,6 @@
@@ -11,7 +11,7 @@ index ba5d893..b4a572c 100644
 +export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse, req?: http.IncomingMessage): Promise<void>;
 +export declare function dispatchMutating(method: string, path: string, body: any, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d..51e32a8 100644
+index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1d190aef3 100644
 --- a/dist/router.js
 +++ b/dist/router.js
 @@ -6,6 +6,14 @@ import { channelsPage } from './ui/pages/channels.js';
@@ -23,7 +23,7 @@ index 326434d..51e32a8 100644
 +import { tasksPage, cronDescribe } from './ui/pages/tasks.js';
 +import { renderWikiMarkdown } from './ui/wiki-render.js';
 +import { getTasks } from './store.js';
-+import { getDashboardPermissions, getDashboardResolveActor } from './server.js';
++import { getDashboardPermissions, getDashboardResolveActor, getDashboardHistoryProvider } from './server.js';
 +import { readFileSync, realpathSync } from 'node:fs';
 +import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from 'node:path';
  function json(res, data, status = 200) {
@@ -48,7 +48,7 @@ index 326434d..51e32a8 100644
      const s = getSnapshot();
      // --- API routes ---
      if (method === 'GET' && path === '/api/status') {
-@@ -45,6 +63,7 @@ export async function dispatch(method, path, params, res) {
+@@ -45,13 +63,31 @@ export async function dispatch(method, path, params, res) {
                  owners: s.users.filter((u) => u.privilege === 'owner').length,
                  globalAdmins: s.users.filter((u) => u.privilege === 'global_admin').length,
              },
@@ -56,7 +56,32 @@ index 326434d..51e32a8 100644
              lastUpdated: getLastUpdated(),
          });
      }
-@@ -74,10 +93,66 @@ export async function dispatch(method, path, params, res) {
+     if (method === 'GET' && path === '/api/activity') {
++        const range = params && params.get('range');
++        if (range && range !== '24h') {
++            const provider = getDashboardHistoryProvider();
++            if (!provider || typeof provider.activity !== 'function') {
++                return json(res, { error: 'History provider not configured' }, 501);
++            }
++            try {
++                return json(res, provider.activity(range));
++            }
++            catch (err) {
++                const status = typeof err?.status === 'number' ? err.status : 500;
++                return json(res, { error: err?.message || 'History lookup failed' }, status);
++            }
++        }
+         if (!s)
+             return json(res, { error: 'No data yet' }, 503);
+-        return json(res, { buckets: s.activity });
++        // Snapshot path returns the legacy 24h shape so unscaled clients keep
++        // working; the historyProvider returns the new {bucket,granularity}
++        // shape for ?range=7d|30d|all. Overview JS detects which it received.
++        return json(res, { buckets: s.activity, granularity: 'hour', range: '24h' });
+     }
+     if (method === 'GET' && path === '/api/agent-groups') {
+         if (!s)
+@@ -74,10 +110,66 @@ export async function dispatch(method, path, params, res) {
              admins: group.admins,
          });
      }
@@ -124,7 +149,28 @@ index 326434d..51e32a8 100644
      }
      if (method === 'GET' && path === '/api/channels') {
          if (!s)
-@@ -114,6 +189,32 @@ export async function dispatch(method, path, params, res) {
+@@ -105,6 +197,20 @@ export async function dispatch(method, path, params, res) {
+         return json(res, s.users);
+     }
+     if (method === 'GET' && path === '/api/tokens/summary') {
++        const range = params && params.get('range');
++        if (range && range !== 'all') {
++            const provider = getDashboardHistoryProvider();
++            if (!provider || typeof provider.tokenSummary !== 'function') {
++                return json(res, { error: 'History provider not configured' }, 501);
++            }
++            try {
++                return json(res, provider.tokenSummary(range));
++            }
++            catch (err) {
++                const status = typeof err?.status === 'number' ? err.status : 500;
++                return json(res, { error: err?.message || 'History lookup failed' }, status);
++            }
++        }
+         if (!s)
+             return json(res, { error: 'No data yet' }, 503);
+         return json(res, s.tokens);
+@@ -114,6 +220,32 @@ export async function dispatch(method, path, params, res) {
              return json(res, { error: 'No data yet' }, 503);
          return json(res, { sessions: s.context_windows });
      }
@@ -157,7 +203,7 @@ index 326434d..51e32a8 100644
      // --- HTML pages ---
      if (method === 'GET') {
          if (path === '/dashboard')
-@@ -130,6 +231,9 @@ export async function dispatch(method, path, params, res) {
+@@ -130,6 +262,9 @@ export async function dispatch(method, path, params, res) {
              return html(res, usersPage());
          if (path === '/dashboard/logs')
              return html(res, logsPage());
@@ -167,7 +213,7 @@ index 326434d..51e32a8 100644
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +243,87 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +274,87 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -256,23 +302,24 @@ index 326434d..51e32a8 100644
 +    return json(res, { error: 'Not found' }, 404);
 +}
 diff --git a/dist/server.d.ts b/dist/server.d.ts
-index 8507931..9fb35fc 100644
+index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..6188b8ea290f1825cb7cb750a7e5c1063a7f6c44 100644
 --- a/dist/server.d.ts
 +++ b/dist/server.d.ts
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,8 @@
 -import type { DashboardConfig } from './types.js';
-+import type { DashboardConfig, DashboardPermissions, ResolveActor } from './types.js';
++import type { DashboardConfig, DashboardHistoryProvider, DashboardPermissions, ResolveActor } from './types.js';
  export declare function getDashboardSecret(): string | null;
 +export declare function getDashboardCsrfToken(): string | null;
 +export declare function getDashboardPermissions(): DashboardPermissions | null;
 +export declare function getDashboardResolveActor(): ResolveActor | null;
++export declare function getDashboardHistoryProvider(): DashboardHistoryProvider | null;
  export declare function startDashboard(config?: DashboardConfig): void;
  export declare function stopDashboard(): Promise<void>;
 diff --git a/dist/server.js b/dist/server.js
-index f616ef5..c5eede7 100644
+index f616ef5adfe7763270aa56d9685c1843819202de..6694782f030e43c64f1e237c79ac981261daec90 100644
 --- a/dist/server.js
 +++ b/dist/server.js
-@@ -4,32 +4,81 @@
+@@ -4,32 +4,86 @@
   * Serves dashboard UI and API endpoints.
   */
  import http from 'http';
@@ -286,6 +333,7 @@ index f616ef5..c5eede7 100644
 +let dashboardMutators = null;
 +let dashboardResolveActor = null;
 +let dashboardPermissions = null;
++let dashboardHistoryProvider = null;
 +let csrfToken = null;
  export function getDashboardSecret() {
      return dashboardSecret;
@@ -298,6 +346,9 @@ index f616ef5..c5eede7 100644
 +}
 +export function getDashboardResolveActor() {
 +    return dashboardResolveActor;
++}
++export function getDashboardHistoryProvider() {
++    return dashboardHistoryProvider;
 +}
 +function readCookie(req, name) {
 +    const raw = req.headers.cookie;
@@ -328,6 +379,7 @@ index f616ef5..c5eede7 100644
 +    dashboardMutators = config.mutators || null;
 +    dashboardResolveActor = config.resolveActor || null;
 +    dashboardPermissions = config.permissions || null;
++    dashboardHistoryProvider = config.historyProvider || null;
      if (!dashboardSecret) {
          console.warn('[dashboard] Starting without secret — endpoints are unauthenticated');
      }
@@ -356,7 +408,7 @@ index f616ef5..c5eede7 100644
          // Auth check for /api/* routes (endpoints with their own auth are excluded)
          const selfAuthed = ['/api/ingest', '/api/logs', '/api/logs/push'];
          if (path.startsWith('/api/') && !selfAuthed.includes(path) && dashboardSecret) {
-@@ -55,8 +104,43 @@ export function startDashboard(config = {}) {
+@@ -55,8 +109,43 @@ export function startDashboard(config = {}) {
              handleLogStream(req, res);
              return;
          }
@@ -402,7 +454,7 @@ index f616ef5..c5eede7 100644
          catch (err) {
              if (!res.headersSent) {
 diff --git a/dist/store.d.ts b/dist/store.d.ts
-index c7e717d..1d2a616 100644
+index c7e717d5fc55e65cd6461e66df1ec931673e5698..1d2a6169c26ff771d97e3481ba297fba1bc5d522 100644
 --- a/dist/store.d.ts
 +++ b/dist/store.d.ts
 @@ -3,10 +3,11 @@
@@ -419,7 +471,7 @@ index c7e717d..1d2a616 100644
  export declare function getLogBuffer(): string[];
  export declare function addLogClient(res: http.ServerResponse): void;
 diff --git a/dist/store.js b/dist/store.js
-index b12b787..697c55e 100644
+index b12b787287c1cc6389280fc422b2dcba69697559..697c55eaba9c457997c501394018bda603b899fe 100644
 --- a/dist/store.js
 +++ b/dist/store.js
 @@ -1,7 +1,9 @@
@@ -443,7 +495,7 @@ index b12b787..697c55e 100644
  const LOG_BUFFER_MAX = 500;
  const logBuffer = [];
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 7cebaa6..128122b 100644
+index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..697a60c596708a97d8bc077786f90012e881f174 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -16,6 +16,26 @@ export interface DashboardSnapshot {
@@ -473,10 +525,55 @@ index 7cebaa6..128122b 100644
  }
  export interface AgentGroupInfo {
      id: string;
-@@ -139,7 +159,77 @@ export interface ActivityBucket {
+@@ -139,7 +159,123 @@ export interface ActivityBucket {
      inbound: number;
      outbound: number;
  }
++export type HistoryRangeKey = '24h' | '7d' | '30d' | 'all';
++export type HistoryBucketGranularity = 'hour' | 'day' | 'week';
++export interface HistoryActivityBucket {
++    bucket: string;
++    inbound: number;
++    outbound: number;
++}
++export interface HistoryActivityResponse {
++    buckets: HistoryActivityBucket[];
++    granularity: HistoryBucketGranularity;
++    range: HistoryRangeKey;
++}
++export interface HistoryTokenSummary {
++    totals: {
++        requests: number;
++        inputTokens: number;
++        outputTokens: number;
++        cacheReadTokens: number;
++        cacheCreationTokens: number;
++        costUsd: number;
++        cacheHitRate: number;
++    };
++    byModel: Record<string, {
++        requests: number;
++        inputTokens: number;
++        outputTokens: number;
++        cacheReadTokens: number;
++        cacheCreationTokens: number;
++        costUsd: number;
++    }>;
++    byGroup: Record<string, {
++        requests: number;
++        inputTokens: number;
++        outputTokens: number;
++        cacheReadTokens: number;
++        cacheCreationTokens: number;
++        costUsd: number;
++        name: string;
++    }>;
++    range: HistoryRangeKey;
++}
++export interface DashboardHistoryProvider {
++    activity(range: HistoryRangeKey): HistoryActivityResponse;
++    tokenSummary(range: HistoryRangeKey): HistoryTokenSummary;
++}
 +export interface AgentGroupRenameArgs {
 +    id: string;
 +    name: string;
@@ -550,12 +647,13 @@ index 7cebaa6..128122b 100644
 +    mutators?: DashboardMutators;
 +    resolveActor?: ResolveActor;
 +    permissions?: DashboardPermissions;
++    historyProvider?: DashboardHistoryProvider;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b9575..2d7e8eb 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19e3ecad2a 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3512 @@
+@@ -2,172 +2,3527 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -874,6 +972,21 @@ index 36b9575..2d7e8eb 100644
 +    text-transform: uppercase;
 +    letter-spacing: 0.4px;
 +  }
++  .overview-v2 select.ov-window-select {
++    appearance: none;
++    -webkit-appearance: none;
++    -moz-appearance: none;
++    padding-right: 26px;
++    cursor: pointer;
++    font-family: inherit;
++    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2394a3b8' stroke-width='1.6'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5'/%3E%3C/svg%3E");
++    background-repeat: no-repeat;
++    background-position: right 9px center;
++    background-size: 9px;
++    line-height: 1.2;
++  }
++  .overview-v2 select.ov-window-select:focus { outline: 1px solid var(--ov-cyan); outline-offset: 1px; }
++  .overview-v2 select.ov-window-select option { background: #0f172a; color: var(--ov-text); text-transform: none; letter-spacing: normal; }
 +
 +  .overview-v2 .ov-section {
 +    font-size: 12px;
@@ -4173,7 +4286,7 @@ index 36b9575..2d7e8eb 100644
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3515,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3530,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -4188,7 +4301,7 @@ index 36b9575..2d7e8eb 100644
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3529,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3544,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -4214,7 +4327,7 @@ index 36b9575..2d7e8eb 100644
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3555,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3570,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -4233,7 +4346,7 @@ index 36b9575..2d7e8eb 100644
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3576,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3591,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -4250,7 +4363,7 @@ index 36b9575..2d7e8eb 100644
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3597,52 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3612,52 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -4305,7 +4418,7 @@ index 36b9575..2d7e8eb 100644
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db8..eb8bf8b 100644
+index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9d747694d 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -5262,14 +5375,14 @@ index 0c33db8..eb8bf8b 100644
    `);
 diff --git a/dist/ui/pages/audit.d.ts b/dist/ui/pages/audit.d.ts
 new file mode 100644
-index 0000000..aafb8fc
+index 0000000000000000000000000000000000000000..aafb8fc3a07ef232f1ff65dafbf7ca8a5f429a03
 --- /dev/null
 +++ b/dist/ui/pages/audit.d.ts
 @@ -0,0 +1 @@
 +export declare function auditPage(): string;
 diff --git a/dist/ui/pages/audit.js b/dist/ui/pages/audit.js
 new file mode 100644
-index 0000000..9486e34
+index 0000000000000000000000000000000000000000..9486e34005d56f52397af3c29867bd6fdd579b62
 --- /dev/null
 +++ b/dist/ui/pages/audit.js
 @@ -0,0 +1,112 @@
@@ -5386,7 +5499,7 @@ index 0000000..9486e34
 +  `);
 +}
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a..e047d6b 100644
+index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -5644,7 +5757,7 @@ index 4433c2a..e047d6b 100644
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37a..6094425 100644
+index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -5886,7 +5999,7 @@ index 93fe37a..6094425 100644
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa022..517e1e2 100644
+index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -6291,10 +6404,10 @@ index 38aa022..517e1e2 100644
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e..8f0d9e3 100644
+index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a4133124a99e088 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,165 +1,387 @@
+@@ -1,165 +1,485 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -6308,7 +6421,12 @@ index 3e0cc9e..8f0d9e3 100644
 +        </div>
 +        <div class="ov-header-status">
 +          <span id="ov-health" class="ov-health-pill ov-health-loading"><span class="ov-health-dot"></span><span class="ov-health-label">Checking…</span></span>
-+          <span class="ov-window-chip">Last 24 hours</span>
++          <select id="ov-window-select" class="ov-window-chip ov-window-select" aria-label="Timeframe">
++            <option value="24h">Last 24 hours</option>
++            <option value="7d">Last week</option>
++            <option value="30d">Last month</option>
++            <option value="all">All time</option>
++          </select>
 +        </div>
 +      </header>
  
@@ -6319,7 +6437,7 @@ index 3e0cc9e..8f0d9e3 100644
  
 -    <h3 class="section-title">Context Windows</h3>
 -    <div id="context"><div class="loading">Loading...</div></div>
-+      <h3 class="ov-section">Token Usage</h3>
++      <h3 id="ov-tokens-title" class="ov-section">Token Usage · Last 24 hours</h3>
 +      <section id="ov-tokens" class="ov-token-hero"><div class="ov-loading">Loading…</div></section>
 +      <section id="ov-token-detail" class="ov-tables-row"></section>
  
@@ -6330,7 +6448,7 @@ index 3e0cc9e..8f0d9e3 100644
 +
 +      <section class="ov-bottom-row">
 +        <div class="ov-panel ov-activity">
-+          <h3 class="ov-panel-title">Message Activity (24H)</h3>
++          <h3 id="ov-activity-title" class="ov-panel-title">Message Activity · Last 24 hours</h3>
 +          <div id="ov-chart"><div class="ov-loading">Loading…</div></div>
 +        </div>
 +        <div class="ov-panel ov-infra">
@@ -6346,13 +6464,43 @@ index 3e0cc9e..8f0d9e3 100644
 -    <h3 class="section-title">Agent Groups</h3>
 -    <div id="groups"></div>
      <script>
++    // Window selector — drives Message Activity chart + Token Usage cells.
++    // Snapshot fetches (overview/context/agent-groups/wikis) are window-
++    // independent and only loaded once. Activity + tokens re-fetch on change.
++    var OV_WINDOW_KEY = 'ov-window';
++    var OV_WINDOW_LABELS = {
++      '24h': 'Last 24 hours',
++      '7d':  'Last week',
++      '30d': 'Last month',
++      'all': 'All time',
++    };
++    function ovReadWindow() {
++      try {
++        var v = window.localStorage && window.localStorage.getItem(OV_WINDOW_KEY);
++        if (v && OV_WINDOW_LABELS[v]) return v;
++      } catch (e) { /* localStorage may be disabled */ }
++      return '24h';
++    }
++    function ovWriteWindow(v) {
++      try { window.localStorage && window.localStorage.setItem(OV_WINDOW_KEY, v); }
++      catch (e) { /* ignore */ }
++    }
++
      (async () => {
        try {
 -        const [data, activity, tokenData, ctxData] = await Promise.all([
-+        const [data, activity, tokenData, ctxData, agentGroups, wikis] = await Promise.all([
++        var initialRange = ovReadWindow();
++        var selectEl = document.getElementById('ov-window-select');
++        if (selectEl) selectEl.value = initialRange;
++
++        // Snapshot endpoints — these don't depend on the timeframe.
++        // /api/tokens/summary defaults to cumulative ('all'), which is what
++        // we want when the selector is on 'all'; for other ranges, the
++        // window-aware loader below replaces the totals.
++        const [data, ctxData, agentGroups, wikis] = await Promise.all([
            api('/api/overview'),
-           api('/api/activity'),
-           api('/api/tokens/summary'),
+-          api('/api/activity'),
+-          api('/api/tokens/summary'),
            api('/api/context'),
 +          api('/api/agent-groups'),
 +          api('/api/wikis').catch(function(){ return null; }),
@@ -6413,6 +6561,7 @@ index 3e0cc9e..8f0d9e3 100644
  
 -        // Token by model + group breakdown
 -        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
++        function renderTokens(tokenData) {
 +        var t = tokenData.totals || {};
 +        var hitRateRaw = (typeof t.cacheHitRate === 'number')
 +          ? t.cacheHitRate
@@ -6473,11 +6622,12 @@ index 3e0cc9e..8f0d9e3 100644
 +            '<td class="ov-num-cache-read">' + formatNum(gv.cacheReadTokens) + '</td>' +
 +            '<td class="ov-num-cache-write">' + formatNum(gv.cacheCreationTokens) + '</td>' +
 +            '<td class="ov-num-cost">' + fmtUsd(gv.costUsd || 0) + '</td></tr>';
++        }
++        detailHtml += '</tbody></table></div>';
++        document.getElementById('ov-token-detail').innerHTML = detailHtml;
          }
 -        detailHtml += '</table></div></div>';
 -        document.getElementById('token-detail').innerHTML = detailHtml;
-+        detailHtml += '</tbody></table></div>';
-+        document.getElementById('ov-token-detail').innerHTML = detailHtml;
  
 -        // Context windows
 -        var ctxSessions = (ctxData.sessions || []);
@@ -6519,12 +6669,24 @@ index 3e0cc9e..8f0d9e3 100644
          }
  
 -        // Activity chart
-         var buckets = activity.buckets || [];
+-        var buckets = activity.buckets || [];
 -        var maxVal = Math.max(1, ...buckets.map(function(b) { return Math.max(b.inbound, b.outbound); }));
++        function renderActivity(activity) {
++        // activity may be the legacy shape ({buckets:[{hour,...}]}) from the
++        // 24h snapshot path, or the range shape ({buckets:[{bucket,...}],
++        // granularity}) from the historyProvider. Normalise to one shape.
++        var rawBuckets = (activity && activity.buckets) || [];
++        var granularity = (activity && activity.granularity) || 'hour';
++        var buckets = rawBuckets.map(function(b) {
++          return {
++            key: b.bucket != null ? b.bucket : b.hour,
++            inbound: b.inbound || 0,
++            outbound: b.outbound || 0,
++          };
++        });
          if (buckets.length === 0) {
 -          document.getElementById('chart').innerHTML = '<div class="loading">No activity data</div>';
-+          document.getElementById('ov-chart').innerHTML = '<div class="ov-loading">No activity data</div>';
-         } else {
+-        } else {
 -          document.getElementById('chart').innerHTML =
 -            '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:11px">' + badge('inbound', 'blue') + ' ' + badge('outbound', 'green') + '</div>' +
 -            buckets.map(function(b) {
@@ -6538,36 +6700,80 @@ index 3e0cc9e..8f0d9e3 100644
 -                '<span class="chart-value">' + b.inbound + '/' + b.outbound + '</span>' +
 -                '</div>';
 -            }).join('');
-+          var maxVal = Math.max(1, ...buckets.map(function(b){ return Math.max(b.inbound, b.outbound); }));
-+          var chartHtml = '<div class="ov-chart-legend">' +
-+            '<span><span class="ov-chart-swatch ov-chart-swatch-in"></span>Inbound</span>' +
-+            '<span><span class="ov-chart-swatch ov-chart-swatch-out"></span>Outbound</span>' +
-+            '</div>';
-+          chartHtml += '<div class="ov-chart-rows">' + buckets.map(function(b) {
-+            var hour = b.hour.slice(11, 13) + ':00';
-+            var inPct = (b.inbound / maxVal) * 100;
-+            var outPct = (b.outbound / maxVal) * 100;
-+            return '<div class="ov-chart-row">' +
-+              '<span class="ov-chart-hour">' + hour + '</span>' +
-+              '<div class="ov-chart-bars">' +
-+                '<div class="ov-chart-bar ov-chart-bar-in" style="width:' + inPct + '%"></div>' +
-+                '<div class="ov-chart-bar ov-chart-bar-out" style="width:' + outPct + '%"></div>' +
-+              '</div>' +
-+              '<span class="ov-chart-val">' + b.inbound + '/' + b.outbound + '</span>' +
-+            '</div>';
-+          }).join('') + '</div>';
-+          document.getElementById('ov-chart').innerHTML = chartHtml;
-         }
- 
--        // Groups list
--        var groupsList = data.agentGroups.list || [];
--        document.getElementById('groups').innerHTML = groupsList.length === 0
--          ? '<div class="loading">No agent groups</div>'
--          : '<table><tr><th>Name</th><th>Folder</th></tr>' +
--            groupsList.map(function(g) {
--              return '<tr><td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
--              '<td>' + esc(g.folder) + '</td></tr>';
--            }).join('') + '</table>';
++          document.getElementById('ov-chart').innerHTML = '<div class="ov-loading">No activity data</div>';
++          return;
++        }
++        var maxVal = Math.max(1, ...buckets.map(function(b){ return Math.max(b.inbound, b.outbound); }));
++        var chartHtml = '<div class="ov-chart-legend">' +
++          '<span><span class="ov-chart-swatch ov-chart-swatch-in"></span>Inbound</span>' +
++          '<span><span class="ov-chart-swatch ov-chart-swatch-out"></span>Outbound</span>' +
++          '</div>';
++        chartHtml += '<div class="ov-chart-rows">' + buckets.map(function(b) {
++          var label;
++          if (granularity === 'hour') {
++            // 'YYYY-MM-DDTHH' → 'HH:00'
++            label = (b.key || '').slice(11, 13) + ':00';
++          } else if (granularity === 'day') {
++            // 'YYYY-MM-DD' → 'MM/DD'
++            var d = b.key || '';
++            label = d.length >= 10 ? d.slice(5, 7) + '/' + d.slice(8, 10) : d;
++          } else if (granularity === 'week') {
++            // 'YYYY-Www' → 'Www' (or full key if shorter)
++            var k = b.key || '';
++            var ix = k.indexOf('W');
++            label = ix >= 0 ? k.slice(ix) : k;
++          } else {
++            label = b.key || '';
++          }
++          var inPct = (b.inbound / maxVal) * 100;
++          var outPct = (b.outbound / maxVal) * 100;
++          return '<div class="ov-chart-row">' +
++            '<span class="ov-chart-hour">' + esc(label) + '</span>' +
++            '<div class="ov-chart-bars">' +
++              '<div class="ov-chart-bar ov-chart-bar-in" style="width:' + inPct + '%"></div>' +
++              '<div class="ov-chart-bar ov-chart-bar-out" style="width:' + outPct + '%"></div>' +
++            '</div>' +
++            '<span class="ov-chart-val">' + b.inbound + '/' + b.outbound + '</span>' +
++          '</div>';
++        }).join('') + '</div>';
++        document.getElementById('ov-chart').innerHTML = chartHtml;
++        }
++
++        async function loadWindow(range) {
++          var label = OV_WINDOW_LABELS[range] || OV_WINDOW_LABELS['24h'];
++          var titleA = document.getElementById('ov-activity-title');
++          var titleT = document.getElementById('ov-tokens-title');
++          if (titleA) titleA.textContent = 'Message Activity · ' + label;
++          if (titleT) titleT.textContent = 'Token Usage · ' + label;
++          var chartEl = document.getElementById('ov-chart');
++          var tokensEl = document.getElementById('ov-tokens');
++          if (chartEl) chartEl.innerHTML = '<div class="ov-loading">Loading…</div>';
++          if (tokensEl) tokensEl.innerHTML = '<div class="ov-loading">Loading…</div>';
++          try {
++            var actUrl = range === '24h' ? '/api/activity' : '/api/activity?range=' + encodeURIComponent(range);
++            var tokUrl = range === 'all' ? '/api/tokens/summary' : '/api/tokens/summary?range=' + encodeURIComponent(range);
++            var pair = await Promise.all([api(actUrl), api(tokUrl)]);
++            renderActivity(pair[0]);
++            renderTokens(pair[1]);
++          }
++          catch (err) {
++            if (chartEl) chartEl.innerHTML = '<div class="ov-loading">Error: ' + esc((err && err.message) || 'load failed') + '</div>';
++          }
++        }
++
++        // Initial window load — fire-and-forget, runs in parallel with the
++        // snapshot-only sections rendered below. Detached await prevents
++        // those sections from waiting on the window fetches.
++        loadWindow(initialRange);
++        if (selectEl) {
++          selectEl.addEventListener('change', function() {
++            var v = selectEl.value;
++            if (!OV_WINDOW_LABELS[v]) return;
++            ovWriteWindow(v);
++            loadWindow(v);
++          });
++        }
++
 +        var totalSessions = data.sessions.active || 0;
 +        var runningSessions = data.sessions.running || 0;
 +        var registeredChannels = data.channels.registered || [];
@@ -6581,9 +6787,18 @@ index 3e0cc9e..8f0d9e3 100644
 +          infraHtml += '<div class="ov-infra-warn">' +
 +            health.reasons.map(function(r){ return esc(r); }).join(' · ') +
 +            '</div>';
-+        }
+         }
 +        document.getElementById('ov-infra').innerHTML = infraHtml;
-+
+ 
+-        // Groups list
+-        var groupsList = data.agentGroups.list || [];
+-        document.getElementById('groups').innerHTML = groupsList.length === 0
+-          ? '<div class="loading">No agent groups</div>'
+-          : '<table><tr><th>Name</th><th>Folder</th></tr>' +
+-            groupsList.map(function(g) {
+-              return '<tr><td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
+-              '<td>' + esc(g.folder) + '</td></tr>';
+-            }).join('') + '</table>';
 +        var agentGroupsList = Array.isArray(agentGroups) ? agentGroups : [];
 +        if (agentGroupsList.length === 0) {
 +          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No teams</div>';
@@ -6665,7 +6880,7 @@ index 3e0cc9e..8f0d9e3 100644
 +          '<div class="ov-kpi-value">' + esc(String(value)) + '</div>' +
 +          '<div class="ov-kpi-chips">' + chipsHtml + '</div>' +
 +        '</div></div>';
-     }
++    }
 +
 +    function tokenCell(label, value, badgeText, emphasis) {
 +      return '<div class="ov-token-cell' + (emphasis ? ' ov-token-cell-emphasis' : '') + '">' +
@@ -6702,7 +6917,7 @@ index 3e0cc9e..8f0d9e3 100644
 +        '<div class="ov-infra-value">' + valueHtml + '</div>' +
 +        '<div class="ov-infra-sub">' + esc(sub) + '</div>' +
 +        '</div>';
-+    }
+     }
 +
      function formatUptime(s) {
        var h = Math.floor(s / 3600);
@@ -6786,7 +7001,7 @@ index 3e0cc9e..8f0d9e3 100644
    `);
  }
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb..ce5acd6 100644
+index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..ce5acd6c85c7e19a32b57017faec5ee961044ade 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -7081,7 +7296,7 @@ index 7e438eb..ce5acd6 100644
  }
 diff --git a/dist/ui/pages/tasks.d.ts b/dist/ui/pages/tasks.d.ts
 new file mode 100644
-index 0000000..96dd0c5
+index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec57f8e02eb
 --- /dev/null
 +++ b/dist/ui/pages/tasks.d.ts
 @@ -0,0 +1,3 @@
@@ -7090,7 +7305,7 @@ index 0000000..96dd0c5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000..482f03f
+index 0000000000000000000000000000000000000000..482f03f696dc28b7174adb7ac6057a1f27a156eb
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
 @@ -0,0 +1,921 @@
@@ -8016,7 +8231,7 @@ index 0000000..482f03f
 +    }
 +}
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe..531e82e 100644
+index ea390fe8a5d6d30e177421c8d7b78af81da78962..531e82e5e7a7a6d6fc84644528073b9f2dd4a86e 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -8354,7 +8569,7 @@ index ea390fe..531e82e 100644
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000..fab790b
+index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa53ce9376
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,630 @@
@@ -8990,7 +9205,7 @@ index 0000000..fab790b
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000..020f9ff
+index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,180 @@
@@ -9175,7 +9390,7 @@ index 0000000..020f9ff
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581b..5d6a76e 100644
+index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5d6a76e243b21fbde07dbe495537523ec0d90ed3 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,10 @@

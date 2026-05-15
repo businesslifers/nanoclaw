@@ -108,6 +108,70 @@ interface PusherConfig {
   intervalMs?: number;
 }
 
+// Window selector on the overview page asks for one of these ranges; the
+// dashboard router calls back into `getActivityForRange` / `getTokenSummaryForRange`
+// when a non-default range is requested. 24h and 'all' remain the snapshot defaults.
+export type RangeKey = '24h' | '7d' | '30d' | 'all';
+export type BucketGranularity = 'hour' | 'day' | 'week';
+
+const HOUR_MS = 3600000;
+const DAY_MS = 86400000;
+const ALL_TIME_MAX_WEEK_BUCKETS = 52; // cap weekly chart so long-lived installs stay readable
+
+interface RangeSpec {
+  cutoffIso: string; // '' means "no cutoff" (all time)
+  granularity: BucketGranularity;
+  preseed: string[]; // pre-filled bucket keys (oldest first); '' for 'all'
+}
+
+function pad2(n: number): string {
+  return n < 10 ? '0' + n : String(n);
+}
+
+function isoWeekKey(d: Date): string {
+  // Standard ISO-8601 week algorithm: Thursday determines the year.
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((date.getTime() - yearStart.getTime()) / DAY_MS + 1) / 7);
+  return date.getUTCFullYear() + '-W' + pad2(weekNo);
+}
+
+function bucketKeyOf(iso: string, gran: BucketGranularity): string {
+  if (gran === 'hour') return iso.slice(0, 13);
+  if (gran === 'day') return iso.slice(0, 10);
+  return isoWeekKey(new Date(iso));
+}
+
+function rangeSpec(range: RangeKey, nowMs = Date.now()): RangeSpec {
+  if (range === '24h') {
+    const preseed: string[] = [];
+    for (let i = 23; i >= 0; i--) {
+      preseed.push(new Date(nowMs - i * HOUR_MS).toISOString().slice(0, 13));
+    }
+    return { cutoffIso: new Date(nowMs - 24 * HOUR_MS).toISOString(), granularity: 'hour', preseed };
+  }
+  if (range === '7d') {
+    const preseed: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      preseed.push(new Date(nowMs - i * DAY_MS).toISOString().slice(0, 10));
+    }
+    return { cutoffIso: new Date(nowMs - 7 * DAY_MS).toISOString(), granularity: 'day', preseed };
+  }
+  if (range === '30d') {
+    const preseed: string[] = [];
+    for (let i = 29; i >= 0; i--) {
+      preseed.push(new Date(nowMs - i * DAY_MS).toISOString().slice(0, 10));
+    }
+    return { cutoffIso: new Date(nowMs - 30 * DAY_MS).toISOString(), granularity: 'day', preseed };
+  }
+  return { cutoffIso: '', granularity: 'week', preseed: [] };
+}
+
+function isValidRange(value: unknown): value is RangeKey {
+  return value === '24h' || value === '7d' || value === '30d' || value === 'all';
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setInterval> | null = null;
 let logOffset = 0;
@@ -526,16 +590,9 @@ function collectUsers() {
   });
 }
 
-function collectTokens() {
+function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   const sessionsDir = path.join(DATA_DIR, 'v2-sessions');
-  const allEntries: Array<{
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-    agentGroupId: string;
-  }> = [];
+  const allEntries: Array<TokenEntry & { agentGroupId: string }> = [];
   const agentGroups = getAllAgentGroups();
   const nameMap = new Map(agentGroups.map((g) => [g.id, g.name]));
 
@@ -549,6 +606,15 @@ function collectTokens() {
       allEntries.push(...codexEntries.map((e) => ({ ...e, agentGroupId: agDir })));
     }
   }
+
+  // Range filter — 'all' includes everything (matches the pre-range
+  // cumulative totals). Other ranges drop entries with timestamps older
+  // than the cutoff; entries with timestamp='' (Codex without scrapable
+  // timestamp) are kept in every range as a best-effort fallback.
+  const spec = rangeSpec(range, nowMs);
+  const filtered = spec.cutoffIso
+    ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso)
+    : allEntries;
 
   const byModel: Record<
     string,
@@ -583,7 +649,7 @@ function collectTokens() {
     cacheHitRate: 0,
   };
 
-  for (const e of allEntries) {
+  for (const e of filtered) {
     const cost = computeCostUsd(e.model, e);
 
     if (!byModel[e.model])
@@ -633,20 +699,35 @@ function collectTokens() {
   const denom = totals.inputTokens + totals.cacheReadTokens + totals.cacheCreationTokens;
   totals.cacheHitRate = denom > 0 ? totals.cacheReadTokens / denom : 0;
 
-  return { totals, byModel, byGroup };
+  return { totals, byModel, byGroup, range };
 }
 
-function scanJsonlTokens(agentDir: string) {
+export function getTokenSummaryForRange(range: RangeKey | string) {
+  if (!isValidRange(range)) {
+    const err = new Error('invalid range; expected 24h | 7d | 30d | all') as Error & { status?: number };
+    err.status = 400;
+    throw err;
+  }
+  return collectTokens(range);
+}
+
+interface TokenEntry {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  // Best-effort ISO timestamp of when the assistant turn happened. Empty
+  // string means "unknown" — those entries are treated as "always include"
+  // (i.e., they show up in every range filter).
+  timestamp: string;
+}
+
+function scanJsonlTokens(agentDir: string): TokenEntry[] {
   const claudeDir = path.join(agentDir, '.claude-shared', 'projects');
   if (!fs.existsSync(claudeDir)) return [];
 
-  const entries: Array<{
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-  }> = [];
+  const entries: TokenEntry[] = [];
 
   const walk = (dir: string): void => {
     try {
@@ -673,6 +754,7 @@ function scanJsonlTokens(agentDir: string) {
                     outputTokens: u.output_tokens || 0,
                     cacheReadTokens: u.cache_read_input_tokens || 0,
                     cacheCreationTokens: u.cache_creation_input_tokens || 0,
+                    timestamp: typeof r.timestamp === 'string' ? r.timestamp : '',
                   });
                 }
               } catch {
@@ -706,14 +788,8 @@ function scanJsonlTokens(agentDir: string) {
  * Codex reports cached_tokens (reads only). We bucket them as cacheReadTokens
  * and leave cacheCreationTokens=0 for Codex.
  */
-function scanCodexTokens(agentDir: string) {
-  const entries: Array<{
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-  }> = [];
+function scanCodexTokens(agentDir: string): TokenEntry[] {
+  const entries: TokenEntry[] = [];
   let sessNames: string[];
   try {
     sessNames = fs.readdirSync(agentDir).filter((d) => d.startsWith('sess-'));
@@ -721,6 +797,11 @@ function scanCodexTokens(agentDir: string) {
     return entries;
   }
   const usageRe = /"usage":\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
+  // Best-effort ISO timestamp scrape from the log body — matches the standard
+  // 2025-01-02T03:04:05(.000)Z shape that Codex's tracing layer emits. If we
+  // can't find one, the entry gets `timestamp: ''` and is treated as
+  // "always include" by the range filter (matches the pre-range behavior).
+  const tsRe = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/;
   for (const sess of sessNames) {
     const dbPath = path.join(agentDir, sess, 'codex', 'logs_2.sqlite');
     if (!fs.existsSync(dbPath)) continue;
@@ -747,6 +828,7 @@ function scanCodexTokens(agentDir: string) {
         const inputTotal = Number(usage.input_tokens) || 0;
         const details = (usage.input_tokens_details as { cached_tokens?: number } | undefined) ?? {};
         const cached = Number(details.cached_tokens) || 0;
+        const tsMatch = body.match(tsRe);
         entries.push({
           model,
           // Anthropic semantics: input_tokens = fresh (excludes cached).
@@ -755,6 +837,7 @@ function scanCodexTokens(agentDir: string) {
           outputTokens: Number(usage.output_tokens) || 0,
           cacheReadTokens: cached,
           cacheCreationTokens: 0,
+          timestamp: tsMatch ? tsMatch[1] : '',
         });
       }
     } catch {
@@ -847,57 +930,76 @@ function collectContextWindows() {
 }
 
 function collectActivity() {
-  const now = Date.now();
-  const buckets: Record<string, { inbound: number; outbound: number }> = {};
+  // Legacy snapshot shape: { hour, inbound, outbound }[]. Kept for backward-
+  // compatibility with the dashboard's cached `s.activity` field — the new
+  // historyProvider path uses `getActivityForRange` and returns a different
+  // shape (bucket / granularity).
+  const result = scanActivity('24h');
+  return result.buckets.map((b) => ({ hour: b.bucket, inbound: b.inbound, outbound: b.outbound }));
+}
 
-  for (let i = 0; i < 24; i++) {
-    const key = new Date(now - i * 3600000).toISOString().slice(0, 13);
-    buckets[key] = { inbound: 0, outbound: 0 };
-  }
+function scanActivity(range: RangeKey, nowMs = Date.now()) {
+  const spec = rangeSpec(range, nowMs);
+  const buckets: Record<string, { inbound: number; outbound: number }> = {};
+  for (const k of spec.preseed) buckets[k] = { inbound: 0, outbound: 0 };
 
   const sessionsDir = path.join(DATA_DIR, 'v2-sessions');
-  if (!fs.existsSync(sessionsDir)) return toBucketArray(buckets);
-
-  const cutoff = new Date(now - 86400000).toISOString();
-
-  try {
-    for (const agDir of fs.readdirSync(sessionsDir).filter((d) => d.startsWith('ag-'))) {
-      const agPath = path.join(sessionsDir, agDir);
-      for (const sessDir of fs.readdirSync(agPath).filter((d) => d.startsWith('sess-'))) {
-        for (const [dbName, direction] of [
-          ['outbound.db', 'outbound'],
-          ['inbound.db', 'inbound'],
-        ] as const) {
-          const dbPath = path.join(agPath, sessDir, dbName);
-          if (!fs.existsSync(dbPath)) continue;
-          try {
-            const db = new Database(dbPath, { readonly: true });
-            const table = direction === 'outbound' ? 'messages_out' : 'messages_in';
-            const rows = db.prepare(`SELECT timestamp FROM ${table} WHERE timestamp > ?`).all(cutoff) as {
-              timestamp: string;
-            }[];
-            for (const row of rows) {
-              const key = row.timestamp.slice(0, 13);
-              if (buckets[key]) buckets[key][direction]++;
+  if (fs.existsSync(sessionsDir)) {
+    try {
+      for (const agDir of fs.readdirSync(sessionsDir).filter((d) => d.startsWith('ag-'))) {
+        const agPath = path.join(sessionsDir, agDir);
+        for (const sessDir of fs.readdirSync(agPath).filter((d) => d.startsWith('sess-'))) {
+          for (const [dbName, direction] of [
+            ['outbound.db', 'outbound'],
+            ['inbound.db', 'inbound'],
+          ] as const) {
+            const dbPath = path.join(agPath, sessDir, dbName);
+            if (!fs.existsSync(dbPath)) continue;
+            try {
+              const db = new Database(dbPath, { readonly: true });
+              const table = direction === 'outbound' ? 'messages_out' : 'messages_in';
+              const sql = spec.cutoffIso
+                ? `SELECT timestamp FROM ${table} WHERE timestamp > ?`
+                : `SELECT timestamp FROM ${table}`;
+              const rows = (spec.cutoffIso
+                ? db.prepare(sql).all(spec.cutoffIso)
+                : db.prepare(sql).all()) as { timestamp: string }[];
+              for (const row of rows) {
+                if (!row.timestamp) continue;
+                const key = bucketKeyOf(row.timestamp, spec.granularity);
+                if (!buckets[key]) buckets[key] = { inbound: 0, outbound: 0 };
+                buckets[key][direction]++;
+              }
+              db.close();
+            } catch {
+              /* skip */
             }
-            db.close();
-          } catch {
-            /* skip */
           }
         }
       }
+    } catch {
+      /* skip */
     }
-  } catch {
-    /* skip */
   }
 
-  return toBucketArray(buckets);
+  let entries = Object.entries(buckets)
+    .map(([bucket, counts]) => ({ bucket, ...counts }))
+    .sort((a, b) => a.bucket.localeCompare(b.bucket));
+
+  if (range === 'all' && entries.length > ALL_TIME_MAX_WEEK_BUCKETS) {
+    entries = entries.slice(entries.length - ALL_TIME_MAX_WEEK_BUCKETS);
+  }
+
+  return { buckets: entries, granularity: spec.granularity, range };
 }
 
-function toBucketArray(buckets: Record<string, { inbound: number; outbound: number }>) {
-  return Object.entries(buckets)
-    .map(([hour, counts]) => ({ hour, ...counts }))
-    .sort((a, b) => a.hour.localeCompare(b.hour));
+export function getActivityForRange(range: RangeKey | string) {
+  if (!isValidRange(range)) {
+    const err = new Error('invalid range; expected 24h | 7d | 30d | all') as Error & { status?: number };
+    err.status = 400;
+    throw err;
+  }
+  return scanActivity(range);
 }
 
 function collectMessages() {
