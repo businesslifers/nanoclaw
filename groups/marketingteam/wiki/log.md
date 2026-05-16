@@ -23,6 +23,12 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
 
+## [2026-05-15] lint | 0 new issues, 2 pre-existing open items
+
+All links valid, all 7 content pages indexed, no new sources. Same open items as May 8 lint:
+1. Missing entity pages for 6 Carpet One locations + Haus Of Rattan (covered by client-list topic only).
+2. Global wiki remains empty — no cross-group promotions yet.
+
 ## [2026-05-08] lint | 2 issues found, 0 fixed
 
 Index is current and all 7 content pages are indexed. No broken cross-references, no orphan pages, no unprocessed sources, no contradictions detected. Two issues flagged for future action:
