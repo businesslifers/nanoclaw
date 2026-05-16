@@ -1,11 +1,11 @@
 ---
 name: add-dashboard-pro
-description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, "Agent Groups" relabelled to "Teams" throughout the UI, list/card view toggle on the Teams page, agent/sub-agent rename with audit log, a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes, and a /dashboard/tasks page with cancel/pause/resume/edit actions for scheduled tasks. Requires /add-dashboard to have been run first.
+description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, "Agent Groups" relabelled to "Teams" throughout the UI, list/card view toggle on the Teams page, agent/sub-agent rename with audit log, a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes, a /dashboard/tasks page with cancel/pause/resume/edit actions for scheduled tasks, and an overview-page timeframe selector (24h / week / month / all-time) that drives the activity chart and token-usage cells. Requires /add-dashboard to have been run first.
 ---
 
 # /add-dashboard-pro — businesslifers dashboard customizations
 
-Adds ten things on top of the base `/add-dashboard` install. The patch also relabels "Agent Groups" as "Teams" everywhere it appears in the UI (sidebar nav, page header, Overview section, table column headers, the "By Team" cost panel, and tasks-page labels). The internal model, API routes (`/api/agent-groups`, `/dashboard/agent-groups`), CSS class names (`.agent-groups-v2`), and source identifiers stay as `agent-group(s)` — this is a display rename only.
+Adds eleven things on top of the base `/add-dashboard` install. The patch also relabels "Agent Groups" as "Teams" everywhere it appears in the UI (sidebar nav, page header, Overview section, table column headers, the "By Team" cost panel, and tasks-page labels). The internal model, API routes (`/api/agent-groups`, `/dashboard/agent-groups`), CSS class names (`.agent-groups-v2`), and source identifiers stay as `agent-group(s)` — this is a display rename only.
 
 1. **Wiki page redesign** — restyles the dashboard's `/dashboard/wikis` route (markdown rendering, sidebar layout). Surfaces YAML frontmatter as a metadata bar above the article — `verdict:` (worth-exploring / interesting-but-not-now / pass) as a colored badge, `evaluated:` and `updated:` dates, a clickable source link (preferring `url:` for the href, with `source:` as label fallback), and `tags:` as pills. Code blocks get a hover-revealed copy-to-clipboard button.
 2. **Per-container CPU + memory columns** on the `/dashboard/sessions` table, with bar visualisations and color thresholds.
@@ -16,7 +16,8 @@ Adds ten things on top of the base `/add-dashboard` install. The patch also rela
 7. **CRUD foundation + agent/sub-agent rename** — first write capability on the dashboard. Hover any agent (card view, list view, and the Overview hierarchy) and a pencil button activates an inline editor; submit `PATCH /api/agent-groups/:id` with `{ name }` and the host validates, authorizes via `canAccessAgentGroup`/`hasAdminPrivilege`, runs `updateAgentGroup` + audit row in a single transaction, then nudges the pusher so the new name appears in <1s. The `id` and `folder` are immutable; `groups/<folder>/container.json` `groupName`/`assistantName` re-sync on the next container spawn (`src/container-runner.ts:423-428`); OneCLI display name re-applies on the next session via the existing `ensureAgent` call. No container restart required. Foundation pieces also added so future write features layer on cleanly: `mutators` + `resolveActor` options on `startDashboard`, double-submit `nc-csrf` cookie + `X-Dashboard-CSRF` header, and `dispatchMutating` for non-GET routes.
 8. **Audit log + page** — a new `dashboard_audit` table (migration `016-dashboard-audit`) records every mutator call (`actor_user_id`, `action`, `target_type`, `target_id`, before/after JSON, ts). The `/dashboard/audit` page renders the latest rows with action + target filters and search. Visible immediately after the first dashboard write so operators can audit changes without grepping logs.
 9. **Hide team from dashboard** — a per-team off-switch for the listing. Hover any team's name (cards, list, or Overview hierarchy) and an eye-strike button appears next to the rename pencil; one click confirms and PATCHes `/api/agent-groups/:id/hidden` with `{ hidden: true }`. The row disappears immediately (no full reload — both the list table row and any matching cards flip via a delegated handler). A "Hidden (N)" pill appears in the toolbar whenever ≥1 team is hidden; toggling it adds `body.ag-show-hidden`, which un-clips hidden rows and renders them at 55% opacity with the eye button persistently visible so unhide is one click. State persists via the `agent_groups.hidden_in_dashboard` column (migration `017-agent-group-hidden-dashboard`) and the toolbar preference under `localStorage.ag-show-hidden`. The flag does **not** affect runtime — hidden teams still receive messages, run sessions, and accept tasks; it only filters the dashboard view. Audited like rename (`action='agent_group.set_hidden_in_dashboard'`). Authorization mirrors rename (`hasAdminPrivilege`). Cards-grid uses a `:has()` selector so a section whose every member is hidden disappears with its header by default.
-10. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. The drawer renders the prompt as **markdown** — headings, bold, italic, fenced/inline code, bulleted/ordered lists, links, and paragraphs are all formatted via a small client-side escape-first renderer (defined inline in `dist/ui/pages/tasks.js` as `renderMarkdown`). Output is HTML-injection safe: every untrusted character is HTML-escaped before any markdown transform; only `https?:`, `mailto:`, and same-origin links are emitted as `<a>` tags (others fall back to plain text). Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
+10. **Overview timeframe selector** — the static "Last 24 hours" chip in the overview header becomes a `<select>` with four windows (Last 24 hours / Last week / Last month / All time). On change, the page re-fetches `/api/activity?range=<key>` and `/api/tokens/summary?range=<key>` and re-renders the Message Activity chart + Token Usage cells + by-model/by-team breakdowns. The chart bucket granularity adapts (hourly for 24h, daily for week/month, weekly for all-time — capped at the most recent 52 weeks so long-lived installs stay readable). The 24h path stays as snapshot pushes (no extra steady-state cost); other ranges are computed on demand by a `historyProvider` callback exported from `src/dashboard-pusher.ts`. The user's selection persists under `localStorage['ov-window']`. Default is `24h`. For Codex agents whose log timestamps can't be scraped, entries are kept in every range as a best-effort fallback. The new `historyProvider` field must be wired into the `startDashboard(...)` call (see Step 3a below).
+11. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. The drawer renders the prompt as **markdown** — headings, bold, italic, fenced/inline code, bulleted/ordered lists, links, and paragraphs are all formatted via a small client-side escape-first renderer (defined inline in `dist/ui/pages/tasks.js` as `renderMarkdown`). Output is HTML-injection safe: every untrusted character is HTML-escaped before any markdown transform; only `https?:`, `mailto:`, and same-origin links are emitted as `<a>` tags (others fall back to plain text). Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
 
 ## What this skill is NOT
 
@@ -97,16 +98,21 @@ cp .claude/skills/add-dashboard-pro/resources/dashboard-tasks.test.ts          s
 
 Migration 017 adds an `agent_groups.hidden_in_dashboard INTEGER NOT NULL DEFAULT 0` column. The `AgentGroup` type in `src/types.ts` must include `hidden_in_dashboard?: number;` and `updateAgentGroup`'s parameter type in `src/db/agent-groups.ts` must include `'hidden_in_dashboard'` in the `Partial<Pick<...>>`. Apply both edits manually.
 
-The tasks page also requires a host wiring change: extend the `startDashboard(...)` call in `src/index.ts` to pass a `permissions: { canAccessAgentGroup }` callback so the dashboard's `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package:
+The tasks page and the timeframe selector both require host wiring changes — extend the `startDashboard(...)` call in `src/index.ts` to pass a `permissions: { canAccessAgentGroup }` callback (so the dashboard's `/api/tasks` route can filter per-viewer) and a `historyProvider` callback pair (so `/api/activity?range=` and `/api/tokens/summary?range=` can compute on-demand without bundling host modules into the dashboard package):
 
 ```ts
 // src/index.ts — alongside the existing startDashboard call
 import { canAccessAgentGroup } from './modules/permissions/access.js';
+import { getActivityForRange, getTokenSummaryForRange } from './dashboard-pusher.js';
 // ...
 startDashboard({
   // ...existing fields (mutators, resolveActor, etc.)
   permissions: {
     canAccessAgentGroup: (userId, agentGroupId) => canAccessAgentGroup(userId, agentGroupId).allowed,
+  },
+  historyProvider: {
+    activity: getActivityForRange,
+    tokenSummary: getTokenSummaryForRange,
   },
 });
 ```
@@ -124,7 +130,9 @@ Verify after editing:
 
 ```bash
 grep -q 'buildDashboardMutatorContext' src/index.ts && \
+  grep -q 'getActivityForRange' src/index.ts && \
   grep -q 'nudgePusher' src/dashboard-pusher.ts && \
+  grep -q 'getActivityForRange' src/dashboard-pusher.ts && \
   grep -q 'migration016' src/db/migrations/index.ts && \
   grep -q 'migration017' src/db/migrations/index.ts && echo OK
 ```
@@ -207,6 +215,8 @@ done
 
 Open the dashboard, navigate to **Sessions**: there should be new **CPU** and **Memory** columns with bar fills (color-graded green/yellow/red at <50/<80/≥80%). Within ~60 seconds of the first container spawn, both columns populate. The watchdog needs 5 consecutive snapshots above 80% (~5 minutes) before it surfaces in the health pill on Overview.
 
+On **Overview** the top-right of the header shows the timeframe `<select>` (Last 24 hours / Last week / Last month / All time). Changing it re-fetches `/api/activity?range=…` and `/api/tokens/summary?range=…` and re-renders the activity chart + token usage cells without a full reload. The choice persists across reloads in `localStorage['ov-window']`.
+
 On **Teams** (`/dashboard/agent-groups` — the page label is "Teams"), the toolbar shows a list/card toggle (rightmost control, after the Models filter). Clicking the grid icon flips to a card view that groups lead + sub-agents under collapsible team headers; the chosen mode persists across reloads in `localStorage['ag-view']`.
 
 The wiki redesign is visible at `/dashboard/wikis`.
@@ -223,7 +233,7 @@ rm patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
 # Manually revert src/dashboard-pusher.ts (re-run /add-dashboard's pusher copy step)
 # Manually remove the getActiveContainerNames export from src/container-runner.ts
 # Manually remove the tasks mutators from src/dashboard-mutators.ts (the cancelTask/pauseTask/resumeTask/updateTask exports + the helpers under the "Task mutators" header)
-# Manually remove the permissions callback from the startDashboard call in src/index.ts
+# Manually remove the permissions and historyProvider callbacks from the startDashboard call in src/index.ts
 # Manually remove cronstrue from package.json then re-pin via pnpm install
 pnpm install
 pnpm run build
