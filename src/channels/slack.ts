@@ -26,6 +26,14 @@ registerChannelAdapter('slack', {
       signingSecret: env.SLACK_SIGNING_SECRET,
     });
     const bridge = createChatSdkBridge({ adapter: slackAdapter, concurrency: 'concurrent', supportsThreads: true });
+    bridge.resolveChannelName = async (platformId: string) => {
+      try {
+        const info = await slackAdapter.fetchThread(platformId);
+        return (info as { channelName?: string }).channelName ?? null;
+      } catch {
+        return null;
+      }
+    };
 
     // Slack's reactions API is add/remove individual emojis (vs Telegram's
     // "set the list" replace model), so we track the current reaction per
