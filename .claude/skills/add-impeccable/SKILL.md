@@ -65,23 +65,26 @@ Expected output: `SKILL.md`, `reference/`, `scripts/`.
 
 Upstream `SKILL.md` and the loader scripts reference `.claude/skills/impeccable/...`. Inside a NanoClaw agent container the skill mounts at `/app/skills/impeccable/...` (see `src/container-runner.ts:359`). Without a remap, `node .claude/skills/impeccable/scripts/load-context.mjs` would resolve to a non-existent path inside the container.
 
-Append a header to the installed SKILL.md (do **not** edit the upstream paths in-place — keeps later upstream diffs clean):
+Splice a path-mapping note in between the upstream YAML frontmatter and the body. Don't edit the upstream paths in-place — keeps later upstream diffs clean.
 
 ```bash
-# Build a header that explains the path mapping, then prepend.
-cat > /tmp/impeccable-header.md <<'EOF'
+SKILL=container/skills/impeccable/SKILL.md
+# Find the line number of the closing `---` of the YAML frontmatter (i.e. the
+# second `---` line in the file). awk uses a small state machine, with no
+# `$0`-style interpolation that some harness loaders strip when rendering.
+end_fm=$(awk '/^---$/{n=n+1; if(n==2){print NR; exit}}' "$SKILL")
+{
+  head -n "$end_fm" "$SKILL"
+  cat <<'EOF'
+
 > **NanoClaw path mapping** — this container skill lives at `/app/skills/impeccable/` (read-only mount from `container/skills/impeccable/` on the host). Where the upstream skill body below references `.claude/skills/impeccable/...`, substitute `/app/skills/impeccable/...` for every Bash invocation. Example: `node .claude/skills/impeccable/scripts/load-context.mjs` → `node /app/skills/impeccable/scripts/load-context.mjs`.
 
 ---
-
 EOF
+  tail -n +"$((end_fm+1))" "$SKILL"
+} > "$SKILL.new" && mv "$SKILL.new" "$SKILL"
 
-# Splice: keep the YAML frontmatter at the top, then insert the header right after.
-awk -v RS='---\n' 'NR==1{printf "---\n"} NR==2{printf "%s---\n", $0; while ((getline line < "/tmp/impeccable-header.md") > 0) print line; next} {printf "---\n%s", $0}' container/skills/impeccable/SKILL.md > container/skills/impeccable/SKILL.md.new
-mv container/skills/impeccable/SKILL.md.new container/skills/impeccable/SKILL.md
-rm /tmp/impeccable-header.md
-
-head -25 container/skills/impeccable/SKILL.md
+head -20 "$SKILL"
 ```
 
 Verify the frontmatter is still at the top and the path-mapping note appears immediately after.
