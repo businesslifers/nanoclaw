@@ -612,9 +612,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   // than the cutoff; entries with timestamp='' (Codex without scrapable
   // timestamp) are kept in every range as a best-effort fallback.
   const spec = rangeSpec(range, nowMs);
-  const filtered = spec.cutoffIso
-    ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso)
-    : allEntries;
+  const filtered = spec.cutoffIso ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso) : allEntries;
 
   const byModel: Record<
     string,
@@ -961,9 +959,9 @@ function scanActivity(range: RangeKey, nowMs = Date.now()) {
               const sql = spec.cutoffIso
                 ? `SELECT timestamp FROM ${table} WHERE timestamp > ?`
                 : `SELECT timestamp FROM ${table}`;
-              const rows = (spec.cutoffIso
-                ? db.prepare(sql).all(spec.cutoffIso)
-                : db.prepare(sql).all()) as { timestamp: string }[];
+              const rows = (spec.cutoffIso ? db.prepare(sql).all(spec.cutoffIso) : db.prepare(sql).all()) as {
+                timestamp: string;
+              }[];
               for (const row of rows) {
                 if (!row.timestamp) continue;
                 const key = bucketKeyOf(row.timestamp, spec.granularity);

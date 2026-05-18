@@ -193,7 +193,8 @@ async function main(): Promise<void> {
   const dashboardPort = parseInt(process.env.DASHBOARD_PORT || dashboardEnv.DASHBOARD_PORT || '3100', 10);
   if (dashboardSecret) {
     const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
-    const { startDashboardPusher, getActivityForRange, getTokenSummaryForRange } = await import('./dashboard-pusher.js');
+    const { startDashboardPusher, getActivityForRange, getTokenSummaryForRange } =
+      await import('./dashboard-pusher.js');
     const { buildDashboardMutatorContext } = await import('./dashboard-mutators.js');
     const { canAccessAgentGroup } = await import('./modules/permissions/access.js');
     const { mutators, resolveActor } = buildDashboardMutatorContext();
