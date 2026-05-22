@@ -1,0 +1,60 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Janet//Mettro//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:travel-bne-20260526@mettro.com.au
+SUMMARY:🚗 Travel to Brisbane Airport
+DTSTART;TZID=Australia/Brisbane:20260526T063000
+DTEND;TZID=Australia/Brisbane:20260526T070000
+DESCRIPTION:30 mins travel to Brisbane Airport for QF613
+TRANSP:OPAQUE
+END:VEVENT
+BEGIN:VEVENT
+UID:airport-bne-20260526@mettro.com.au
+SUMMARY:🛫 Airport — QF613 Brisbane → Melbourne
+DTSTART;TZID=Australia/Brisbane:20260526T070000
+DTEND;TZID=Australia/Brisbane:20260526T080000
+LOCATION:Brisbane Airport Terminal D
+DESCRIPTION:At airport for QF613. Check in and wait.\nFlight departs 8:00AM Terminal D.\nBooking Ref: DYSX2R
+STATUS:OOF
+TRANSP:OPAQUE
+END:VEVENT
+BEGIN:VEVENT
+UID:qf613-dysx2r-20260526@mettro.com.au
+SUMMARY:✈️ QF613 Brisbane → Melbourne
+DTSTART;TZID=Australia/Brisbane:20260526T080000
+DTEND;TZID=Australia/Melbourne:20260526T103000
+LOCATION:Brisbane Airport Terminal D
+DESCRIPTION:Qantas Flight QF613\nDeparting: Brisbane Terminal D 8:00AM\nArriving: Melbourne Tullamarine Terminal 1 10:30AM\nBooking Reference: DYSX2R\nPassengers: Raeleen Robertson\, Liam Barrett\nEconomy | Boeing 737 | Non-Stop
+TRANSP:OPAQUE
+END:VEVENT
+BEGIN:VEVENT
+UID:travel-mel-20260527@mettro.com.au
+SUMMARY:🚗 Travel to Melbourne Airport
+DTSTART;TZID=Australia/Melbourne:20260527T171500
+DTEND;TZID=Australia/Melbourne:20260527T174500
+DESCRIPTION:30 mins travel to Melbourne Tullamarine Airport for QF632
+TRANSP:OPAQUE
+END:VEVENT
+BEGIN:VEVENT
+UID:airport-mel-20260527@mettro.com.au
+SUMMARY:🛫 Airport — QF632 Melbourne → Brisbane
+DTSTART;TZID=Australia/Melbourne:20260527T174500
+DTEND;TZID=Australia/Melbourne:20260527T184500
+LOCATION:Melbourne Airport Tullamarine Terminal 1
+DESCRIPTION:At airport for QF632. Check in and wait.\nFlight departs 6:45PM Terminal 1.\nBooking Ref: DYSX2R
+STATUS:OOF
+TRANSP:OPAQUE
+END:VEVENT
+BEGIN:VEVENT
+UID:qf632-dysx2r-20260527@mettro.com.au
+SUMMARY:✈️ QF632 Melbourne → Brisbane
+DTSTART;TZID=Australia/Melbourne:20260527T184500
+DTEND;TZID=Australia/Brisbane:20260527T210500
+LOCATION:Melbourne Airport Tullamarine Terminal 1
+DESCRIPTION:Qantas Flight QF632\nDeparting: Melbourne Tullamarine Terminal 1 6:45PM\nArriving: Brisbane Terminal D 9:05PM\nBooking Reference: DYSX2R\nPassengers: Raeleen Robertson\, Liam Barrett\nEconomy | Boeing 737 | Non-Stop
+TRANSP:OPAQUE
+END:VEVENT
+END:VCALENDAR

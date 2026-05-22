@@ -156,3 +156,4 @@ Use Python `urllib.request` (not curl) for multi-line descriptions to avoid shel
 | Arrow Energy Support | 901610574349 |
 | Launchpoint Golf > launchpointgolf.com | 901602099164 |
 | Mettro Repo > Mettro AI | 901614510925 |
+| Carpet One > Carpet One Resource Hub 2025/26 | 901609737854 |

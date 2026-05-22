@@ -49,6 +49,7 @@ Founded: 29 August 2001 (24 years as of 2026)
 - Workspace ID: `9003245964`
 - Mettro AI doc ID: `8ca58cc-93956`
 - Mettro Knowledge Base (wiki mirror): `8ca58cc-94596`
+- **Estimates/proposals** live in the **Deals list** — not the Clients list
 
 ## Email Drafting Conventions
 - Always include a **subject line** in every email draft
