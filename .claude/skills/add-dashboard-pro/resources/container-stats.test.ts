@@ -129,12 +129,32 @@ describe('CpuWatchdog', () => {
     expect(w.pinned()).toEqual([]);
   });
 
-  it('garbage-collects sessions that disappear from the active set', () => {
+  it('garbage-collects sessions absent from the active set', () => {
+    const w = new CpuWatchdog(3, 80);
+    w.record([stat('sess-a', 95)], new Set(['sess-a']));
+    expect(w._historyFor('sess-a')).toBeDefined();
+    w.record([], new Set()); // sess-a no longer active
+    expect(w._historyFor('sess-a')).toBeUndefined();
+  });
+
+  it('keeps history when stats are empty but the session is still active', () => {
+    // collectContainerStats returns [] on a transient docker failure. The
+    // window must survive that, or a pinned container would dodge the flag.
+    const w = new CpuWatchdog(3, 80);
+    const active = new Set(['sess-a']);
+    w.record([stat('sess-a', 95)], active);
+    w.record([stat('sess-a', 95)], active);
+    w.record([], active); // docker stats hiccup — session still live
+    expect(w._historyFor('sess-a')).toHaveLength(2);
+    w.record([stat('sess-a', 95)], active);
+    expect(w.pinned()).toHaveLength(1); // window intact across the blip
+  });
+
+  it('does not GC when no active set is provided', () => {
     const w = new CpuWatchdog(3, 80);
     w.record([stat('sess-a', 95)]);
+    w.record([]); // no active set → history preserved
     expect(w._historyFor('sess-a')).toBeDefined();
-    w.record([]); // sess-a gone
-    expect(w._historyFor('sess-a')).toBeUndefined();
   });
 
   it('ignores stats without a sessionId', () => {
