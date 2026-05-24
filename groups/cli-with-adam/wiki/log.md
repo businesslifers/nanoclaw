@@ -32,3 +32,7 @@ No changes. Wiki still in scaffolded-only state — no sources, no content pages
 ## [2026-05-10] lint | 0 issues found, 0 fixed
 
 No changes. Wiki remains scaffolded-only — no sources, no content pages.
+
+## [2026-05-17] lint | 0 issues found, 0 fixed
+
+No changes. Wiki still scaffolded-only — no sources, no content pages.

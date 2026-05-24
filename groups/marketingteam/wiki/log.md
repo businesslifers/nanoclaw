@@ -23,6 +23,14 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
 
+## [2026-05-22] lint | 1 stale claim found and fixed
+
+Discovered QLD Capital has been paused since Apr 24, 2026 (`active: false` in clients.json) but wiki still listed 8 active clients. Fixed:
+- `topics/client-list.md` — updated to 7 active clients, noted QLD Capital pause
+- `entities/qld-capital.md` — updated status to paused
+- `index.md` — updated client-list summary line
+All links valid, no orphan pages, no new sources.
+
 ## [2026-05-15] lint | 0 new issues, 2 pre-existing open items
 
 All links valid, all 7 content pages indexed, no new sources. Same open items as May 8 lint:

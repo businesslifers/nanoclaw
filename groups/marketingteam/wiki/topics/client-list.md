@@ -1,7 +1,7 @@
 ---
 type: topic
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-22
 sources:
   - sources/v1-conversations/2026-04-08-conversation-2312.md
 related:
@@ -11,7 +11,7 @@ related:
 
 # Active Clients
 
-8 clients currently active in the daily reporting pipeline.
+7 clients currently active in the daily reporting pipeline (QLD Capital paused Apr 24, 2026 — see below).
 
 ## Carpet One (6 locations)
 
@@ -31,7 +31,7 @@ All Carpet One accounts sit under the `carpetone.com.au mcc` (ID: 226-088-8703).
 | Client | Google Ads ID | Notes |
 |---|---|---|
 | Haus Of Rattan | 420-948-9195 | |
-| QLD Capital | 483-764-0439 | Finance/lending — see [QLD Capital entity page](../entities/qld-capital.md) |
+| QLD Capital | 483-764-0439 | Finance/lending — **paused Apr 24, 2026** (client request); excluded from daily pipeline. See [QLD Capital entity page](../entities/qld-capital.md) |
 
 ## Account structure
 - Top-level MCC: **Lifers PTY LTD** (321-808-2250) — umbrella manager

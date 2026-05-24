@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-22
 sources:
   - sources/v1-conversations/2026-04-08-conversation-2312.md
 related:
@@ -11,7 +11,7 @@ related:
 
 # QLD Capital
 
-Finance/lending client. Active in the daily reporting pipeline.
+Finance/lending client. **Paused since Apr 24, 2026** — client requested all ads paused until further notice. Excluded from daily pipeline (`active: false` in `clients.json`).
 
 ## Account details
 - **Google Ads ID:** 483-764-0439

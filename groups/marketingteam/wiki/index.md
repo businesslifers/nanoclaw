@@ -3,7 +3,7 @@ scope: group
 group: marketingteam
 title: Marketing Team
 description: Marketing Team wiki — Janet maintains; entries scoped to Mettro Digital marketing operations (Google Ads, GA4, clients, conversion analysis).
-updated: 2026-05-15
+updated: 2026-05-22
 ---
 
 # Marketing Team Wiki — Index
@@ -31,7 +31,7 @@ Every wiki page should be linked here under its category with a one-line summary
 *Threads spanning multiple sources — running investigations, recurring reports, account health themes.*
 
 - [Reporting Pipeline](topics/reporting-pipeline.md) — Daily Collector → Analyst → Reporter pipeline; schedules, scripts, failure handling
-- [Client List](topics/client-list.md) — 8 active clients (6 Carpet One locations + Haus Of Rattan + QLD Capital); account IDs and MCC structure
+- [Client List](topics/client-list.md) — 7 active clients (6 Carpet One locations + Haus Of Rattan); QLD Capital paused Apr 24, 2026; account IDs and MCC structure
 
 ### Source Summaries
 *One page per ingested source.*
