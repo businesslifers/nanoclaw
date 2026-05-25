@@ -9208,7 +9208,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,211 @@
 +// dist/ui/wiki-render.js
 +import { Marked } from 'marked';
 +
@@ -9231,8 +9231,31 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +
 +  m.use({
 +    walkTokens(token) {
++      // Neutralise raw HTML so agent-authored wiki markdown can't inject
++      // <script> / event-handler attributes into the dashboard origin
++      // (stored XSS). Marked passes raw HTML through verbatim by default;
++      // escaping the html token's text — which the html renderer emits
++      // as-is — makes it render as visible text instead of executing.
++      // walkTokens recurses the tree, so this covers both block-level and
++      // inline html tokens.
++      if (token.type === 'html') {
++        token.text = escapeHtml(token.text || '');
++        return;
++      }
++      // Strip dangerous schemes off image sources — these never match the
++      // .md link rewrite below.
++      if (token.type === 'image') {
++        if (isDangerousHref(token.href)) token.href = '';
++        return;
++      }
 +      if (token.type !== 'link') return;
 +      const href = token.href || '';
++      // javascript:/data:/vbscript: links contain no "://", so the scheme
++      // check below would let them through. Block them outright.
++      if (isDangerousHref(href)) {
++        token.href = '#';
++        return;
++      }
 +      if (/^[a-z]+:\/\//i.test(href) || href.startsWith('#') || href.startsWith('mailto:')) {
 +        return;
 +      }
@@ -9337,6 +9360,14 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +    .replace(/>/g, '&gt;')
 +    .replace(/"/g, '&quot;')
 +    .replace(/'/g, '&#39;');
++}
++
++function isDangerousHref(href) {
++  if (href == null) return false;
++  // Browsers ignore embedded whitespace/control chars when resolving a URI
++  // scheme, so strip them before testing (e.g. "java\tscript:").
++  const cleaned = String(href).replace(/[\u0000-\u0020]+/g, '').toLowerCase();
++  return /^(javascript|data|vbscript):/.test(cleaned);
 +}
 +
 +function isHttpUrl(s) {

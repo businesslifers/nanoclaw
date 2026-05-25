@@ -299,8 +299,12 @@ function collectSnapshot(): Record<string, unknown> {
   // Per-container CPU/memory readings for the active set. This is the
   // input to the CPU watchdog AND a snapshot consumer in its own right
   // (rendered as columns on the dashboard Sessions table).
-  const containerStats = collectContainerStats(getActiveContainerNames());
-  cpuWatchdog.record(containerStats);
+  const activeContainers = getActiveContainerNames();
+  const containerStats = collectContainerStats(activeContainers);
+  // GC the watchdog against the *active session set*, not this stats batch —
+  // collectContainerStats returns [] on a transient docker failure, and
+  // GC'ing on the empty batch would wipe the high-CPU window on every hiccup.
+  cpuWatchdog.record(containerStats, new Set(activeContainers.keys()));
 
   // Decorate each session row with its current CPU/mem reading so the
   // dashboard can render columns without a second join. Sessions whose
@@ -612,7 +616,9 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   // than the cutoff; entries with timestamp='' (Codex without scrapable
   // timestamp) are kept in every range as a best-effort fallback.
   const spec = rangeSpec(range, nowMs);
-  const filtered = spec.cutoffIso ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso) : allEntries;
+  const filtered = spec.cutoffIso
+    ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso)
+    : allEntries;
 
   const byModel: Record<
     string,
@@ -959,9 +965,9 @@ function scanActivity(range: RangeKey, nowMs = Date.now()) {
               const sql = spec.cutoffIso
                 ? `SELECT timestamp FROM ${table} WHERE timestamp > ?`
                 : `SELECT timestamp FROM ${table}`;
-              const rows = (spec.cutoffIso ? db.prepare(sql).all(spec.cutoffIso) : db.prepare(sql).all()) as {
-                timestamp: string;
-              }[];
+              const rows = (spec.cutoffIso
+                ? db.prepare(sql).all(spec.cutoffIso)
+                : db.prepare(sql).all()) as { timestamp: string }[];
               for (const row of rows) {
                 if (!row.timestamp) continue;
                 const key = bucketKeyOf(row.timestamp, spec.granularity);

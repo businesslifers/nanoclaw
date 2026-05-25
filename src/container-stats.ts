@@ -174,19 +174,34 @@ export class CpuWatchdog {
     private readonly thresholdPercent: number = 80,
   ) {}
 
-  /** Record this round's stats. Drops history for any session not present. */
-  record(stats: ContainerStat[]): void {
-    const seen = new Set<string>();
+  /**
+   * Record this round's stats. `activeSessionIds`, when provided, is the set
+   * of sessions that currently have a live container (from the host's active
+   * container map). History is GC'd against *that* set — NOT against which
+   * sessions happened to appear in this stats batch.
+   *
+   * This distinction is load-bearing: `collectContainerStats` returns [] on
+   * any transient `docker ps`/`docker stats` failure. GC'ing on "present in
+   * this sample" would wipe the entire window on every such hiccup and reset
+   * the 5-sample counter, letting a genuinely pinned container dodge the
+   * watchdog indefinitely under noisy runtime conditions. Keying GC to the
+   * active session set means a stats blip leaves history intact.
+   *
+   * When `activeSessionIds` is omitted, no GC runs (history is bounded only
+   * by the active set at the call site).
+   */
+  record(stats: ContainerStat[], activeSessionIds?: Set<string>): void {
     for (const s of stats) {
       if (!s.sessionId) continue;
-      seen.add(s.sessionId);
       const arr = this.history.get(s.sessionId) ?? [];
       arr.push(s.cpuPercent);
       while (arr.length > this.maxSamples) arr.shift();
       this.history.set(s.sessionId, arr);
     }
-    for (const sid of [...this.history.keys()]) {
-      if (!seen.has(sid)) this.history.delete(sid);
+    if (activeSessionIds) {
+      for (const sid of [...this.history.keys()]) {
+        if (!activeSessionIds.has(sid)) this.history.delete(sid);
+      }
     }
   }
 
