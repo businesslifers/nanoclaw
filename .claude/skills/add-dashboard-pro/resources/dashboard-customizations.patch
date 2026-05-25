@@ -4656,7 +4656,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
 +              '<thead><tr>' +
 +                '<th>Name</th><th>Folder</th><th>Model</th>' +
 +                '<th class="ag-num ag-cell-usage" title="Cumulative API-equivalent cost across all sessions for this team">Usage</th>' +
-+                '<th class="ag-num">Sessions</th><th class="ag-num">Running</th>' +
++                '<th class="ag-num">Runs</th><th class="ag-num">Running</th>' +
 +                '<th>Created</th><th class="ag-actions"></th>' +
 +              '</tr></thead>' +
 +              '<tbody>' + body + '</tbody>' +
@@ -4759,7 +4759,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
 +        '<td class="ag-cell-folder">' + esc(g.folder) + '</td>' +
 +        '<td class="ag-cell-model">' + modelCell + '</td>' +
 +        '<td class="ag-num ag-cell-usage">' + usageCell + '</td>' +
-+        '<td class="ag-num">' + (g.sessionCount || 0) + '</td>' +
++        '<td class="ag-num">' + (g.runCount || 0) + '</td>' +
 +        '<td class="ag-num">' + runningPill + '</td>' +
 +        '<td class="ag-cell-date">' + esc(created) + '</td>' +
 +        '<td class="ag-actions">' +
@@ -4792,7 +4792,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
 +    // group (or a solo agent with no children); children is its sub-agents.
 +    function cardsGroupHtml(lead, children) {
 +      var members = [lead].concat(children);
-+      var totalSessions = members.reduce(function(a, g){ return a + (g.sessionCount || 0); }, 0);
++      var totalSessions = members.reduce(function(a, g){ return a + (g.runCount || 0); }, 0);
 +      var totalRunning = members.reduce(function(a, g){ return a + (g.runningSessions || 0); }, 0);
 +      var groupTag = children.length > 0
 +        ? '<span class="ag-tag ag-tag-lead">TEAM</span>'
@@ -4808,7 +4808,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
 +            groupTag +
 +            '<span class="ag-cards-group-count">' + members.length + ' ' + (members.length === 1 ? 'agent' : 'agents') + '</span>' +
 +            '<div class="ag-cards-group-meta">' +
-+              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalSessions + '</span> sessions</span>' +
++              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalSessions + '</span> runs</span>' +
 +              '<span class="ag-cards-group-stat"><span class="ag-cards-group-stat-num">' + totalRunning + '</span> running</span>' +
 +              (created ? '<span class="ag-cards-group-stat ag-cards-group-stat-date">Created ' + esc(created) + '</span>' : '') +
 +            '</div>' +
@@ -4859,8 +4859,8 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
 +          '</div>' +
 +          '<div class="ag-card-stats">' +
 +            '<div class="ag-card-stat">' +
-+              '<div class="ag-card-stat-value">' + (g.sessionCount || 0) + '</div>' +
-+              '<div class="ag-card-stat-label">Sessions</div>' +
++              '<div class="ag-card-stat-value">' + (g.runCount || 0) + '</div>' +
++              '<div class="ag-card-stat-label">Runs</div>' +
 +            '</div>' +
 +            '<div class="ag-card-stat">' +
 +              '<div class="ag-card-stat-value">' + runningCell + '</div>' +

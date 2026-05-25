@@ -333,7 +333,19 @@ function collectSnapshot(): Record<string, unknown> {
     }));
   const tasks = collectTasks(sessionRefs);
 
-  const agentGroups = collectAgentGroups();
+  // Collect per-session message stats once, then roll up a lifetime "runs"
+  // count per agent group (sum of inbound messages across its sessions). In
+  // single-session mode the session-row count is structurally always 1, so it
+  // tells operators nothing; totalIn is the meaningful lifetime activity number
+  // ("how many times the agent has been prompted/run") that the Teams cards
+  // surface as "Runs".
+  const messages = collectMessages();
+  const runCountByGroup = new Map<string, number>();
+  for (const m of messages) {
+    runCountByGroup.set(m.agentGroupId, (runCountByGroup.get(m.agentGroupId) ?? 0) + m.totalIn);
+  }
+
+  const agentGroups = collectAgentGroups(runCountByGroup);
   const hiddenAgentGroupCount = agentGroups.filter((g) => g.hidden_in_dashboard).length;
 
   return {
@@ -348,7 +360,7 @@ function collectSnapshot(): Record<string, unknown> {
     tokens: collectTokens(),
     context_windows: collectContextWindows(),
     activity: collectActivity(),
-    messages: collectMessages(),
+    messages,
     wikis: collectWikis(),
     tasks,
     system: { containers: containerStats, pinnedSessions: pinned },
@@ -412,7 +424,7 @@ function errorLogTouchedRecently(thresholdMs = 5 * 60 * 1000): boolean {
   }
 }
 
-function collectAgentGroups() {
+function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   const allAgentGroups = getAllAgentGroups();
   const agentById = new Map(allAgentGroups.map((g) => [g.id, g] as const));
 
@@ -492,6 +504,9 @@ function collectAgentGroups() {
       })(),
       sessionCount: sessions.length,
       runningSessions: running.length,
+      // Lifetime inbound-message count across this group's sessions — the
+      // "Runs" stat on the Teams cards. 0 for groups that never ran.
+      runCount: runCountByGroup.get(g.id) ?? 0,
       wirings,
       destinations,
       members,
