@@ -653,7 +653,7 @@ diff --git a/dist/ui/layout.js b/dist/ui/layout.js
 index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19e3ecad2a 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3533 @@
+@@ -2,172 +2,3534 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -1195,6 +1195,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
 +    white-space: nowrap;
 +  }
 +  .overview-v2 .ov-table th.ov-sort-th:hover { color: var(--ov-text); }
++  .overview-v2 .ov-table th.ov-sort-th.ov-sort-active { color: var(--ov-text); }
 +
 +  /* Context windows grid */
 +  .overview-v2 .ov-context-grid {
@@ -4292,7 +4293,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3536,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3537,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -6413,7 +6414,7 @@ diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
 index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a4133124a99e088 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,165 +1,514 @@
+@@ -1,165 +1,523 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -6569,18 +6570,25 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
 +        // Cost-sortable By Model / By Team tables. Clicking the Cost header
 +        // toggles asc/desc; the choice persists across timeframe re-renders.
-+        var ovCostSort = { model: 'desc', team: 'desc' };
++        // Sortable By Model / By Team tables. Click a sortable header (Requests
++        // or Cost) to sort by it; clicking the active column toggles asc/desc.
++        var OV_SORT_FIELDS = { requests: 'requests', cost: 'costUsd' };
++        var ovSort = { model: { key: 'cost', dir: 'desc' }, team: { key: 'cost', dir: 'desc' } };
 +        var ovLastTokenData = null;
-+        function ovSortByCost(obj, dir) {
++        function ovSortRows(obj, s) {
++          var field = OV_SORT_FIELDS[s.key] || 'costUsd';
 +          return Object.keys(obj || {}).map(function(k){ return { key: k, v: obj[k] }; })
 +            .sort(function(a, b) {
-+              var av = Number(a.v.costUsd) || 0, bv = Number(b.v.costUsd) || 0;
-+              return dir === 'asc' ? av - bv : bv - av;
++              var av = Number(a.v[field]) || 0, bv = Number(b.v[field]) || 0;
++              return s.dir === 'asc' ? av - bv : bv - av;
 +            });
 +        }
-+        function ovCostHeader(which) {
-+          var arrow = ovCostSort[which] === 'asc' ? ' ▲' : ' ▼';
-+          return '<th class="ov-sort-th" data-ovsort="' + which + '" title="Sort by cost">Cost' + arrow + '</th>';
++        function ovSortTh(table, col, label) {
++          var s = ovSort[table], active = s.key === col;
++          var arrow = active ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
++          return '<th class="ov-sort-th' + (active ? ' ov-sort-active' : '') + '"' +
++            ' data-ovtable="' + table + '" data-ovcol="' + col + '"' +
++            ' title="Sort by ' + label.toLowerCase() + '">' + label + arrow + '</th>';
 +        }
 +        // Delegated once on the static container so it survives the re-renders
 +        // that replace the tables' markup on each sort toggle / timeframe change.
@@ -6589,9 +6597,11 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +          ovDetailEl.addEventListener('click', function(e) {
 +            var th = e.target && e.target.closest ? e.target.closest('.ov-sort-th') : null;
 +            if (!th) return;
-+            var which = th.getAttribute('data-ovsort');
-+            if (!ovCostSort[which]) return;
-+            ovCostSort[which] = ovCostSort[which] === 'desc' ? 'asc' : 'desc';
++            var table = th.getAttribute('data-ovtable'), col = th.getAttribute('data-ovcol');
++            var s = ovSort[table];
++            if (!s || !OV_SORT_FIELDS[col]) return;
++            if (s.key === col) { s.dir = s.dir === 'desc' ? 'asc' : 'desc'; }
++            else { s.key = col; s.dir = 'desc'; }
 +            if (ovLastTokenData) renderTokens(ovLastTokenData);
 +          });
 +        }
@@ -6616,9 +6626,9 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +        var detailHtml = '';
 -        var models = tokenData.byModel || {};
 -        detailHtml += '<table><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
-+        var modelRows = ovSortByCost(tokenData.byModel, ovCostSort.model);
++        var modelRows = ovSortRows(tokenData.byModel, ovSort.model);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Model</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovCostHeader('model') + '</tr></thead><tbody>';
++          '<table class="ov-table"><thead><tr><th>Model</th>' + ovSortTh('model', 'requests', 'Requests') + '<th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovSortTh('model', 'cost', 'Cost') + '</tr></thead><tbody>';
 -        for (var m in models) {
 -          var mv = models[m];
 +        for (var mi = 0; mi < modelRows.length; mi++) {
@@ -6645,9 +6655,9 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -          var gv = groups[gid];
 +        detailHtml += '</tbody></table></div>';
 +
-+        var teamRows = ovSortByCost(tokenData.byGroup, ovCostSort.team);
++        var teamRows = ovSortRows(tokenData.byGroup, ovSort.team);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Team</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Team</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovCostHeader('team') + '</tr></thead><tbody>';
++          '<table class="ov-table"><thead><tr><th>Team</th>' + ovSortTh('team', 'requests', 'Requests') + '<th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovSortTh('team', 'cost', 'Cost') + '</tr></thead><tbody>';
 +        for (var ti = 0; ti < teamRows.length; ti++) {
 +          var gid = teamRows[ti].key, gv = teamRows[ti].v;
            detailHtml += '<tr><td><a href="/dashboard/agent-groups?id=' + esc(gid) + '">' + esc(gv.name) + '</a></td>' +
