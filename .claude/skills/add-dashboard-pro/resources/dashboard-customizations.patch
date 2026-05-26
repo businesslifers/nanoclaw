@@ -653,7 +653,7 @@ diff --git a/dist/ui/layout.js b/dist/ui/layout.js
 index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19e3ecad2a 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3527 @@
+@@ -2,172 +2,3533 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -1189,6 +1189,12 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
 +  .overview-v2 .ov-num-cache-read  { color: var(--ov-green); }
 +  .overview-v2 .ov-num-cache-write { color: var(--ov-amber); }
 +  .overview-v2 .ov-num-cost        { color: var(--ov-text); font-weight: 600; }
++  .overview-v2 .ov-table th.ov-sort-th {
++    cursor: pointer;
++    user-select: none;
++    white-space: nowrap;
++  }
++  .overview-v2 .ov-table th.ov-sort-th:hover { color: var(--ov-text); }
 +
 +  /* Context windows grid */
 +  .overview-v2 .ov-context-grid {
@@ -4286,7 +4292,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3530,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3536,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -6407,7 +6413,7 @@ diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
 index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a4133124a99e088 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,165 +1,485 @@
+@@ -1,165 +1,514 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -6561,7 +6567,36 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
  
 -        // Token by model + group breakdown
 -        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
++        // Cost-sortable By Model / By Team tables. Clicking the Cost header
++        // toggles asc/desc; the choice persists across timeframe re-renders.
++        var ovCostSort = { model: 'desc', team: 'desc' };
++        var ovLastTokenData = null;
++        function ovSortByCost(obj, dir) {
++          return Object.keys(obj || {}).map(function(k){ return { key: k, v: obj[k] }; })
++            .sort(function(a, b) {
++              var av = Number(a.v.costUsd) || 0, bv = Number(b.v.costUsd) || 0;
++              return dir === 'asc' ? av - bv : bv - av;
++            });
++        }
++        function ovCostHeader(which) {
++          var arrow = ovCostSort[which] === 'asc' ? ' ▲' : ' ▼';
++          return '<th class="ov-sort-th" data-ovsort="' + which + '" title="Sort by cost">Cost' + arrow + '</th>';
++        }
++        // Delegated once on the static container so it survives the re-renders
++        // that replace the tables' markup on each sort toggle / timeframe change.
++        var ovDetailEl = document.getElementById('ov-token-detail');
++        if (ovDetailEl) {
++          ovDetailEl.addEventListener('click', function(e) {
++            var th = e.target && e.target.closest ? e.target.closest('.ov-sort-th') : null;
++            if (!th) return;
++            var which = th.getAttribute('data-ovsort');
++            if (!ovCostSort[which]) return;
++            ovCostSort[which] = ovCostSort[which] === 'desc' ? 'asc' : 'desc';
++            if (ovLastTokenData) renderTokens(ovLastTokenData);
++          });
++        }
 +        function renderTokens(tokenData) {
++        ovLastTokenData = tokenData;
 +        var t = tokenData.totals || {};
 +        var hitRateRaw = (typeof t.cacheHitRate === 'number')
 +          ? t.cacheHitRate
@@ -6579,17 +6614,20 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -        // By model
 -        detailHtml += '<div class="detail-panel"><h4 style="color:#ccc;margin-bottom:8px">By Model</h4>';
 +        var detailHtml = '';
-         var models = tokenData.byModel || {};
+-        var models = tokenData.byModel || {};
 -        detailHtml += '<table><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
++        var modelRows = ovSortByCost(tokenData.byModel, ovCostSort.model);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Model</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th><th>Cost</th></tr></thead><tbody>';
-         for (var m in models) {
-           var mv = models[m];
++          '<table class="ov-table"><thead><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovCostHeader('model') + '</tr></thead><tbody>';
+-        for (var m in models) {
+-          var mv = models[m];
++        for (var mi = 0; mi < modelRows.length; mi++) {
++          var mEntry = modelRows[mi], mv = mEntry.v;
 -          detailHtml += '<tr><td>' + badge(m, 'blue') + '</td><td>' + formatNum(mv.requests) + '</td>' +
 -            '<td>' + formatNum(mv.inputTokens) + '</td><td>' + formatNum(mv.outputTokens) + '</td>' +
 -            '<td style="color:#4ade80">' + formatNum(mv.cacheReadTokens) + '</td>' +
 -            '<td style="color:#facc15">' + formatNum(mv.cacheCreationTokens) + '</td></tr>';
-+          detailHtml += '<tr><td>' + badge(m, 'blue') + '</td>' +
++          detailHtml += '<tr><td>' + badge(mEntry.key, 'blue') + '</td>' +
 +            '<td>' + formatNum(mv.requests) + '</td>' +
 +            '<td>' + formatNum(mv.inputTokens) + '</td>' +
 +            '<td>' + formatNum(mv.outputTokens) + '</td>' +
@@ -6607,11 +6645,11 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -          var gv = groups[gid];
 +        detailHtml += '</tbody></table></div>';
 +
-+        var groupsRoll = tokenData.byGroup || {};
++        var teamRows = ovSortByCost(tokenData.byGroup, ovCostSort.team);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Team</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Team</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th><th>Cost</th></tr></thead><tbody>';
-+        for (var gid in groupsRoll) {
-+          var gv = groupsRoll[gid];
++          '<table class="ov-table"><thead><tr><th>Team</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovCostHeader('team') + '</tr></thead><tbody>';
++        for (var ti = 0; ti < teamRows.length; ti++) {
++          var gid = teamRows[ti].key, gv = teamRows[ti].v;
            detailHtml += '<tr><td><a href="/dashboard/agent-groups?id=' + esc(gid) + '">' + esc(gv.name) + '</a></td>' +
              '<td>' + formatNum(gv.requests) + '</td>' +
 -            '<td>' + formatNum(gv.inputTokens) + '</td><td>' + formatNum(gv.outputTokens) + '</td>' +
