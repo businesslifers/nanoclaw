@@ -6414,7 +6414,7 @@ diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
 index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a4133124a99e088 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
-@@ -1,165 +1,523 @@
+@@ -1,165 +1,530 @@
  import { layout } from '../layout.js';
  export function overviewPage() {
      return layout('Overview', '/dashboard', `
@@ -6568,20 +6568,27 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
  
 -        // Token by model + group breakdown
 -        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
-+        // Cost-sortable By Model / By Team tables. Clicking the Cost header
-+        // toggles asc/desc; the choice persists across timeframe re-renders.
-+        // Sortable By Model / By Team tables. Click a sortable header (Requests
-+        // or Cost) to sort by it; clicking the active column toggles asc/desc.
-+        var OV_SORT_FIELDS = { requests: 'requests', cost: 'costUsd' };
++        // Sortable By Model / By Agent tables. Click any column header to sort
++        // by it (label column sorts alphabetically, the rest numerically);
++        // clicking the active column toggles asc/desc. In-memory, resets on reload.
++        var OV_SORT_FIELDS = {
++          requests: 'requests', in: 'inputTokens', out: 'outputTokens',
++          cacheRead: 'cacheReadTokens', cacheWrite: 'cacheCreationTokens', cost: 'costUsd',
++        };
 +        var ovSort = { model: { key: 'cost', dir: 'desc' }, team: { key: 'cost', dir: 'desc' } };
 +        var ovLastTokenData = null;
-+        function ovSortRows(obj, s) {
++        function ovSortRows(obj, s, labelOf) {
++          var rows = Object.keys(obj || {}).map(function(k){
++            return { key: k, v: obj[k], label: labelOf ? labelOf(k, obj[k]) : k };
++          });
++          var dir = s.dir === 'asc' ? 1 : -1;
++          if (s.key === 'label') {
++            return rows.sort(function(a, b){ return dir * String(a.label).localeCompare(String(b.label)); });
++          }
 +          var field = OV_SORT_FIELDS[s.key] || 'costUsd';
-+          return Object.keys(obj || {}).map(function(k){ return { key: k, v: obj[k] }; })
-+            .sort(function(a, b) {
-+              var av = Number(a.v[field]) || 0, bv = Number(b.v[field]) || 0;
-+              return s.dir === 'asc' ? av - bv : bv - av;
-+            });
++          return rows.sort(function(a, b){
++            return dir * ((Number(a.v[field]) || 0) - (Number(b.v[field]) || 0));
++          });
 +        }
 +        function ovSortTh(table, col, label) {
 +          var s = ovSort[table], active = s.key === col;
@@ -6599,9 +6606,9 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +            if (!th) return;
 +            var table = th.getAttribute('data-ovtable'), col = th.getAttribute('data-ovcol');
 +            var s = ovSort[table];
-+            if (!s || !OV_SORT_FIELDS[col]) return;
++            if (!s || (col !== 'label' && !OV_SORT_FIELDS[col])) return;
 +            if (s.key === col) { s.dir = s.dir === 'desc' ? 'asc' : 'desc'; }
-+            else { s.key = col; s.dir = 'desc'; }
++            else { s.key = col; s.dir = col === 'label' ? 'asc' : 'desc'; }
 +            if (ovLastTokenData) renderTokens(ovLastTokenData);
 +          });
 +        }
@@ -6628,7 +6635,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -        detailHtml += '<table><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
 +        var modelRows = ovSortRows(tokenData.byModel, ovSort.model);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Model</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Model</th>' + ovSortTh('model', 'requests', 'Requests') + '<th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovSortTh('model', 'cost', 'Cost') + '</tr></thead><tbody>';
++          '<table class="ov-table"><thead><tr>' + ovSortTh('model', 'label', 'Model') + ovSortTh('model', 'requests', 'Requests') + ovSortTh('model', 'in', 'In') + ovSortTh('model', 'out', 'Out') + ovSortTh('model', 'cacheRead', 'Cache Read') + ovSortTh('model', 'cacheWrite', 'Cache Write') + ovSortTh('model', 'cost', 'Cost') + '</tr></thead><tbody>';
 -        for (var m in models) {
 -          var mv = models[m];
 +        for (var mi = 0; mi < modelRows.length; mi++) {
@@ -6655,9 +6662,9 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -          var gv = groups[gid];
 +        detailHtml += '</tbody></table></div>';
 +
-+        var teamRows = ovSortRows(tokenData.byGroup, ovSort.team);
-+        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Team</h3>' +
-+          '<table class="ov-table"><thead><tr><th>Team</th>' + ovSortTh('team', 'requests', 'Requests') + '<th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th>' + ovSortTh('team', 'cost', 'Cost') + '</tr></thead><tbody>';
++        var teamRows = ovSortRows(tokenData.byGroup, ovSort.team, function(k, v){ return v.name || k; });
++        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Agent</h3>' +
++          '<table class="ov-table"><thead><tr>' + ovSortTh('team', 'label', 'Agent') + ovSortTh('team', 'requests', 'Requests') + ovSortTh('team', 'in', 'In') + ovSortTh('team', 'out', 'Out') + ovSortTh('team', 'cacheRead', 'Cache Read') + ovSortTh('team', 'cacheWrite', 'Cache Write') + ovSortTh('team', 'cost', 'Cost') + '</tr></thead><tbody>';
 +        for (var ti = 0; ti < teamRows.length; ti++) {
 +          var gid = teamRows[ti].key, gv = teamRows[ti].v;
            detailHtml += '<tr><td><a href="/dashboard/agent-groups?id=' + esc(gid) + '">' + esc(gv.name) + '</a></td>' +
