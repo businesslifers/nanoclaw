@@ -23,6 +23,16 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
 
+## [2026-05-22] lint | 3 stale claims fixed in reporting-pipeline.md
+
+`reporting-pipeline.md` had not been updated when QLD Capital was paused. Fixed:
+- "8 active clients" → "7 active clients" (QLD Capital paused Apr 24, 2026)
+- Reporter output described as "Telegram message" → "Slack mrkdwn message" (channel migrated to Slack)
+- "Telegram note" block referencing `telegram-markdown-sanitize.ts` replaced with Slack mrkdwn note
+- Frontmatter `updated` date corrected
+No broken cross-references, no orphan pages, no unprocessed sources.
+Open recurring item: no per-client entity pages for 7 active clients (covered by client-list topic).
+
 ## [2026-05-22] lint | 1 stale claim found and fixed
 
 Discovered QLD Capital has been paused since Apr 24, 2026 (`active: false` in clients.json) but wiki still listed 8 active clients. Fixed:

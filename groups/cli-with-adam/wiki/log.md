@@ -36,3 +36,9 @@ No changes. Wiki remains scaffolded-only — no sources, no content pages.
 ## [2026-05-17] lint | 0 issues found, 0 fixed
 
 No changes. Wiki still scaffolded-only — no sources, no content pages.
+
+## [2026-05-31] lint | 1 issue found, 0 fixed
+
+Wiki remains in scaffolded-only state — no sources, no content pages.
+One cosmetic issue: `wiki/index.md` still carries `updated: 2026-04-28` (initialisation date); no content has been added to warrant an update, so left as-is.
+All cross-references clean; global wiki resolves. Awaiting first ingest.

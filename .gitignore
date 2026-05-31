@@ -41,6 +41,9 @@ groups/*/data/api-test-result.txt
 groups/*/data/ga4-test-result.txt
 groups/*/data/collector-status.json
 
+# Per-session working screenshots (agent-browser / Miro browsing artefacts)
+groups/*/miro_*.png
+
 # Composer-managed CLAUDE.md artefacts (regenerated each container spawn)
 groups/*/CLAUDE.md
 groups/*/.claude-shared.md
