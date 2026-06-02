@@ -1,9 +1,12 @@
 {
-  "sandbox": {
-    "enabled": false
-  },
   "statusLine": {
     "type": "command",
     "command": ".claude/statusline.sh"
+  },
+  "sandbox": {
+    "enabled": false
+  },
+  "enabledPlugins": {
+    "mate@mate-suite": true
   }
 }
