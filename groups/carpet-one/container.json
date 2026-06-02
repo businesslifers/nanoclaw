@@ -1,0 +1,12 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "Janet",
+  "assistantName": "Janet",
+  "agentGroupId": "ag-1780365571870-gslxpq"
+}

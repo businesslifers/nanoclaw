@@ -18,4 +18,5 @@ INSERT INTO messaging_groups VALUES('mg-1777957905683-uxjv20','slack','slack:C0B
 INSERT INTO messaging_groups VALUES('mg-1778202109644-wu0hza','slack','slack:C0B2E8Z2HQA','project-management-team',1,'request_approval','2026-05-08T01:01:49.644Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1778215735145-qty9u2','slack','slack:D0B1JV7GJH3',NULL,0,'request_approval','2026-05-08T04:48:55.145Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1778547686046-hy2q7l','slack','slack:D0B1RV7NJ0L',NULL,0,'request_approval','2026-05-12T01:01:26.046Z',NULL);
+INSERT INTO messaging_groups VALUES('mg-1780365571872-l6rq6u','slack','slack:C0B7H7DLR5K','Carpet One',1,'strict','2026-06-02T01:59:31.872Z',NULL);
 COMMIT;

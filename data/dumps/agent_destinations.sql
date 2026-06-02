@@ -31,4 +31,5 @@ INSERT INTO agent_destinations VALUES('ag-1777257359331-63ti7x','tracey','agent'
 INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','tracey','agent','ag-1778549688239-0u5g1v','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','adam','agent','ag-1777257359331-63ti7x','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','raels','agent','ag-1778215787818-bncghq','2026-05-12T01:44:14.000Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','carpet-one','channel','mg-1780365571872-l6rq6u','2026-06-02T01:59:31.872Z');
 COMMIT;

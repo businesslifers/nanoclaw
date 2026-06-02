@@ -45,6 +45,7 @@ INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientma
 INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z',0);
 INSERT INTO agent_groups VALUES('ag-1778215787818-bncghq','Janet','dm-with-raeleen',NULL,'2026-05-08T04:49:47.818Z',1);
 INSERT INTO agent_groups VALUES('ag-1778549688239-0u5g1v','Janet','dm-with-tracey',NULL,'2026-05-12T01:34:48.239Z',1);
+INSERT INTO agent_groups VALUES('ag-1780365571870-gslxpq','Janet','carpet-one',NULL,'2026-06-02T01:59:31.870Z',0);
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -66,6 +67,7 @@ INSERT INTO messaging_groups VALUES('mg-1777957905683-uxjv20','slack','slack:C0B
 INSERT INTO messaging_groups VALUES('mg-1778202109644-wu0hza','slack','slack:C0B2E8Z2HQA','project-management-team',1,'request_approval','2026-05-08T01:01:49.644Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1778215735145-qty9u2','slack','slack:D0B1JV7GJH3',NULL,0,'request_approval','2026-05-08T04:48:55.145Z',NULL);
 INSERT INTO messaging_groups VALUES('mg-1778547686046-hy2q7l','slack','slack:D0B1RV7NJ0L',NULL,0,'request_approval','2026-05-12T01:01:26.046Z',NULL);
+INSERT INTO messaging_groups VALUES('mg-1780365571872-l6rq6u','slack','slack:C0B7H7DLR5K','Carpet One',1,'strict','2026-06-02T01:59:31.872Z',NULL);
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -86,6 +88,7 @@ INSERT INTO messaging_group_agents VALUES('mga-1777957915682-2rumxc','mg-1777957
 INSERT INTO messaging_group_agents VALUES('mga-1778203406041-z7d4na','mg-1778202109644-wu0hza','ag-1778203406039-nhnh92','shared',0,'2026-05-08T01:23:26.039Z','pattern','.','known','accumulate');
 INSERT INTO messaging_group_agents VALUES('mga-1778215787819-hb9nsg','mg-1778215735145-qty9u2','ag-1778215787818-bncghq','shared',0,'2026-05-08T04:49:47.820Z','mention-sticky',NULL,'known','accumulate');
 INSERT INTO messaging_group_agents VALUES('mga-1778549688241-yeuk3e','mg-1778547686046-hy2q7l','ag-1778549688239-0u5g1v','shared',0,'2026-05-12T01:34:48.241Z','mention-sticky',NULL,'known','accumulate');
+INSERT INTO messaging_group_agents VALUES('mga-1780365571872-gwuqaq','mg-1780365571872-l6rq6u','ag-1780365571870-gslxpq','shared',0,'2026-06-02T01:59:31.872Z','mention',NULL,'all','drop');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -120,6 +123,7 @@ INSERT INTO agent_destinations VALUES('ag-1777257359331-63ti7x','tracey','agent'
 INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','tracey','agent','ag-1778549688239-0u5g1v','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','adam','agent','ag-1777257359331-63ti7x','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','raels','agent','ag-1778215787818-bncghq','2026-05-12T01:44:14.000Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','carpet-one','channel','mg-1780365571872-l6rq6u','2026-06-02T01:59:31.872Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
