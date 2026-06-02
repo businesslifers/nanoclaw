@@ -1,0 +1,3 @@
+Immutable archive of material rejected during ingestion for the research-local-market mate. Do not edit or delete entries.
+
+Layout: one subdirectory per rejection. Each subdirectory contains the original source file (preserving its filename), a `_reason.md` recording why the material was rejected, and a `_manifest.md` capturing provenance — filename, size, sha256, mime type, origin, archive date, and `local_only` flag. The manifest and reason are text and always committed; the original is committed below the size threshold and optionally kept local-only above it. Replace `research-local-market` when copying.

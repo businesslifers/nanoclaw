@@ -1,0 +1,1 @@
+A project manager. Runs projects from kickoff to closeout — managing scope, schedule, risk, deliverables, and stakeholder communication so nothing falls through the cracks and the people commissioning the work always know where things stand.

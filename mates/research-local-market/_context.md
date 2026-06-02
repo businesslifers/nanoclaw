@@ -1,0 +1,1 @@
+Reviews a store's local market area to identify marketing opportunities — demographics, nearby developments, competitor presence, community groups, sponsorship openings, and local search visibility — and translates what it finds into a prioritised, location-specific opportunity set.

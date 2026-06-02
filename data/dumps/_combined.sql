@@ -45,7 +45,9 @@ INSERT INTO agent_groups VALUES('ag-1777607105027-isi0rv','ClientMate','clientma
 INSERT INTO agent_groups VALUES('ag-1778203406039-nhnh92','Project Management Team','project-management-team',NULL,'2026-05-08T01:23:26.039Z',0);
 INSERT INTO agent_groups VALUES('ag-1778215787818-bncghq','Janet','dm-with-raeleen',NULL,'2026-05-08T04:49:47.818Z',1);
 INSERT INTO agent_groups VALUES('ag-1778549688239-0u5g1v','Janet','dm-with-tracey',NULL,'2026-05-12T01:34:48.239Z',1);
-INSERT INTO agent_groups VALUES('ag-1780365571870-gslxpq','Janet','carpet-one',NULL,'2026-06-02T01:59:31.870Z',0);
+INSERT INTO agent_groups VALUES('ag-1780365571870-gslxpq','Carpet One','carpet-one',NULL,'2026-06-02T01:59:31.870Z',0);
+INSERT INTO agent_groups VALUES('d7dfb3be-2eef-41ce-b7ac-42156ab8ae31','PM','carpet-one-pm-project',NULL,'2026-06-02T02:14:15.088Z',0);
+INSERT INTO agent_groups VALUES('7c2ec039-1d69-4b74-b814-e0af577b8479','Local Market Analyst','carpet-one-research-local-market',NULL,'2026-06-02T02:26:57.170Z',0);
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
@@ -124,6 +126,10 @@ INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','tracey','agent'
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','adam','agent','ag-1777257359331-63ti7x','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','raels','agent','ag-1778215787818-bncghq','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','carpet-one','channel','mg-1780365571872-l6rq6u','2026-06-02T01:59:31.872Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','pm-project','agent','d7dfb3be-2eef-41ce-b7ac-42156ab8ae31','2026-06-02T02:14:15.088Z');
+INSERT INTO agent_destinations VALUES('d7dfb3be-2eef-41ce-b7ac-42156ab8ae31','parent','agent','ag-1780365571870-gslxpq','2026-06-02T02:14:15.088Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','research-local-market','agent','7c2ec039-1d69-4b74-b814-e0af577b8479','2026-06-02T02:26:57.170Z');
+INSERT INTO agent_destinations VALUES('7c2ec039-1d69-4b74-b814-e0af577b8479','parent','agent','ag-1780365571870-gslxpq','2026-06-02T02:26:57.170Z');
 COMMIT;
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;

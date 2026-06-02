@@ -1,0 +1,1 @@
+Identifies commercial content and advertising opportunities by synthesising voice-of-customer intelligence — what real buyers are saying, searching for, and struggling with — and translating it into a prioritised set of specific opportunities ready to brief into creative, content, or paid media work.

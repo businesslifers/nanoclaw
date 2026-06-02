@@ -1,0 +1,1 @@
+Primary material for the research-local-market mate — file-shaped artifacts the wiki references. Each subdirectory is one reference set with a `_meta.md` describing what it exemplifies. Replace `research-local-market` when copying.

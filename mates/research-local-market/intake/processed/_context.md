@@ -1,0 +1,3 @@
+Immutable archive of material that has been ingested into the research-local-market mate's wiki or references. Every wiki page and reference traces back to a file here via `source_refs`. Do not edit or delete entries.
+
+Layout: one subdirectory per source. Each subdirectory contains the original source file (preserving its filename) and a `_manifest.md` capturing provenance — filename, size, sha256, mime type, origin, archive date, and `local_only` flag. The manifest is text and always committed; the original is committed below the size threshold and optionally kept local-only above it. Replace `research-local-market` when copying.

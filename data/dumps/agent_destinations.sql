@@ -32,4 +32,8 @@ INSERT INTO agent_destinations VALUES('ag-1778215787818-bncghq','tracey','agent'
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','adam','agent','ag-1777257359331-63ti7x','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1778549688239-0u5g1v','raels','agent','ag-1778215787818-bncghq','2026-05-12T01:44:14.000Z');
 INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','carpet-one','channel','mg-1780365571872-l6rq6u','2026-06-02T01:59:31.872Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','pm-project','agent','d7dfb3be-2eef-41ce-b7ac-42156ab8ae31','2026-06-02T02:14:15.088Z');
+INSERT INTO agent_destinations VALUES('d7dfb3be-2eef-41ce-b7ac-42156ab8ae31','parent','agent','ag-1780365571870-gslxpq','2026-06-02T02:14:15.088Z');
+INSERT INTO agent_destinations VALUES('ag-1780365571870-gslxpq','research-local-market','agent','7c2ec039-1d69-4b74-b814-e0af577b8479','2026-06-02T02:26:57.170Z');
+INSERT INTO agent_destinations VALUES('7c2ec039-1d69-4b74-b814-e0af577b8479','parent','agent','ag-1780365571870-gslxpq','2026-06-02T02:26:57.170Z');
 COMMIT;

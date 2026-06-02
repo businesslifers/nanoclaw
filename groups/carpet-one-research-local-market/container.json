@@ -1,0 +1,16 @@
+{
+  "mcpServers": {},
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [
+    {
+      "hostPath": "/home/admin/Agents/janet-v2/groups/carpet-one/wiki",
+      "containerPath": "team-wiki",
+      "readonly": true
+    }
+  ],
+  "skills": "all",
+  "agentGroupId": "7c2ec039-1d69-4b74-b814-e0af577b8479"
+}
