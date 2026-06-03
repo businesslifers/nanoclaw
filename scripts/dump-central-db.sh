@@ -22,9 +22,12 @@ fi
 # Identity tables: change rarely, define WHO this install is.
 # Runtime tables (sessions, pending_*, chat_sdk_*) are intentionally excluded —
 # they regenerate as messages flow in after restore.
+# container_configs is included: it holds deliberate per-group config (model,
+# packages, MCP servers, cli_scope) that would NOT regenerate after restore.
 IDENTITY_TABLES=(
   schema_version
   agent_groups
+  container_configs
   messaging_groups
   messaging_group_agents
   agent_destinations
