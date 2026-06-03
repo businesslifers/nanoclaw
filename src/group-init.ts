@@ -6,6 +6,27 @@ import { ensureContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
+/**
+ * Default communication guidance seeded into every new group's
+ * `CLAUDE.local.md`. Keeps replies short and the ask unmissable — long,
+ * multi-message replies get skimmed and the user ends up asking "what do I
+ * need to do?" instead of reading. Written once at creation (the seed is
+ * gated on the file not existing), so per-group edits are never clobbered.
+ */
+const DEFAULT_COMMUNICATION_GUIDANCE = `## Communication
+
+### Be brief and direct
+
+Long replies get skimmed or skipped, and the user ends up asking "so what do I need to do?" instead of reading. Write so they don't have to.
+
+- **Lead with the point.** First line = the answer, the result, or the ask. No preamble, no "Sure! I've gone ahead and…", no recap of what you did.
+- **Default to 1–3 sentences.** Expand only when the user asks for detail. If you're tempted to write paragraphs, that's a sign it belongs in a task, a doc, or a wiki page, not a chat message.
+- **Make the ask unmissable.** If there's something for the user to do, say it plainly on its own line — e.g. \`Need from you: a yes/no, or tell me what to change.\` If there's nothing, say \`Nothing needed from you.\` Never make them guess.
+- **One message, not five.** Don't split a single thought across multiple sends.
+- **Cut the process.** How you got there goes in \`<internal>\` tags, not the reply. The user wants the outcome.
+- **Lists over prose for multiple items**, but keep each item to one short line. No nested bullets, no walls of text.
+`;
+
 const DEFAULT_SETTINGS_JSON =
   JSON.stringify(
     {
@@ -60,7 +81,7 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
   // Claude Code. Seeded with caller-provided instructions on first creation.
   const claudeLocalFile = path.join(groupDir, 'CLAUDE.local.md');
   if (!fs.existsSync(claudeLocalFile)) {
-    const body = opts?.instructions ? opts.instructions + '\n' : '';
+    const body = (opts?.instructions ? opts.instructions.trim() + '\n\n' : '') + DEFAULT_COMMUNICATION_GUIDANCE;
     fs.writeFileSync(claudeLocalFile, body);
     initialized.push('CLAUDE.local.md');
   }
