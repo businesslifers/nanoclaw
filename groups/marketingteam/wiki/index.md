@@ -33,6 +33,7 @@ Every wiki page should be linked here under its category with a one-line summary
 
 - [Reporting Pipeline](topics/reporting-pipeline.md) — Daily Collector → Analyst → Reporter pipeline; schedules, scripts, failure handling
 - [Client List](topics/client-list.md) — 7 active clients (6 Carpet One locations + Haus Of Rattan); QLD Capital paused Apr 24, 2026; account IDs and MCC structure
+- [Google Ads proxy h2 break](topics/google-ads-proxy-h2-break.md) — Jun 2026 incident: OneCLI proxy TLS interception breaks gRPC/h2; collector fails all accounts; fix options + May 31 month-end date bug noted
 
 ### Source Summaries
 *One page per ingested source.*

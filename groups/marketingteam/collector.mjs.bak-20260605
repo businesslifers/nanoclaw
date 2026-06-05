@@ -7,6 +7,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { JWT } from '/workspace/agent/node_modules/google-auth-library/build/src/index.js';
+import { grpc } from '/workspace/agent/node_modules/google-gax/build/src/index.js';
+import { GoogleAdsServiceClient } from '/workspace/agent/node_modules/google-ads-node/build/src/index.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -87,48 +89,26 @@ async function createAdsClient() {
   });
   const { access_token } = await jwtClient.authorize();
   ADS_BEARER_TOKEN = access_token;
-  // REST transport: the OneCLI proxy TLS-intercepts and only negotiates http/1.1,
-  // which breaks gRPC/h2 (SSL alert 120). We call the Google Ads REST endpoint
-  // directly with the bearer token above. No gRPC client needed; return a truthy
-  // placeholder so the 6 queryAds(adsClient, ...) call sites stay unchanged.
-  return { transport: 'rest' };
+  return new GoogleAdsServiceClient({ sslCreds: grpc.credentials.createSsl() });
 }
 
-// Google Ads REST returns camelCase JSON, but every downstream reader in this
-// file uses the proto snake_case field names. Normalise so consumers are untouched.
-function toSnakeCase(obj) {
-  if (Array.isArray(obj)) return obj.map(toSnakeCase);
-  if (obj !== null && typeof obj === 'object') {
-    return Object.fromEntries(
-      Object.entries(obj).map(([k, v]) => [
-        k.replace(/([A-Z])/g, '_$1').toLowerCase(),
-        toSnakeCase(v),
-      ])
-    );
-  }
-  return obj;
-}
-
-async function queryAds(_adsClient, customerId, query) {
-  const url = `https://googleads.googleapis.com/v23/customers/${customerId}/googleAds:searchStream`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${ADS_BEARER_TOKEN}`,
-      'developer-token': CONFIG.developerToken,
-      'login-customer-id': String(CONFIG.managerCustomerId).replace(/-/g, ''),
-    },
-    body: JSON.stringify({ query }),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Ads REST ${resp.status}: ${text}`);
-  }
-  const batches = await resp.json();
+async function queryAds(adsClient, customerId, query) {
   const rows = [];
-  for (const batch of (Array.isArray(batches) ? batches : [batches])) {
-    for (const row of (batch.results || [])) rows.push(toSnakeCase(row));
+  const stream = adsClient.searchStream(
+    { customer_id: customerId, query },
+    {
+      otherArgs: {
+        headers: {
+          'developer-token': CONFIG.developerToken,
+          authorization: `Bearer ${ADS_BEARER_TOKEN}`,
+        },
+      },
+    }
+  );
+  for await (const page of stream) {
+    for (const row of (page.results || [])) {
+      rows.push(row);
+    }
   }
   return rows;
 }
@@ -809,7 +789,7 @@ async function main() {
     }
   }
 
-  if (adsClient && typeof adsClient.close === 'function') await adsClient.close();
+  await adsClient.close();
 
   // Prune old files (after monthly rollup)
   if (periods.isFirstOfMonth) {

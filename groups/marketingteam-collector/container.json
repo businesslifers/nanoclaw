@@ -4,6 +4,16 @@
     "apt": [],
     "npm": []
   },
-  "additionalMounts": [],
-  "skills": "all"
+  "additionalMounts": [
+    {
+      "hostPath": "/home/admin/Agents/janet-v2/groups/marketingteam/wiki",
+      "containerPath": "team-wiki",
+      "readonly": true
+    }
+  ],
+  "skills": "all",
+  "provider": "claude",
+  "groupName": "Collector",
+  "assistantName": "Collector",
+  "agentGroupId": "ag-1777429951298-sb2cr5"
 }

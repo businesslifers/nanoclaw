@@ -23,6 +23,10 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
 
+## [2026-06-05] ingest | Google Ads proxy h2/gRPC break incident
+
+Collector lane diagnosed the Jun 3–4 collection failures: OneCLI proxy began TLS-intercepting and only negotiates http/1.1, breaking google-ads-node's gRPC/h2 requirement (SSL alert 120). Filed `topics/google-ads-proxy-h2-break.md` with root cause + 3 fix options (infra host exemption / proxy h2 support / app-side REST transport). Relayed to channel (msg 137), awaiting decision. Also recorded the separate, still-open May 31 month-end MTD date bug there.
+
 ## [2026-05-22] lint | 3 stale claims fixed in reporting-pipeline.md
 
 `reporting-pipeline.md` had not been updated when QLD Capital was paused. Fixed:

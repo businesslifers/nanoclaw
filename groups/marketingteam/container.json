@@ -10,5 +10,6 @@
   "skills": "all",
   "groupName": "Marketing Team",
   "assistantName": "Marketing Team",
-  "agentGroupId": "ag-1777429834314-u4riyu"
+  "agentGroupId": "ag-1777429834314-u4riyu",
+  "model": "claude-opus-4-8"
 }

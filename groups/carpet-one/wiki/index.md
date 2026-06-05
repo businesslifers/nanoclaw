@@ -19,7 +19,7 @@ Every wiki page should be linked here under its category with a one-line summary
 ### Entities
 *People, places, organisations, products, projects.*
 
-_(none yet)_
+- [Carpet One — Brand Profile](entities/carpet-one-brand.md) — Full brand profile: positioning, writing style, visual style, product range, all 51 Australian store locations with contact details.
 
 ### Concepts
 *Ideas, frameworks, definitions.*
