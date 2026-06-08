@@ -16,6 +16,7 @@ NanoClaw doesn't ship channels in trunk. This skill copies the Slack adapter in 
 Skip to **Credentials** if all of these are already in place:
 
 - `src/channels/slack.ts` exists
+- `src/channels/slack-registration.test.ts` exists
 - `src/channels/index.ts` contains `import './slack.js';`
 - `@chat-adapter/slack` is listed in `package.json` dependencies
 - `patches/@chat-adapter__slack@4.27.0.patch` exists and is registered under `patchedDependencies` in `pnpm-workspace.yaml`
@@ -28,10 +29,11 @@ Otherwise continue. Every step below is safe to re-run.
 git fetch origin channels
 ```
 
-### 2. Copy the adapter
+### 2. Copy the adapter and its registration test
 
 ```bash
-git show origin/channels:src/channels/slack.ts > src/channels/slack.ts
+git show origin/channels:src/channels/slack.ts                 > src/channels/slack.ts
+git show origin/channels:src/channels/slack-registration.test.ts > src/channels/slack-registration.test.ts
 ```
 
 ### 3. Append the self-registration import
@@ -76,11 +78,16 @@ pnpm install @chat-adapter/slack@4.27.0
 > `splitOversizedSectionBlocks` post-processor in `cardToBlockKit`) or drop it
 > once the fix lands upstream in [vercel/chat](https://github.com/vercel/chat).
 
-### 5. Build
+### 5. Build and validate
 
 ```bash
 pnpm run build
+pnpm exec vitest run src/channels/slack-registration.test.ts
 ```
+
+Both must be clean before proceeding. `slack-registration.test.ts` is the one integration test: it imports the real channel barrel and asserts the registry contains `slack`. It goes red if the `import './slack.js';` line is deleted or drifts, if the barrel fails to evaluate, or if `@chat-adapter/slack` isn't installed (the import throws) — so it also implicitly verifies the dependency from step 4. The adapter also calls core's `createChatSdkBridge(...)`; that typed core-API consumption is guarded by `pnpm run build`.
+
+End-to-end message delivery against a real Slack workspace is verified manually once the service is running — see Next Steps and the webhook setup above.
 
 ## Credentials
 
