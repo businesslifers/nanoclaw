@@ -44,8 +44,24 @@ import './slack.js';
 ### 4. Install the adapter package (pinned)
 
 ```bash
-pnpm install @chat-adapter/slack@4.26.0
+pnpm install @chat-adapter/slack@4.30.0
 ```
+
+> **Slack 3000-char section limit:** Slack rejects the **entire** message
+> (`invalid_blocks`) if any `section` block's text exceeds 3000 chars — which
+> on older adapter versions silently dropped long replies. As of
+> `@chat-adapter/slack@4.30.0` the SDK handles this itself (a `LIMITS` table in
+> `dist/blocks.js` truncates section text to 3000, caps `header` text at 150,
+> and slices to Slack's 50-block max), so no manual patch is needed. Note it
+> **truncates** an oversized single section rather than splitting it across
+> blocks, so a >3000-char unbroken section (e.g. a long code block) loses its
+> tail.
+>
+> **Keep the family version-aligned:** `@chat-adapter/slack`,
+> `@chat-adapter/telegram`, and `chat` must be on the same version — they ship
+> in lockstep and share the `chat` core `ChatInstance` type. Bumping one alone
+> breaks the host build with a `ChatInstance` type mismatch. If you bump Slack,
+> bump the others to match.
 
 ### 5. Build
 
