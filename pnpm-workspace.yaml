@@ -5,7 +5,6 @@ onlyBuiltDependencies:
   - sharp
 
 patchedDependencies:
-  '@chat-adapter/slack@4.27.0': patches/@chat-adapter__slack@4.27.0.patch
   '@nanoco/nanoclaw-dashboard@0.3.0': patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
 
 pnpm:

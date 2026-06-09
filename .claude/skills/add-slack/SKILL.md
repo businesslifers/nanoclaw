@@ -18,8 +18,7 @@ Skip to **Credentials** if all of these are already in place:
 - `src/channels/slack.ts` exists
 - `src/channels/slack-registration.test.ts` exists
 - `src/channels/index.ts` contains `import './slack.js';`
-- `@chat-adapter/slack` is listed in `package.json` dependencies
-- `patches/@chat-adapter__slack@4.27.0.patch` exists and is registered under `patchedDependencies` in `pnpm-workspace.yaml`
+- `@chat-adapter/slack@4.30.0` is listed in `package.json` dependencies
 
 Otherwise continue. Every step below is safe to re-run.
 
@@ -44,39 +43,27 @@ Append to `src/channels/index.ts` (skip if the line is already present):
 import './slack.js';
 ```
 
-### 4. Install the adapter package (pinned, with the Slack 3000-char fix)
-
-Vercel's Chat SDK (`@chat-adapter/slack`) builds Slack `section` blocks with no
-length cap. Slack rejects the **entire** message if any section's text exceeds
-3000 chars (`invalid_blocks`), so long agent replies are silently dropped. The
-bug is unfixed upstream through at least 4.30.0, so we carry a pnpm patch that
-splits oversized `section`/`context` blocks at newline/word boundaries, caps
-`header` text at 150 chars, and guards Slack's 50-block-per-message limit.
-
-Copy the patch in:
+### 4. Install the adapter package (pinned)
 
 ```bash
-mkdir -p patches
-git show origin/channels:patches/@chat-adapter__slack@4.27.0.patch > 'patches/@chat-adapter__slack@4.27.0.patch'
+pnpm install @chat-adapter/slack@4.30.0
 ```
 
-Register it under `patchedDependencies` in `pnpm-workspace.yaml` (create the key if it doesn't exist):
-
-```yaml
-patchedDependencies:
-  '@chat-adapter/slack@4.27.0': patches/@chat-adapter__slack@4.27.0.patch
-```
-
-Then install — pnpm applies the patch during install:
-
-```bash
-pnpm install @chat-adapter/slack@4.27.0
-```
-
-> **Maintenance:** the patch is version-locked to `4.27.0`. If you bump the
-> package, regenerate it (`pnpm patch @chat-adapter/slack@<new>`, re-add the
-> `splitOversizedSectionBlocks` post-processor in `cardToBlockKit`) or drop it
-> once the fix lands upstream in [vercel/chat](https://github.com/vercel/chat).
+> **Slack 3000-char section limit:** Slack rejects the **entire** message
+> (`invalid_blocks`) if any `section` block's text exceeds 3000 chars — which
+> used to silently drop long agent replies. As of `@chat-adapter/slack@4.30.0`
+> the SDK handles this itself: a `LIMITS` table truncates section text to 3000
+> chars, caps `header` text at 150, and slices messages to Slack's 50-block
+> max (`dist/blocks.js`). We previously carried a pnpm patch (against `4.27.0`'s
+> `dist/index.js`) that *split* oversized sections into multiple blocks rather
+> than truncating; that patch was dropped at the 4.30.0 bump. Trade-off to know:
+> 4.30.0 **truncates** a single >3000-char section (tail lost) where the old
+> patch preserved all content across multiple blocks. The agent formatter
+> usually breaks replies into multiple blocks, so single oversized sections are
+> rare (mainly long unbroken code blocks). Keep `@chat-adapter/slack`,
+> `@chat-adapter/telegram`, and `chat` aligned on the same version — they ship
+> in lockstep and share the `chat` core types; a version skew breaks the host
+> build (`ChatInstance` type mismatch).
 
 ### 5. Build and validate
 
