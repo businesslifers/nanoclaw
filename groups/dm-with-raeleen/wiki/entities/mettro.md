@@ -3,12 +3,12 @@
 _Entity: Agency_
 
 ## Overview
-Mettro is a digital marketing agency. Raels (Raeleen Robertson) is the owner/director. The agency runs a suite of AI-assisted tools and channels under the "Mate" brand (MateSuite).
+Mettro is a digital agency. The company name is **Mettro** — never "Mettro Digital". Raels (Raeleen Robertson) is the Managing Director. The agency runs a suite of AI-assisted tools and channels under the "Mate" brand (MateSuite).
 
 Founded: 29 August 2001 (24 years as of 2026)
 
 ## Key People
-- **Raels (Raeleen Robertson)** — Owner/director. Strategic decisions, senior client relationships, account management.
+- **Raels (Raeleen Robertson)** — Managing Director. Strategic decisions, senior client relationships, account management. Full name for sign-offs: Raeleen Robertson.
 - **Adam** — Technical/ops. Responsible for setting up APIs, infrastructure, channel creation. Does not action ClickUp tasks — never assign tasks to Adam.
 - **Tracey** — Day-to-day operations, client correspondence, contact updates.
 - **Luisa** — On-staff writer. Main pilot for the #content team.
@@ -50,6 +50,26 @@ Founded: 29 August 2001 (24 years as of 2026)
 - Mettro AI doc ID: `8ca58cc-93956`
 - Mettro Knowledge Base (wiki mirror): `8ca58cc-94596`
 - **Estimates/proposals** live in the **Deals list** — not the Clients list
+
+## Rate Card (2026)
+
+Current rates for all estimates and proposals. Template: "Mettro Estimate & Rate Card 2026.xlsx" (two sheets: Estimate, Rates & Settings).
+
+| Role | Rate ex GST |
+|---|---|
+| Strategy | $270/hr |
+| Project Management | $210/hr |
+| Design | $210/hr |
+| Development | $230/hr |
+| Integration & Technical | $250/hr |
+| Quality Assurance | $170/hr |
+| Content Entry | $170/hr |
+| Standard Support | $200/hr |
+| External Contractor | $200/hr |
+
+Settings: GST 10%, Contingency 10% (standard), Discount 0% (adjustable per project). After-hours multiplier: 2x.
+
+Estimate format: Type/Scope/Price/Role 1/Hrs/Role 2/Hrs/Role 3/Hrs/Material cost/Line total/Section key. Row types: Header (section total in Price col), Item, Spacer. Build script lives at `/workspace/agent/drafts/` — regenerate with `node /tmp/build-dtet-estimate.js`.
 
 ## Email Drafting Conventions
 - Always include a **subject line** in every email draft

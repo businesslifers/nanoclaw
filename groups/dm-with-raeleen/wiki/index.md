@@ -36,3 +36,4 @@ ClickUp Doc ID: `8ca58cc-94596`
 | #crm — Contact Intelligence System | `topics/crm-spec.md` | `8ca58cc-23196` | CRM spec summary, status, integrations |
 | #content — Content Team | `topics/content-team-spec.md` | `8ca58cc-23216` | Content team spec summary, status, blockers |
 | Cool Ideas Board | `topics/cool-ideas-board.md` | — | ClickUp list for saving tools/ideas; field IDs, label IDs, workflow |
+| QLD Digital Service Standard | `topics/qld-digital-service-standard.md` | — | 13 criteria, correct URL, relevance to DTET project |
