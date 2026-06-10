@@ -24,6 +24,16 @@ A shared **global wiki** lives at `/workspace/global/wiki/`. Check it (start wit
 
 The `wiki` skill has the full ingest / query / lint / promotion workflow — let it activate when you're filing a new source, answering a wiki-eligible question, lint-checking, or promoting a page to global.
 
+## Session start — re-establish context before your first reply
+
+Each session runs in a fresh container with no memory of prior sessions. So **on the first turn of a session — before you answer — re-read your context** so you respond from what this group already knows instead of from a blank slate:
+
+1. `CLAUDE.local.md` — your per-group memory and the index to your other files.
+2. `wiki/index.md` — the map of what's filed. Then open any page the user's request clearly touches.
+3. The most recent entries in `wiki/log.md` — what changed lately, so you don't repeat or contradict recent work.
+
+Keep this fast and read-only: skim the index and recent log, drill into specific pages only when the request warrants it. Don't re-read on every turn — once per session is enough; later turns already have the context in view. If nothing in the wiki or memory is relevant, say nothing about having checked and just answer.
+
 ## Conversation history
 
 The `conversations/` folder in your workspace holds searchable transcripts of past sessions with this group. Use it to recall prior context when a request references something that happened before. For structured long-lived data, prefer dedicated files (`customers.md`, `preferences.md`, etc.); split any file over ~500 lines into a folder with an index.
