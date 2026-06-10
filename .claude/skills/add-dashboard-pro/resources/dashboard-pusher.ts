@@ -1095,5 +1095,16 @@ function collectWikis() {
     name: g.name,
     folder: g.folder,
   }));
-  return listWikis(process.cwd(), groups);
+  const wikis = listWikis(process.cwd(), groups);
+  // Surface the repo-level "global" wiki even when it lives under
+  // groups/global/wiki/ rather than the convention root <repoRoot>/wiki/.
+  // Only synthesize it when discovery didn't already find a global wiki, so a
+  // real root wiki/ (or a registered 'global' agent group) still takes priority.
+  if (!wikis.some((w) => w.isGlobal)) {
+    const fallback = listWikis(process.cwd(), [{ id: '_global', name: 'Global', folder: 'global' }]).find(
+      (w) => w.id === '_global',
+    );
+    if (fallback) wikis.push({ ...fallback, isGlobal: true });
+  }
+  return wikis;
 }

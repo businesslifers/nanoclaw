@@ -8627,7 +8627,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa53ce9376
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
-@@ -0,0 +1,630 @@
+@@ -0,0 +1,797 @@
 +// dist/ui/pages/wikis.js
 +import { layout } from '../layout.js';
 +
@@ -8710,15 +8710,87 @@ index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa
 +    return w.isGlobal ? 'Global' : 'Team';
 +  }
 +
++  function cardHtml(w, isLead) {
++    var accent = colorFor(w.id);
++    var desc = w.description
++      ? '<p class="wk-card-desc">' + esc(w.description) + '</p>'
++      : '<p class="wk-card-desc wk-muted">No description — add one to index.md front matter.</p>';
++    var badge = w.isGlobal
++      ? '<span class="wk-card-badge">global</span>'
++      : (isLead ? '<span class="wk-card-badge">team lead</span>' : '');
++    return (
++      '<a class="wk-card" style="--accent: ' + accent + '" ' +
++         'href="/dashboard/wikis?id=' + encodeURIComponent(w.id) + '">' +
++        '<div class="wk-card-top">' +
++          '<div class="wk-card-mono" aria-hidden="true">' + esc(monoLetter(w.title)) + '</div>' +
++          badge +
++        '</div>' +
++        '<h3 class="wk-card-title">' + esc(w.title) + '</h3>' +
++        desc +
++        '<div class="wk-card-foot">' +
++          '<span class="wk-card-pill">' + pluralPages(w.pageCount) + '</span>' +
++          '<span class="wk-card-updated">Updated ' + esc(rel(w.lastModified)) + '</span>' +
++        '</div>' +
++      '</a>'
++    );
++  }
++
++  function globalHeroHtml(w) {
++    var accent = colorFor(w.id);
++    var desc = w.description
++      ? esc(w.description)
++      : 'Shared knowledge base available to every team.';
++    return (
++      '<a class="wk-hero" style="--accent: ' + accent + '" ' +
++         'href="/dashboard/wikis?id=' + encodeURIComponent(w.id) + '">' +
++        '<div class="wk-hero-mono" aria-hidden="true">' + esc(monoLetter(w.title)) + '</div>' +
++        '<div class="wk-hero-text">' +
++          '<div class="wk-hero-eyebrow">Global</div>' +
++          '<h3 class="wk-hero-title">' + esc(w.title) + '</h3>' +
++          '<p class="wk-hero-desc">' + desc + '</p>' +
++          '<div class="wk-hero-foot">' +
++            '<span class="wk-card-pill">' + pluralPages(w.pageCount) + '</span>' +
++            '<span class="wk-card-updated">Updated ' + esc(rel(w.lastModified)) + '</span>' +
++          '</div>' +
++        '</div>' +
++      '</a>'
++    );
++  }
++
++  // Flat fallback used when the agent-group hierarchy is unavailable — keeps the
++  // page useful (global first, then alphabetical) instead of dumping every wiki
++  // into a single "Other" bucket.
++  function renderFlat(root, head, wikis) {
++    wikis.sort(function(a,b){
++      if (a.isGlobal !== b.isGlobal) return a.isGlobal ? -1 : 1;
++      return String(a.title).localeCompare(String(b.title));
++    });
++    var cards = wikis.map(function(w){ return cardHtml(w, false); }).join('');
++    root.innerHTML =
++      '<div class="wk-listpage">' + head +
++        '<div class="wk-section-head">' +
++          '<h2 class="wk-section-title">All Wikis ' +
++            '<span class="wk-section-count">(' + esc(wikis.length) + ')</span>' +
++          '</h2>' +
++        '</div>' +
++        '<div class="wk-grid">' + cards + '</div>' +
++      '</div>';
++  }
++
 +  async function loadList() {
 +    try {
-+      var wikis = await api('/api/wikis');
++      var both = await Promise.all([
++        api('/api/wikis'),
++        api('/api/agent-groups').catch(function(){ return []; }),
++      ]);
++      var wikis = both[0] || [];
++      var groups = both[1] || [];
 +      var root = document.getElementById('wk-root');
 +      var head =
 +        '<header class="wk-pagehead">' +
 +          '<div class="wk-pagehead-text">' +
 +            '<h1 class="wk-pagehead-title">Wikis</h1>' +
-+            '<p class="wk-pagehead-sub">Knowledge base and documentation for agents, workflows, and operations.</p>' +
++            '<p class="wk-pagehead-sub">Knowledge base and documentation, organized by team.</p>' +
 +          '</div>' +
 +        '</header>';
 +      if (!wikis || wikis.length === 0) {
@@ -8729,44 +8801,97 @@ index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa
 +          '</div>';
 +        return;
 +      }
-+      wikis.sort(function(a,b){
-+        if (a.isGlobal !== b.isGlobal) return a.isGlobal ? -1 : 1;
-+        return String(a.title).localeCompare(String(b.title));
++
++      // No hierarchy available → degrade to the flat list rather than a
++      // misleading single "Other" group.
++      if (!Array.isArray(groups) || groups.length === 0) {
++        renderFlat(root, head, wikis);
++        return;
++      }
++
++      // Trace each wiki to its owning team. WikiMeta.id === agent_groups.id for
++      // per-team wikis; a wiki's team is the top-most ancestor (lead) of that
++      // group, walked up via parentId. Leads that head a real team have at least
++      // one child; standalone agents (e.g. DM agents) fall to "Other".
++      var byId = {};
++      groups.forEach(function(g){ byId[g.id] = g; });
++      function leadOf(g) {
++        var cur = g, guard = 0;
++        while (cur && cur.parentId && byId[cur.parentId] && guard++ < 50) {
++          cur = byId[cur.parentId];
++        }
++        return cur;
++      }
++      var hasChildren = {};
++      groups.forEach(function(g){
++        if (g.parentId && byId[g.parentId]) hasChildren[g.parentId] = true;
 +      });
-+      var cards = wikis.map(function(w) {
-+        var accent = colorFor(w.id);
-+        var desc = w.description
-+          ? '<p class="wk-card-desc">' + esc(w.description) + '</p>'
-+          : '<p class="wk-card-desc wk-muted">No description — add one to index.md front matter.</p>';
-+        var globalBadge = w.isGlobal
-+          ? '<span class="wk-card-badge">global</span>'
-+          : '';
-+        return (
-+          '<a class="wk-card" style="--accent: ' + accent + '" ' +
-+             'href="/dashboard/wikis?id=' + encodeURIComponent(w.id) + '">' +
-+            '<div class="wk-card-top">' +
-+              '<div class="wk-card-mono" aria-hidden="true">' + esc(monoLetter(w.title)) + '</div>' +
-+              globalBadge +
++
++      var globalWikis = [];
++      var teams = {};      // leadId -> { lead, wikis: [] }
++      var standalone = []; // DM agents or wikis whose group is unknown
++      wikis.forEach(function(w){
++        if (w.isGlobal) { globalWikis.push(w); return; }
++        var g = byId[w.id];
++        var lead = g ? leadOf(g) : null;
++        if (lead && hasChildren[lead.id]) {
++          (teams[lead.id] = teams[lead.id] || { lead: lead, wikis: [] }).wikis.push(w);
++        } else {
++          standalone.push(w);
++        }
++      });
++
++      var sections = '';
++
++      if (globalWikis.length) {
++        globalWikis.sort(function(a,b){ return String(a.title).localeCompare(String(b.title)); });
++        sections +=
++          '<section class="wk-team-section wk-global-section">' +
++            '<div class="wk-section-head">' +
++              '<h2 class="wk-section-title">Global</h2>' +
 +            '</div>' +
-+            '<h3 class="wk-card-title">' + esc(w.title) + '</h3>' +
-+            desc +
-+            '<div class="wk-card-foot">' +
-+              '<span class="wk-card-pill">' + pluralPages(w.pageCount) + '</span>' +
-+              '<span class="wk-card-updated">Updated ' + esc(rel(w.lastModified)) + '</span>' +
++            '<div class="wk-hero-grid">' +
++              globalWikis.map(function(w){ return globalHeroHtml(w); }).join('') +
 +            '</div>' +
-+          '</a>'
-+        );
-+      }).join('');
-+      root.innerHTML =
-+        '<div class="wk-listpage">' +
-+          head +
-+          '<div class="wk-section-head">' +
-+            '<h2 class="wk-section-title">All Wikis ' +
-+              '<span class="wk-section-count">(' + esc(wikis.length) + ')</span>' +
-+            '</h2>' +
-+          '</div>' +
-+          '<div class="wk-grid">' + cards + '</div>' +
-+        '</div>';
++          '</section>';
++      }
++
++      Object.keys(teams).sort(function(a,b){
++        return String(teams[a].lead.name).localeCompare(String(teams[b].lead.name));
++      }).forEach(function(tid){
++        var t = teams[tid];
++        t.wikis.sort(function(a,b){
++          var al = (a.id === t.lead.id) ? 0 : 1, bl = (b.id === t.lead.id) ? 0 : 1;
++          if (al !== bl) return al - bl;
++          return String(a.title).localeCompare(String(b.title));
++        });
++        var cards = t.wikis.map(function(w){ return cardHtml(w, w.id === t.lead.id); }).join('');
++        sections +=
++          '<section class="wk-team-section">' +
++            '<div class="wk-section-head">' +
++              '<h2 class="wk-section-title">' + esc(t.lead.name) + ' ' +
++                '<span class="wk-section-count">(' + esc(t.wikis.length) + ')</span>' +
++              '</h2>' +
++            '</div>' +
++            '<div class="wk-grid">' + cards + '</div>' +
++          '</section>';
++      });
++
++      if (standalone.length) {
++        standalone.sort(function(a,b){ return String(a.title).localeCompare(String(b.title)); });
++        var ocards = standalone.map(function(w){ return cardHtml(w, false); }).join('');
++        sections +=
++          '<section class="wk-team-section">' +
++            '<div class="wk-section-head">' +
++              '<h2 class="wk-section-title">Other ' +
++                '<span class="wk-section-count">(' + esc(standalone.length) + ')</span>' +
++              '</h2>' +
++            '</div>' +
++            '<div class="wk-grid">' + ocards + '</div>' +
++          '</section>';
++      }
++
++      root.innerHTML = '<div class="wk-listpage">' + head + sections + '</div>';
 +    } catch (e) {
 +      document.getElementById('wk-root').innerHTML =
 +        '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
@@ -9023,6 +9148,48 @@ index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa
 +    }
 +    .wk-card-updated { font-size: 11px; color: #64748b; }
 +    .wk-muted { color: #64748b; font-style: italic; }
++
++    /* ---- team sections ---- */
++    .wk-team-section { margin-bottom: 36px; }
++    .wk-global-section { margin-bottom: 40px; }
++
++    /* ---- global hero ---- */
++    .wk-hero-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
++    .wk-hero {
++      --accent: #67e8f9;
++      display: flex; align-items: flex-start; gap: 18px;
++      padding: 22px 24px;
++      background:
++        radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 55%),
++        #111728;
++      border: 1px solid color-mix(in srgb, var(--accent) 28%, #1f2944);
++      border-radius: 14px;
++      text-decoration: none; color: #e2e8f0;
++      transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
++    }
++    .wk-hero:hover {
++      border-color: color-mix(in srgb, var(--accent) 55%, #1f2944);
++      transform: translateY(-1px);
++      box-shadow: 0 8px 26px color-mix(in srgb, var(--accent) 14%, transparent);
++    }
++    .wk-hero-mono {
++      width: 48px; height: 48px; flex-shrink: 0;
++      border-radius: 12px;
++      display: flex; align-items: center; justify-content: center;
++      background: color-mix(in srgb, var(--accent) 18%, transparent);
++      color: var(--accent);
++      font-weight: 700; font-size: 20px;
++      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
++    }
++    .wk-hero-text { flex: 1; min-width: 0; }
++    .wk-hero-eyebrow {
++      font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
++      color: var(--accent); text-transform: uppercase;
++      margin-bottom: 4px;
++    }
++    .wk-hero-title { margin: 0 0 6px; font-size: 18px; font-weight: 600; color: #e2e8f0; }
++    .wk-hero-desc { margin: 0 0 14px; font-size: 13.5px; color: #94a3b8; line-height: 1.5; }
++    .wk-hero-foot { display: flex; align-items: center; gap: 12px; }
 +
 +    /* ---- inner pages (landing + page) ---- */
 +    .wk-page { display: grid; grid-template-columns: 280px 1fr; gap: 0; min-height: calc(100vh - 56px); }
