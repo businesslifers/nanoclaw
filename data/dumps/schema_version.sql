@@ -20,4 +20,5 @@ INSERT INTO schema_version VALUES(12,'dashboard-audit','2026-04-30T04:41:27.838Z
 INSERT INTO schema_version VALUES(13,'container-configs','2026-05-11T01:02:02.903Z');
 INSERT INTO schema_version VALUES(14,'cli-scope','2026-05-11T01:02:02.910Z');
 INSERT INTO schema_version VALUES(15,'agent-group-hidden-dashboard','2026-05-11T01:42:25.493Z');
+INSERT INTO schema_version VALUES(16,'messaging-group-instance','2026-06-12T00:38:51.753Z');
 COMMIT;

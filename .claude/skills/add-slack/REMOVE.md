@@ -10,10 +10,10 @@ Delete the self-registration import from `src/channels/index.ts` (skip if alread
 import './slack.js';
 ```
 
-Then delete the copied adapter and its registration test:
+Then delete the copied adapter:
 
 ```bash
-rm -f src/channels/slack.ts src/channels/slack-registration.test.ts
+rm -f src/channels/slack.ts
 ```
 
 ## 2. Remove credentials
