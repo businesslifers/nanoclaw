@@ -132,6 +132,32 @@ export const CONFIG: Entry[] = [
     type: 'boolean',
     default: false,
   },
+
+  // Uninstall route — handled in auto.ts before any setup work begins.
+  {
+    key: 'uninstall',
+    label: 'Uninstall',
+    help: 'Remove this NanoClaw copy (service, containers, data, vault agents). Asks per group.',
+    surface: 'flag',
+    type: 'boolean',
+    default: false,
+  },
+  {
+    key: 'dryRun',
+    label: 'Uninstall dry run',
+    help: 'With --uninstall: preview what would be removed without changing anything.',
+    surface: 'flag',
+    type: 'boolean',
+    default: false,
+  },
+  {
+    key: 'yes',
+    label: 'Uninstall without prompts',
+    help: 'With --uninstall: delete everything found without asking (orphan vault agents are still kept).',
+    surface: 'flag',
+    type: 'boolean',
+    default: false,
+  },
 ];
 
 // ─── name derivation ───────────────────────────────────────────────────

@@ -36,6 +36,14 @@ export interface MessagingGroup {
   id: string;
   channel_type: string;
   platform_id: string;
+  /**
+   * Adapter-instance name. Defaults to channel_type (the "default instance").
+   * Column is NOT NULL (migration 018 backfills instance = channel_type);
+   * optional on the TS type per the denied_at convention so fixtures that
+   * build MessagingGroup objects don't need updating — createMessagingGroup
+   * stamps the default.
+   */
+  instance?: string;
   name: string | null;
   is_group: number; // 0 | 1
   unknown_sender_policy: UnknownSenderPolicy;

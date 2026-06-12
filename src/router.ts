@@ -162,8 +162,10 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   if (messageInterceptor && (await messageInterceptor(event))) return;
 
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
-  //    WhatsApp, iMessage, email) collapse threads to the channel.
-  const adapter = getChannelAdapter(event.channelType);
+  //    WhatsApp, iMessage, email) collapse threads to the channel. Resolved
+  //    by the RECEIVING instance — sibling instances of one platform can
+  //    differ in thread support.
+  const adapter = getChannelAdapter(event.instance ?? event.channelType);
   if (adapter && !adapter.supportsThreads) {
     event = { ...event, threadId: null };
   }
@@ -173,8 +175,14 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   // 1. Combined lookup: messaging_group row + count of wired agents in a
   //    single query. Cheap short-circuit for the common "unwired channel"
   //    case — one DB read and we're out, no auto-create, no sender
-  //    resolution, no log spam.
-  const found = getMessagingGroupWithAgentCount(event.channelType, event.platformId);
+  //    resolution, no log spam. Exact-on-instance: an unknown named
+  //    instance falls through to auto-create rather than hijacking a
+  //    sibling instance's row.
+  const found = getMessagingGroupWithAgentCount(
+    event.channelType,
+    event.platformId,
+    event.instance ?? event.channelType,
+  );
 
   let mg: MessagingGroup;
   let agentCount: number;
@@ -188,6 +196,9 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       id: mgId,
       channel_type: event.channelType,
       platform_id: event.platformId,
+      // Persist the receiving instance — without this, the first bot's row
+      // would absorb every sibling instance's traffic.
+      instance: event.instance ?? event.channelType,
       name: null,
       is_group: event.message.isGroup ? 1 : 0,
       unknown_sender_policy: 'request_approval',
@@ -473,7 +484,15 @@ async function deliverToAgent(
   if (wake) {
     // Typing indicator + status reaction + wake are only for the engaged
     // branch; accumulated messages sit silently until a real trigger fires.
-    startTypingRefresh(session.id, session.agent_group_id, event.channelType, event.platformId, event.threadId);
+    // Typing fires via the adapter instance that owns this chat's row.
+    startTypingRefresh(
+      session.id,
+      session.agent_group_id,
+      event.channelType,
+      event.platformId,
+      event.threadId,
+      mg.instance,
+    );
     startStatusTracking(
       session.id,
       session.agent_group_id,

@@ -50,6 +50,8 @@ import {
 } from './lib/setup-config-parse.js';
 import { runAdvancedScreen } from './lib/setup-config-screen.js';
 import { runWindowedStep } from './lib/windowed-runner.js';
+import { runUninstallFlow } from './uninstall/flow.js';
+import { detectExistingInstall } from './uninstall/scan.js';
 import { detectRegisteredGroups, detectExistingDisplayName } from './environment.js';
 import { pollHealth } from './onecli.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
@@ -90,6 +92,17 @@ async function main(): Promise<void> {
   let configValues = { ...readFromEnv(), ...flagResult.values };
   applyToEnv(configValues);
 
+  // --uninstall routes to the uninstall flow before any setup side effects —
+  // in particular before initProgressionLog(), so an uninstall never resets
+  // logs/setup.log on its way to (possibly) deleting logs/ entirely.
+  if (configValues.uninstall === true) {
+    await runUninstallFlow({
+      dryRun: configValues.dryRun === true,
+      yes: configValues.yes === true,
+      invokedFrom: 'flag',
+    });
+  }
+
   printIntro();
   initProgressionLog();
   phEmit('auto_started');
@@ -122,6 +135,37 @@ async function main(): Promise<void> {
       .map((s) => s.trim())
       .filter(Boolean),
   );
+
+  // Offer removal when setup lands on an existing install. Skipped on every
+  // resume path — both the fail() retry and the sg-docker re-exec pass
+  // NANOCLAW_SKIP (and the latter sets NANOCLAW_REEXEC_SG) — so the prompt
+  // appears at most once per fresh run.
+  const isResume = process.env.NANOCLAW_REEXEC_SG === '1' || skip.size > 0;
+  if (!isResume && detectExistingInstall(process.cwd())) {
+    const action = ensureAnswer(
+      await brightSelect<'keep' | 'uninstall'>({
+        message: 'NanoClaw is already installed in this folder. What would you like to do?',
+        options: [
+          {
+            value: 'keep',
+            label: 'Keep it & continue setup',
+            hint: 'recommended — re-running setup is safe',
+          },
+          {
+            value: 'uninstall',
+            label: 'Uninstall NanoClaw & exit',
+            hint: 'removes service, data, and agent files — asks before each step',
+          },
+        ],
+        initialValue: 'keep',
+      }),
+    ) as 'keep' | 'uninstall';
+    setupLog.userInput('existing_install', action);
+    phEmit('existing_install_detected', { action });
+    if (action === 'uninstall') {
+      await runUninstallFlow({ dryRun: false, yes: false, invokedFrom: 'setup-detection' });
+    }
+  }
 
   if (!skip.has('environment')) {
     const res = await runQuietStep('environment', {
