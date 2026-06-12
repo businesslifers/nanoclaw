@@ -4,7 +4,13 @@
     "apt": [],
     "npm": []
   },
-  "additionalMounts": [],
+  "additionalMounts": [
+    {
+      "hostPath": "/home/admin/.local/bin/rtk",
+      "containerPath": "/usr/local/bin/rtk",
+      "readonly": true
+    }
+  ],
   "skills": "all",
   "groupName": "Project Management Team",
   "assistantName": "Project Management Team",

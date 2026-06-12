@@ -6,7 +6,13 @@
       "google-ads-node@^23.0.0"
     ]
   },
-  "additionalMounts": [],
+  "additionalMounts": [
+    {
+      "hostPath": "/home/admin/.local/bin/rtk",
+      "containerPath": "/usr/local/bin/rtk",
+      "readonly": true
+    }
+  ],
   "skills": "all",
   "groupName": "Marketing Team",
   "assistantName": "Marketing Team",
