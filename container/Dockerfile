@@ -23,7 +23,6 @@ ARG INSTALL_CJK_FONTS=false
 # runtime) is pinned here because it installs from a different source.
 ARG BUN_VERSION=1.3.12
 ARG FIGMA_DEVELOPER_MCP_VERSION=0.11.0
-ARG CODEX_VERSION=0.124.0
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -107,9 +106,6 @@ RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 COPY cli-tools.json install-cli-tools.sh /tmp/
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     sh /tmp/install-cli-tools.sh /tmp/cli-tools.json
-
-RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "@openai/codex@${CODEX_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "figma-developer-mcp@${FIGMA_DEVELOPER_MCP_VERSION}"
