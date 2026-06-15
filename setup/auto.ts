@@ -40,8 +40,12 @@ import { runTeamsChannel } from './channels/teams.js';
 import { runTelegramChannel } from './channels/telegram.js';
 import { runWhatsAppChannel } from './channels/whatsapp.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
+import { getSetupProvider, listSetupProviders } from './providers/registry.js';
+// Provider payloads self-register their picker entry + auth on import.
+import './providers/index.js';
 import { brightSelect } from './lib/bright-select.js';
 import { offerClaudeOnFailure } from './lib/claude-handoff.js';
+import { setPickedProvider } from './lib/picked-provider.js';
 import {
   applyToEnv,
   parseFlags,
@@ -323,8 +327,54 @@ async function main(): Promise<void> {
     }
   }
 
+  let agentProvider: string | undefined;
   if (!skip.has('auth')) {
-    await runAuthStep();
+    // Agent runtime pick. Claude is the default and a no-op — choosing it
+    // runs the existing Claude auth flow unchanged. A branch provider walks
+    // its own auth (e.g. Codex: ChatGPT subscription or API key, vault-only)
+    // and verifies its payload is wired. The pick installs and authenticates
+    // the runtime; it is NOT an install-wide default — and it is NOT a
+    // creation flag. Provider is a DB property of a group: the creation flows
+    // create provider-agnostic groups, and setup sets the picked provider on
+    // each via `ncl groups config update --provider` right after creating it
+    // (the creation scripts inherit it and apply at create — see picked-provider). Existing groups switch the
+    // same way (docs/provider-migration.md).
+    agentProvider = await askAgentProviderChoice();
+    setPickedProvider(agentProvider);
+    let providerEntry = getSetupProvider(agentProvider);
+    if (agentProvider !== 'claude' && !providerEntry) {
+      // A non-claude provider picked from the hard-wired list isn't wired in
+      // this install yet — install it via its self-contained script (channel
+      // style, idempotent: self-skips if already installed), rebuild the image
+      // (the container step already ran, the Dockerfile just changed), then
+      // load the payload's setup module so it self-registers.
+      const install = await runQuietChild(
+        `add-${agentProvider}`,
+        'bash',
+        [`setup/add-${agentProvider}.sh`],
+        {
+          running: `Installing ${agentProvider}…`,
+          done: `${agentProvider} installed.`,
+        },
+      );
+      if (!install.ok) {
+        await fail(
+          `add-${agentProvider}`,
+          `Couldn't install ${agentProvider}.`,
+          'See logs/setup-steps/ for details, then retry setup.',
+        );
+      }
+      p.log.info(brandBody('Rebuilding the container image with the new provider…'));
+      spawnSync('./container/build.sh', [], { stdio: 'inherit' });
+      await import(`./providers/${agentProvider}.js`);
+      providerEntry = getSetupProvider(agentProvider);
+    }
+    if (providerEntry?.runAuth) {
+      await providerEntry.runAuth();
+      await providerEntry.runInstallCheck?.();
+    } else {
+      await runAuthStep();
+    }
   }
 
   if (!skip.has('mounts')) {
@@ -749,6 +799,39 @@ function sendChatMessage(message: string): Promise<void> {
 }
 
 // ─── auth step (select → branch) ────────────────────────────────────────
+
+// Providers offered for install are hard-wired in trunk — an audited control
+// surface (no branch enumeration that anyone with write access could extend).
+// Codex is the only one offered here; opencode/ollama install via their own
+// /add-* skills. Each is installed by its self-contained setup/add-<name>.sh.
+const INSTALLABLE_PROVIDERS = [
+  { value: 'codex', label: 'Codex', hint: 'OpenAI — ChatGPT subscription or API key' },
+] as const;
+
+async function askAgentProviderChoice(): Promise<string> {
+  const installed = listSetupProviders();
+  const installedNames = new Set(installed.map((entry) => entry.value));
+  // Offer the hard-wired installable providers this install hasn't wired yet —
+  // selecting one installs it via setup/add-<name>.sh.
+  const available = INSTALLABLE_PROVIDERS.filter((prov) => !installedNames.has(prov.value));
+  const options = [
+    ...installed.map(({ value, label, hint }) => ({ value, label, hint })),
+    ...available.map((prov) => ({ value: prov.value, label: prov.label, hint: `${prov.hint} — installs now` })),
+  ];
+  // The pick installs and authenticates a runtime — it is not an
+  // install-wide default, so re-runs safely Enter-through on claude (its
+  // auth flow short-circuits when the secret already exists).
+  const choice = ensureAnswer(
+    await brightSelect<string>({
+      message: 'Which agent runtime should power your assistant?',
+      options,
+      initialValue: 'claude',
+    }),
+  ) as string;
+  setupLog.userInput('agent_provider', choice);
+  phEmit('agent_provider_chosen', { provider: choice });
+  return choice;
+}
 
 async function runAuthStep(): Promise<void> {
   if (anthropicSecretExists()) {
@@ -1263,7 +1346,7 @@ function detectExistingOnecli(): { version: string; apiHost: string } | null {
     } catch {
       // not JSON — try to extract a URL directly
     }
-    const m = raw.match(/https?:\/\/[\w.\-]+(?::\d+)?/);
+    const m = raw.match(/https?:\/\/[\w.-]+(?::\d+)?/);
     return m ? { version, apiHost: m[0] } : null;
   } catch {
     return null;

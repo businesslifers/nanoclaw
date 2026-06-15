@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { resolveProviderName } from './container-runner.js';
@@ -23,5 +25,38 @@ describe('resolveProviderName', () => {
   it('treats empty string as unset (falls through)', () => {
     expect(resolveProviderName('', 'opencode')).toBe('opencode');
     expect(resolveProviderName(null, '')).toBe('claude');
+  });
+});
+
+describe('buildContainerArgs ordering invariant (structural)', () => {
+  // The OneCLI gateway apply (SDK applyContainerConfig) appends credential-stub
+  // mounts — e.g. the codex auth.json sentinel nested INSIDE our RW
+  // /home/node/.codex mount. Docker applies binds in argument order, so the
+  // stub must land AFTER its parent mount or the parent shadows it and the
+  // agent silently degrades to loginless auth. Driving the real
+  // buildContainerArgs needs a live gateway + container runtime, so this
+  // guards the invariant structurally: the gateway apply must appear after
+  // the volume-mounts loop in the source.
+  it('applies the OneCLI gateway after the volume mounts', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
+    const mountsLoop = src.indexOf('for (const mount of mounts)');
+    const gatewayApply = src.indexOf('onecli.applyContainerConfig');
+    expect(mountsLoop).toBeGreaterThan(-1);
+    expect(gatewayApply).toBeGreaterThan(-1);
+    expect(gatewayApply).toBeGreaterThan(mountsLoop);
+  });
+});
+
+describe('container boot-failure tripwire (structural)', () => {
+  // A container that dies at boot (unknown provider, missing CLI binary, bad
+  // config) explains itself only on stderr — which logs at debug, below the
+  // default level. The spawn handler must keep a stderr tail and surface it
+  // at warn on a non-zero exit, or the operator sees only "exited code 1" on
+  // repeat. Driving a real failing spawn needs a container runtime, so this
+  // guards the wiring structurally, matching the invariant test above.
+  it('surfaces the stderr tail when the container exits non-zero', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src', 'container-runner.ts'), 'utf-8');
+    expect(src).toContain('stderrTail.push(line)');
+    expect(src).toMatch(/Container exited non-zero.*stderrTail/s);
   });
 });
