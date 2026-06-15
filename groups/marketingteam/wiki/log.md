@@ -19,6 +19,10 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 
 ---
 
+## [2026-06-05] lint | 2 open items, 0 broken links
+
+Health check. Index current (8 content pages all indexed, `updated`/`lint` = 2026-06-05). All cross-references resolve — 8 inline links + frontmatter `related:` targets, 0 broken (the lone `](url)` in reporting-pipeline.md is a literal Slack-formatting example, not a link). No orphans, no contradictions. Both top-level sources have summary pages — none unprocessed. Open items: (1) `google-ads-proxy-h2-break.md` Status ends Jun 5 but the `403 credential_not_found` wall it documents has persisted across every subsequent daily run, still unresolved — needs a status refresh; (2) carried since May 8 — no per-client entity pages for the 7 active clients (covered by client-list topic).
+
 ## [2026-05-05] ingest | v1-scheduled-tasks.md
 
 Pipeline task prompt and Telegram formatting note folded into reporting-pipeline.md. Source summary filed. Index updated.
@@ -72,3 +76,6 @@ Wiki is structurally healthy (no broken links, no orphans, no contradictions) bu
 ## [2026-04-30] init | Wiki scaffolded for Marketing Team group
 
 Created `wiki/` skeleton (`index.md`, `log.md`, `entities/`, `concepts/`, `topics/`) so the agent has somewhere to file marketing-specific knowledge as sources are ingested. `sources/` already contained the v1 conversation import and v1 scheduled-tasks export — those have not yet been processed into wiki pages.
+
+## [2026-06-12] lint | incident page status refreshed
+Updated `topics/google-ads-proxy-h2-break.md` Status: the `403 credential_not_found` wall is still unresolved, having failed every daily collector run Jun 7–12 (6 consecutive days, 0/7 accounts). Closes the open item flagged in the Jun 5 lint. Still no infra host-exemption applied; pipeline remains blocked.
