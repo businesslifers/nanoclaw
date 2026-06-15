@@ -1692,7 +1692,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
 +
 +  .agent-groups-v2 .ag-card-stats {
 +    display: grid;
-+    grid-template-columns: repeat(3, minmax(0, 1fr));
++    grid-template-columns: auto auto minmax(0, 1fr);
 +    gap: 8px;
 +    padding: 10px 0;
 +    border-top: 1px solid var(--ag-border);
@@ -1708,7 +1708,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
 +    text-overflow: ellipsis;
 +    white-space: nowrap;
 +  }
-+  .agent-groups-v2 .ag-card-stat-folder { font-size: 12px; font-weight: 500; color: var(--ag-text); }
++  .agent-groups-v2 .ag-card-stat-folder { font-size: 12px; font-weight: 500; color: var(--ag-text); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.35; }
 +  .agent-groups-v2 .ag-card-stat-label {
 +    color: var(--ag-text-dim);
 +    font-size: 10px;
