@@ -1,0 +1,112 @@
+/**
+ * The 32KB Codex project-doc cap must DEGRADE, never throw: composeGroupAgentsMd
+ * runs inside the provider contribution at every spawn, and a throw there rides
+ * wakeContainer's transient-retry contract — host-sweep respawns every 60s
+ * forever and the group goes silently dark (a permanent condition disguised as
+ * a transient one). Oversized docs drop their largest optional instruction
+ * sections, keep the core contract, and say so in the doc.
+ */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../config.js')>()),
+  DATA_DIR: '/tmp/nanoclaw-agents-md-test/data',
+}));
+
+import { composeGroupAgentsMd, CODEX_PROJECT_DOC_MAX_BYTES } from './codex-agents-md.js';
+import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../db/index.js';
+import { ensureContainerConfig, updateContainerConfigJson } from '../db/container-configs.js';
+import type { AgentGroup } from '../types.js';
+
+const TEST_ROOT = '/tmp/nanoclaw-agents-md-test';
+
+function group(folder: string): AgentGroup {
+  return {
+    id: `ag-${folder}`,
+    name: folder,
+    folder,
+    agent_provider: null,
+    created_at: new Date().toISOString(),
+  } as AgentGroup;
+}
+
+describe('composeGroupAgentsMd cap handling', () => {
+  beforeEach(() => {
+    if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+    fs.mkdirSync(path.join(TEST_ROOT, 'data'), { recursive: true });
+    const db = initTestDb();
+    runMigrations(db);
+  });
+
+  afterEach(() => {
+    closeDb();
+    if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+  });
+
+  it('writes the doc untouched when under the cap', () => {
+    const g = group('small');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      composeGroupAgentsMd(g, groupDir);
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(doc).not.toContain('Omitted for size');
+      // Agent-authored skills must be told their persistent home — without
+      // this, authored skills land on ephemeral container paths and vanish.
+      expect(doc).toContain('/workspace/agent/skills');
+      expect(Buffer.byteLength(doc, 'utf-8')).toBeLessThanOrEqual(CODEX_PROJECT_DOC_MAX_BYTES);
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('inlines the memory index so recall does not depend on a file read', () => {
+    const g = group('with-memory');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      fs.mkdirSync(path.join(groupDir, 'memory'), { recursive: true });
+      fs.writeFileSync(
+        path.join(groupDir, 'memory', 'index.md'),
+        '# Memory Index\n- [People](memories/people/) - notes about people and their preferences\n',
+      );
+
+      composeGroupAgentsMd(g, groupDir);
+
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(doc).toContain('Current memory index');
+      expect(doc).toContain('notes about people and their preferences');
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('degrades instead of throwing when MCP instructions push the doc over the cap', () => {
+    const g = group('oversized');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    updateContainerConfigJson(g.id, 'mcp_servers', {
+      bloated: { command: 'x', instructions: 'y'.repeat(CODEX_PROJECT_DOC_MAX_BYTES + 1024) },
+      lean: { command: 'x', instructions: 'short and useful' },
+    });
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      composeGroupAgentsMd(g, groupDir); // must not throw
+
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(Buffer.byteLength(doc, 'utf-8')).toBeLessThanOrEqual(CODEX_PROJECT_DOC_MAX_BYTES);
+      // Largest optional section dropped, named in the doc; the rest survive.
+      expect(doc).toContain('Omitted for size');
+      expect(doc).toContain('MCP Server: bloated');
+      expect(doc).toContain('short and useful');
+      expect(doc).toContain('Memory System');
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+});

@@ -133,4 +133,16 @@ export type ProviderEvent =
    * event (tool call, thinking, partial message, anything) so the
    * poll-loop's idle timer stays honest during long tool runs.
    */
-  | { type: 'activity' };
+  | { type: 'activity' }
+  /**
+   * A provider produced a file out-of-band (e.g. Codex's native image
+   * generation writes into CODEX_HOME/generated_images/ rather than via the
+   * send_file tool). Emitted so the runner can deliver it to chat.
+   *
+   * The poll-loop consumes this and delivers the file to the session's bound
+   * conversation via `deliverGeneratedFile` (outbound-file.ts), mirroring the
+   * send_file outbox path. Fork note: upstream's `providers` branch emits this
+   * event but never landed the matching trunk type/consumer in main — this
+   * variant and its consumer are carried locally until upstream catches up.
+   */
+  | { type: 'file'; path: string };

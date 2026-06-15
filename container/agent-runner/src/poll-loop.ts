@@ -14,6 +14,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
+import { deliverGeneratedFile } from './outbound-file.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -507,6 +508,17 @@ async function processQuery(
         } else {
           archivePrompts.shift();
         }
+      } else if (event.type === 'file') {
+        // A provider produced a file out-of-band (e.g. Codex's native image
+        // generation writes into CODEX_HOME/generated_images/) and can't
+        // address a destination itself. Deliver it to the conversation this
+        // session replies into. Best-effort: never aborts the turn.
+        const deliveredId = deliverGeneratedFile(event.path);
+        log(
+          deliveredId
+            ? `Delivered provider-generated file ${event.path} (id: ${deliveredId})`
+            : `Provider-generated file not delivered: ${event.path}`,
+        );
       }
     }
   } catch (err) {
