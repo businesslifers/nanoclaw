@@ -12,11 +12,6 @@
       "hostPath": "~/nanoclaw-secrets/wordpress",
       "containerPath": "wordpress-creds",
       "readonly": true
-    },
-    {
-      "hostPath": "/home/admin/.local/bin/rtk",
-      "containerPath": "/usr/local/bin/rtk",
-      "readonly": true
     }
   ],
   "skills": "all",

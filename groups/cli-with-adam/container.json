@@ -4,13 +4,7 @@
     "apt": [],
     "npm": []
   },
-  "additionalMounts": [
-    {
-      "hostPath": "/home/admin/.local/bin/rtk",
-      "containerPath": "/usr/local/bin/rtk",
-      "readonly": true
-    }
-  ],
+  "additionalMounts": [],
   "skills": "all",
   "groupName": "CLI Agent",
   "assistantName": "CLI Agent",
