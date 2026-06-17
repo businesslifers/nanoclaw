@@ -1,13 +1,28 @@
 ---
 type: topic
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-06-17
 related:
   - wiki/topics/reporting-pipeline.md
   - wiki/concepts/collector-data-schema.md
 ---
 
 # Google Ads Collector — proxy h2/gRPC break (Jun 2026)
+
+## ✅ RESOLVED 2026-06-17 — stop escalating this
+
+**The real root cause was NOT an infra/proxy problem and needs no infra action.** The single cause was a stale `login-customer-id` header in the collector.
+
+The collector sent `login-customer-id: 3218082250` (the "Lifers PTY LTD" MCC manager). That manager no longer parents the client accounts — its only child is now "Business Lifers" (`9813601805`). The service account has **direct** access to every active client (all appear in `customers:listAccessibleCustomers`). That stale header caused failures at two layers, which is why it looked like an infra wall:
+
+1. **Proxy layer:** OneCLI's gateway treats a Google Ads request *carrying `login-customer-id`* as a managed call and demands a vault credential it doesn't have → `403 credential_not_found`. A request *without* that header passes straight through the proxy untouched.
+2. **Google layer (once past the proxy):** the manager no longer owns these accounts → `403 USER_PERMISSION_DENIED`.
+
+**Fix (Jun 17):** removed the `login-customer-id` header from `queryAds()` in `collector.mjs`. Verified live — a real collector run through the OneCLI proxy returned **7 succeeded, 0 failed**. No NanoClaw host change, no OneCLI config change, no infra exemption needed. GA4 was never affected (its host isn't intercepted).
+
+Everything below is the original Jun 5 diagnosis, kept for history. Its conclusion ("await infra host-exemption") was **wrong** — there is no host-exemption lever in OneCLI 2.2.3, and none was needed.
+
+---
 
 Ongoing incident. The daily collector started failing for **all 7 accounts** on **Jun 3 2026** and continued Jun 4. Root cause diagnosed by the collector lane Jun 5.
 

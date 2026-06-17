@@ -79,3 +79,6 @@ Created `wiki/` skeleton (`index.md`, `log.md`, `entities/`, `concepts/`, `topic
 
 ## [2026-06-12] lint | incident page status refreshed
 Updated `topics/google-ads-proxy-h2-break.md` Status: the `403 credential_not_found` wall is still unresolved, having failed every daily collector run Jun 7–12 (6 consecutive days, 0/7 accounts). Closes the open item flagged in the Jun 5 lint. Still no infra host-exemption applied; pipeline remains blocked.
+
+## [2026-06-17] fix | Google Ads collector RESOLVED — stale login-customer-id, not infra
+Root-caused and fixed by Adam (host-side). The 13-day "proxy `credential_not_found` wall" was a misdiagnosis: the single cause was the stale `login-customer-id: 3218082250` (Lifers PTY LTD MCC) header in `collector.mjs` `queryAds()`. That MCC no longer parents the client accounts (only child is now Business Lifers 9813601805); the service account has DIRECT access to all 7 active clients. The manager header triggered OneCLI to demand a vault credential (`credential_not_found`) AND would have hit `USER_PERMISSION_DENIED` at Google. Removed the header; verified live through the OneCLI proxy → 7 succeeded, 0 failed. No infra/host-exemption was needed (none exists in OneCLI 2.2.3). Updated `topics/google-ads-proxy-h2-break.md` with a RESOLVED banner.

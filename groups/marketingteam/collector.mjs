@@ -117,7 +117,12 @@ async function queryAds(_adsClient, customerId, query) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${ADS_BEARER_TOKEN}`,
       'developer-token': CONFIG.developerToken,
-      'login-customer-id': String(CONFIG.managerCustomerId).replace(/-/g, ''),
+      // No login-customer-id. The service account has DIRECT access to every
+      // active client (all appear in customers:listAccessibleCustomers). The MCC
+      // manager in CONFIG.managerCustomerId ("Lifers PTY LTD", 321-808-2250) no
+      // longer parents these accounts — its only child is now "Business Lifers".
+      // Sending it as login-customer-id yields 403 USER_PERMISSION_DENIED.
+      // (Jun 2026 incident: see wiki/topics/google-ads-proxy-h2-break.md.)
     },
     body: JSON.stringify({ query }),
   });
