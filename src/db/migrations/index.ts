@@ -17,6 +17,8 @@ import { migration017 } from './017-agent-group-hidden-dashboard.js';
 import { migration018 } from './018-messaging-group-instance.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
+import { migration019 } from './019-agent-message-policies.js';
+import { migration020 } from './020-approvals-approver-user-id.js';
 
 export interface Migration {
   version: number;
@@ -50,6 +52,8 @@ export const migrations: Migration[] = [
   migration016,
   migration017,
   migration018,
+  migration019,
+  migration020,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a
