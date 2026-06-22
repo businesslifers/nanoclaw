@@ -50,3 +50,8 @@ No changes. Wiki still scaffolded-only — no sources, no content pages. All cro
 ## [2026-06-14] lint | 0 issues found, 0 fixed
 
 No changes. Wiki still scaffolded-only — no sources, no content pages. All cross-references clean.
+
+## [2026-06-21] lint | 1 issue found, 0 fixed
+
+Wiki still scaffolded-only — no sources, no content pages. All cross-references clean.
+One issue: three duplicate `[2026-05-03] lint` entries in log.md. Reported to user; awaiting confirmation to fix.
