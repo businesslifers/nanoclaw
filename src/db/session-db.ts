@@ -258,9 +258,13 @@ export interface OutboundMessage {
 export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
   return db
     .prepare(
+      // seq is the secondary sort so same-second rows deliver in write order
+      // (timestamp is whole-second `datetime('now')`; seq is monotonic per write).
+      // Load-bearing for thinking-steps: the turn-end 'complete' marker is written
+      // just before the reply and must deliver first so the card finalizes above it.
       `SELECT * FROM messages_out
        WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
-       ORDER BY timestamp ASC`,
+       ORDER BY timestamp ASC, seq ASC`,
     )
     .all() as OutboundMessage[];
 }

@@ -23,6 +23,7 @@ import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
+import { ThinkingStepsManager, type ThinkingStep } from './thinking-steps.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
@@ -144,6 +145,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     );
   }
   const transformText = (t: string): string => (config.transformOutboundText ? config.transformOutboundText(t) : t);
+  // Slack "thinking steps": renders live tool-call progress cards from
+  // `thinking_step` outbound rows. No-op on adapters without postObject/editObject.
+  const thinkingSteps = new ThinkingStepsManager();
   let chat: Chat;
   let state: SqliteStateAdapter;
   let setupConfig: ChannelSetup;
@@ -405,6 +409,14 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // "discord:guildId:channelId") — use it directly as the thread ID
       const tid = threadId ?? platformId;
       const content = message.content as Record<string, unknown>;
+
+      // Slack thinking steps: drive the live progress card. Fire-and-forget —
+      // the actual Slack calls happen on a throttled chain inside the manager,
+      // so this returns immediately and never blocks (or fails) the real reply.
+      if (message.kind === 'thinking_step') {
+        thinkingSteps.onStep(adapter, tid, content as unknown as ThinkingStep);
+        return;
+      }
 
       if (content.operation === 'edit' && content.messageId) {
         await adapter.editMessage(tid, content.messageId as string, {

@@ -460,6 +460,11 @@ export async function processQuery(
     })();
   }, ACTIVE_POLL_INTERVAL_MS);
 
+  // Slack thinking-steps turn state. The stream spans multiple turns (each
+  // ends on a `result` event), so these reset per turn, not per processQuery.
+  let thinkingTurnId = generateId();
+  let sawThinkingStep = false;
+
   try {
     for await (const event of query.events) {
       handleEvent(event, routing);
@@ -475,6 +480,14 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        // Turn done — finalize the thinking-steps card BEFORE the reply rows
+        // are written (seq order ⇒ the card flips to "Done", then the answer
+        // lands beneath it), then reset for the next turn in this stream.
+        if (sawThinkingStep) {
+          writeThinkingComplete(routing, thinkingTurnId);
+          sawThinkingStep = false;
+        }
+        thinkingTurnId = generateId();
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -534,10 +547,39 @@ export async function processQuery(
             ? `Delivered provider-generated file ${event.path} (id: ${deliveredId})`
             : `Provider-generated file not delivered: ${event.path}`,
         );
+      } else if (event.type === 'tool_step') {
+        // Slack thinking steps: write a side-channel row the host renders as a
+        // live plan card. Gated to Slack channels (the only renderer today);
+        // the host also no-ops on non-capable adapters. Best-effort — these
+        // rows never carry the user's actual reply.
+        if ((routing.channelType ?? '').startsWith('slack')) {
+          sawThinkingStep = true;
+          writeMessageOut({
+            id: generateId(),
+            in_reply_to: routing.inReplyTo,
+            kind: 'thinking_step',
+            platform_id: routing.platformId,
+            channel_type: routing.channelType,
+            thread_id: routing.threadId,
+            content: JSON.stringify({
+              op: event.status === 'in_progress' ? 'task' : 'update',
+              turn: thinkingTurnId,
+              taskId: event.toolId,
+              title: event.title,
+              status: event.status,
+              output: event.output,
+            }),
+          });
+        }
       }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    // Finalize any open thinking-steps card before the error reply is written.
+    if (sawThinkingStep) {
+      writeThinkingComplete(routing, thinkingTurnId);
+      sawThinkingStep = false;
+    }
     notifyExchangeComplete(onExchangeComplete, {
       prompt: archivePrompts[0] ?? initialPrompt,
       result: `Error: ${errMsg}`,
@@ -546,11 +588,33 @@ export async function processQuery(
     });
     throw err;
   } finally {
+    // Stream closed mid-turn (clean close after tool calls, no result event):
+    // finalize so the card doesn't hang on a spinner. No-op if already done.
+    if (sawThinkingStep) {
+      writeThinkingComplete(routing, thinkingTurnId);
+    }
     done = true;
     clearInterval(pollHandle);
   }
 
   return { continuation: queryContinuation };
+}
+
+/**
+ * Write the turn-end marker for Slack thinking steps. The host's
+ * ThinkingStepsManager finalizes the live plan card for this turn (flips it to
+ * "Done"). Only emitted when at least one tool_step was written this turn.
+ */
+function writeThinkingComplete(routing: RoutingContext, turnId: string): void {
+  writeMessageOut({
+    id: generateId(),
+    in_reply_to: routing.inReplyTo,
+    kind: 'thinking_step',
+    platform_id: routing.platformId,
+    channel_type: routing.channelType,
+    thread_id: routing.threadId,
+    content: JSON.stringify({ op: 'complete', turn: turnId }),
+  });
 }
 
 function notifyExchangeComplete(
@@ -580,6 +644,9 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
+      break;
+    case 'tool_step':
+      log(`Tool: ${event.title} → ${event.status}`);
       break;
   }
 }

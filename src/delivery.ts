@@ -212,7 +212,7 @@ async function drainSession(session: Session): Promise<void> {
         // back. Skip the pause for internal traffic (system actions,
         // agent-to-agent routing) — the user doesn't see those and
         // shouldn't get a gap in their typing indicator for them.
-        if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
+        if (msg.kind !== 'system' && msg.kind !== 'thinking_step' && msg.channel_type !== 'agent') {
           pauseTypingRefreshAfterDelivery(session.id);
           // ✅ done: status-tracker promotes the user's last-message reaction
           // and clears it after a short delay. Same gate as typing — user
@@ -390,13 +390,18 @@ async function deliverMessage(
     files,
     deliverInstance,
   );
-  log.info('Message delivered', {
-    id: msg.id,
-    channelType: msg.channel_type,
-    platformId: msg.platform_id,
-    platformMsgId,
-    fileCount: files?.length,
-  });
+  // thinking_step rows are a high-frequency host-driven side channel (one per
+  // tool call); their delivery carries no platform id and is not user-visible
+  // routing, so logging each would drown the routing chain operators read here.
+  if (msg.kind !== 'thinking_step') {
+    log.info('Message delivered', {
+      id: msg.id,
+      channelType: msg.channel_type,
+      platformId: msg.platform_id,
+      platformMsgId,
+      fileCount: files?.length,
+    });
+  }
 
   clearOutbox(session.agent_group_id, session.id, msg.id);
 

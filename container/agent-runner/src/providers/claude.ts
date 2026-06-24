@@ -68,6 +68,149 @@ function mcpAllowPattern(serverName: string): string {
   return `mcp__${serverName.replace(/[^a-zA-Z0-9_-]/g, '_')}__*`;
 }
 
+// ── Slack "thinking steps" tool-call decomposition ──────────────────────────
+// These helpers turn the SDK's tool_use / tool_result blocks into the
+// human-readable titles shown on the live progress card. Pure functions, no
+// I/O. The leaf-name skip list hides the agent's own messaging tools (the
+// message IS the visible output) and its private plan bookkeeping — they'd be
+// noise on a progress card.
+// Builtins to hide (matched by exact name) and the agent's own NanoClaw
+// messaging tools (matched by the exact `mcp__nanoclaw__` name — NOT by leaf
+// name, which would also suppress a same-named tool from another MCP server,
+// e.g. mcp__clickup__send_message, that the user WOULD want to see).
+const THINKING_STEP_SKIP_BUILTIN = new Set(['TodoWrite']);
+const NANOCLAW_TOOL_PREFIX = 'mcp__nanoclaw__';
+const THINKING_STEP_SKIP_NANOCLAW = new Set(['send_message', 'send_file', 'edit_message', 'add_reaction', 'ask_user_question']);
+
+function isThinkingStepSkipped(name: string): boolean {
+  if (THINKING_STEP_SKIP_BUILTIN.has(name)) return true;
+  if (name.startsWith(NANOCLAW_TOOL_PREFIX)) {
+    return THINKING_STEP_SKIP_NANOCLAW.has(name.slice(NANOCLAW_TOOL_PREFIX.length));
+  }
+  return false;
+}
+
+function clampTitle(s: string, n = 80): string {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+function pathBasename(p: unknown): string {
+  if (typeof p !== 'string' || !p) return '';
+  const parts = p.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
+}
+
+function titleForTool(name: string, input: unknown): string {
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  switch (name) {
+    case 'Bash': {
+      const desc = typeof inp.description === 'string' && inp.description ? inp.description : '';
+      const cmd = typeof inp.command === 'string' ? inp.command : '';
+      return clampTitle(desc || cmd || 'Run command');
+    }
+    case 'Read':
+      return clampTitle(`Read ${pathBasename(inp.file_path) || 'file'}`);
+    case 'Edit':
+    case 'Write':
+    case 'NotebookEdit':
+      return clampTitle(`Edit ${pathBasename(inp.file_path ?? inp.notebook_path) || 'file'}`);
+    case 'Glob':
+      return clampTitle(`Find ${typeof inp.pattern === 'string' ? inp.pattern : 'files'}`);
+    case 'Grep':
+      return clampTitle(`Search "${typeof inp.pattern === 'string' ? inp.pattern : ''}"`);
+    case 'WebFetch':
+      try {
+        return `Fetch ${new URL(String(inp.url)).host}`;
+      } catch {
+        return 'Fetch URL';
+      }
+    case 'WebSearch':
+      return clampTitle(`Search "${typeof inp.query === 'string' ? inp.query : ''}"`);
+    case 'Task':
+      return clampTitle(`Subagent: ${typeof inp.description === 'string' ? inp.description : 'task'}`);
+    default: {
+      if (name.startsWith('mcp__')) {
+        const parts = name.split('__'); // mcp__<server>__<tool>
+        const server = parts[1] ?? 'tool';
+        const tool = parts.slice(2).join(' ');
+        return clampTitle(tool ? `${server}: ${tool.replace(/_/g, ' ')}` : server);
+      }
+      return clampTitle(name);
+    }
+  }
+}
+
+function summarizeToolResult(content: unknown): string | undefined {
+  let text = '';
+  if (typeof content === 'string') {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
+      .map((b) => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : ''))
+      .join(' ')
+      .trim();
+  }
+  if (!text.trim()) return undefined;
+  const firstLine = (text.split('\n').find((l) => l.trim()) ?? text).trim();
+  return firstLine.length > 200 ? `${firstLine.slice(0, 199)}…` : firstLine;
+}
+
+/**
+ * Pure decomposition of a single SDK message into thinking-step events.
+ * Exported for unit testing. `toolTitles` correlates a tool_use (start) with
+ * its tool_result (end): a start populates it; the matching end reads + clears
+ * it. Only tools that were started (present in the map) emit a completion, so
+ * skipped tools and pre-window results are dropped. Never throws on bad shapes.
+ */
+export function decomposeToolSteps(
+  message: unknown,
+  toolTitles: Map<string, string>,
+): Array<{ type: 'tool_step'; toolId: string; title: string; status: 'in_progress' | 'complete' | 'error'; output?: string }> {
+  const out: Array<{ type: 'tool_step'; toolId: string; title: string; status: 'in_progress' | 'complete' | 'error'; output?: string }> = [];
+  if (!message || typeof message !== 'object') return out;
+  const m = message as { type?: string; parent_tool_use_id?: string | null; message?: { content?: unknown } };
+  // Skip subagent-internal blocks. The Agent SDK forwards a subagent's
+  // tool_use/tool_result onto the main stream with parent_tool_use_id set; the
+  // parent `Task` step ("Subagent: …") already represents that work, so emitting
+  // the subagent's own Read/Bash/Grep would flood the card with internals.
+  if (m.parent_tool_use_id != null) return out;
+  if (m.type === 'assistant') {
+    const blocks = m.message?.content;
+    if (Array.isArray(blocks)) {
+      for (const b of blocks) {
+        if (b && typeof b === 'object' && (b as { type?: string }).type === 'tool_use') {
+          const tu = b as { id?: string; name?: string; input?: unknown };
+          if (!tu.id || !tu.name || isThinkingStepSkipped(tu.name)) continue;
+          const title = titleForTool(tu.name, tu.input);
+          toolTitles.set(tu.id, title);
+          out.push({ type: 'tool_step', toolId: tu.id, title, status: 'in_progress' });
+        }
+      }
+    }
+  } else if (m.type === 'user') {
+    const blocks = m.message?.content;
+    if (Array.isArray(blocks)) {
+      for (const b of blocks) {
+        if (b && typeof b === 'object' && (b as { type?: string }).type === 'tool_result') {
+          const tr = b as { tool_use_id?: string; content?: unknown; is_error?: boolean };
+          if (!tr.tool_use_id || !toolTitles.has(tr.tool_use_id)) continue;
+          const title = toolTitles.get(tr.tool_use_id)!;
+          toolTitles.delete(tr.tool_use_id);
+          out.push({
+            type: 'tool_step',
+            toolId: tr.tool_use_id,
+            title,
+            status: tr.is_error ? 'error' : 'complete',
+            output: summarizeToolResult(tr.content),
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 interface SDKUserMessage {
   type: 'user';
   message: { role: 'user'; content: string };
@@ -428,6 +571,11 @@ export class ClaudeProvider implements AgentProvider {
 
     let aborted = false;
 
+    // Correlates a tool_use (start) with its tool_result (end) so the
+    // completion step can re-send the human-readable title. Entries are
+    // deleted on completion, so this stays bounded to in-flight tools.
+    const toolStepTitles = new Map<string, string>();
+
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
       for await (const message of sdkResult) {
@@ -458,6 +606,18 @@ export class ClaudeProvider implements AgentProvider {
         } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
           const tn = message as { summary?: string };
           yield { type: 'progress', message: tn.summary || 'Task notification' };
+        }
+
+        // Decompose tool calls into thinking-step events (Slack progress cards).
+        // Additive: assistant/user messages don't match any branch above, so
+        // this never alters existing handling. Exception-isolated so a shape
+        // mismatch can never break the turn.
+        try {
+          for (const ev of decomposeToolSteps(message, toolStepTitles)) {
+            yield ev;
+          }
+        } catch (err) {
+          log(`thinking-step decomposition error: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
       log(`Query completed after ${messageCount} SDK messages`);

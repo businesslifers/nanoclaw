@@ -151,4 +151,17 @@ export type ProviderEvent =
    * event but never landed the matching trunk type/consumer in main — this
    * variant and its consumer are carried locally until upstream catches up.
    */
-  | { type: 'file'; path: string };
+  | { type: 'file'; path: string }
+  /**
+   * One tool-call step, for Slack "thinking steps" progress cards. Emitted by
+   * decomposing the underlying SDK's tool_use (start) and tool_result (end)
+   * blocks. `toolId` correlates the start with its completion. The poll-loop
+   * turns these into `thinking_step` outbound rows (Slack channels only); the
+   * host renders them as a live Block Kit plan card. Providers that don't
+   * decompose tool calls simply never emit this — the feature stays dark.
+   *
+   * Fork note: carried locally alongside the Slack thinking-steps skill until
+   * (if ever) upstream grows an equivalent. Additive — no existing consumer
+   * depends on it.
+   */
+  | { type: 'tool_step'; toolId: string; title: string; status: 'in_progress' | 'complete' | 'error'; output?: string };
