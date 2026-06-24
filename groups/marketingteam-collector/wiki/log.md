@@ -24,3 +24,7 @@ Recent entries are tail-readable: `tail -50 log.md` or `grep "^## \[" log.md | t
 ## [2026-06-04] init | Wiki scaffolded at group creation
 
 Empty skeleton created by `initGroupFilesystem`. No sources ingested yet.
+
+## [2026-06-24] query | Connectivity re-check — 7/7 accounts healthy, root cause confirmed
+
+Adam asked for a "check again" on Google Ads connectivity. Parent ran the real collector from their container: 7/7 accounts succeeded (data date 2026-06-23). No auth issue. Confirmed the June root cause was the stale `login-customer-id` header (now removed); service account has direct access to all 7 accounts. Lane wiki corrected accordingly.
