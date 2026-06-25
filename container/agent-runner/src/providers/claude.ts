@@ -96,9 +96,7 @@ function clampTitle(s: string, n = 80): string {
 }
 
 function pathBasename(p: unknown): string {
-  if (typeof p !== 'string' || !p) return '';
-  const parts = p.split('/').filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : p;
+  return typeof p === 'string' && p ? path.basename(p) : '';
 }
 
 function titleForTool(name: string, input: unknown): string {

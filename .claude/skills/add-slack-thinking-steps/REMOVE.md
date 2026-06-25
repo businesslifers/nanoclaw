@@ -28,6 +28,10 @@ branch wholesale):
   `const thinkingSteps = …` line, and the `if (message.kind === 'thinking_step') { … }` block in `deliver()`.
 - **`src/delivery.ts`** — remove `&& msg.kind !== 'thinking_step'` from the post-delivery guard.
 
+> **Do not touch `src/db/session-db.ts`.** The `ORDER BY timestamp ASC, seq ASC` there is a general
+> delivery-ordering correctness fix (same-second rows deliver in write order), not a thinking-steps
+> patch — reverting it would reintroduce same-second mis-ordering for *all* message kinds.
+
 ## 3. Rebuild + restart
 
 ```bash
