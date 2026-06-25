@@ -24,7 +24,7 @@
 import type { Adapter } from 'chat';
 import { log } from '../log.js';
 
-type PlanTaskStatus = 'pending' | 'in_progress' | 'complete' | 'error';
+type PlanTaskStatus = 'in_progress' | 'complete' | 'error';
 
 /** The plan model shape the adapter's `postObject('plan', …)` renders. */
 interface PlanTask {
@@ -68,8 +68,7 @@ interface TurnState {
   tid: string;
   key: string;
   title: string;
-  tasksById: Map<string, PlanTask>;
-  order: string[]; // taskId insertion order (the array index map's stable replacement)
+  tasksById: Map<string, PlanTask>; // insertion-ordered: iteration order == display order
   collapsedDone: number; // completed tasks folded into the synthetic head, for the cap
   msgId?: string;
   posted: boolean;
@@ -89,7 +88,7 @@ export class ThinkingStepsManager {
     if (!this.enabled(cap)) return;
     try {
       if (step.op === 'complete') {
-        this.finalize(cap, tid, step.turn, DONE_TITLE);
+        this.finalize(tid, step.turn, DONE_TITLE);
         return;
       }
       const key = this.turnKey(tid, step.turn);
@@ -117,7 +116,7 @@ export class ThinkingStepsManager {
   }
 
   /** Finalize a turn's card (idempotent). Called on `complete`, timeout, or eviction. */
-  private finalize(adapter: PlanCapableAdapter, tid: string, turn: string | undefined, title: string): void {
+  private finalize(tid: string, turn: string | undefined, title: string): void {
     const st = this.turns.get(this.turnKey(tid, turn));
     if (!st) return;
     this.evict(st, title);
@@ -136,9 +135,8 @@ export class ThinkingStepsManager {
     // path to finalize, since the turn is already evicted and its timers cleared).
     // The chained flush re-reads st.posted after any pending post has settled.
     st.title = finalTitle;
-    for (const id of st.order) {
-      const t = st.tasksById.get(id);
-      if (t && (t.status === 'in_progress' || t.status === 'pending')) t.status = 'complete';
+    for (const t of st.tasksById.values()) {
+      if (t.status === 'in_progress') t.status = 'complete';
     }
     st.dirty = true;
     this.flush(st, true);
@@ -151,7 +149,6 @@ export class ThinkingStepsManager {
       key,
       title: WORKING_TITLE,
       tasksById: new Map(),
-      order: [],
       collapsedDone: 0,
       posted: false,
       dirty: false,
@@ -172,7 +169,6 @@ export class ThinkingStepsManager {
       if (step.output) existing.output = step.output;
     } else if (step.op === 'task') {
       st.tasksById.set(step.taskId, { id: step.taskId, title: step.title ?? '…', status, output: step.output });
-      st.order.push(step.taskId);
       this.capTasks(st);
     }
     // An `update` for an unknown taskId (e.g. one already collapsed by the cap)
@@ -182,14 +178,17 @@ export class ThinkingStepsManager {
 
   /** Keep the visible task list bounded; fold the oldest *finished* tasks away. */
   private capTasks(st: TurnState): void {
-    while (st.order.length > MAX_VISIBLE_TASKS) {
-      const i = st.order.findIndex((id) => {
-        const t = st.tasksById.get(id);
-        return t && (t.status === 'complete' || t.status === 'error');
-      });
-      if (i === -1) break; // nothing finished yet — leave it (rare)
-      const [id] = st.order.splice(i, 1);
-      st.tasksById.delete(id);
+    while (st.tasksById.size > MAX_VISIBLE_TASKS) {
+      // tasksById iterates in insertion order — fold away the oldest *finished* task.
+      let oldestFinished: string | undefined;
+      for (const [id, t] of st.tasksById) {
+        if (t.status === 'complete' || t.status === 'error') {
+          oldestFinished = id;
+          break;
+        }
+      }
+      if (oldestFinished === undefined) break; // nothing finished yet — leave it (rare)
+      st.tasksById.delete(oldestFinished);
       st.collapsedDone++;
     }
   }
@@ -203,9 +202,8 @@ export class ThinkingStepsManager {
         status: 'complete',
       });
     }
-    for (const id of st.order) {
-      const t = st.tasksById.get(id);
-      if (t) tasks.push(t);
+    for (const t of st.tasksById.values()) {
+      tasks.push(t);
     }
     return { title: st.title, tasks };
   }
@@ -253,7 +251,7 @@ export class ThinkingStepsManager {
 
   /** Whether this turn has done enough to warrant a visible card (noise gate). */
   private shouldPost(st: TurnState): boolean {
-    const tasks = st.order.length + st.collapsedDone;
+    const tasks = st.tasksById.size + st.collapsedDone;
     if (tasks === 0) return false;
     return tasks >= MIN_TASKS_BEFORE_CARD || Date.now() - st.startedAt >= MIN_ELAPSED_BEFORE_CARD_MS;
   }

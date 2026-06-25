@@ -260,8 +260,11 @@ export function getDueOutboundMessages(db: Database.Database): OutboundMessage[]
     .prepare(
       // seq is the secondary sort so same-second rows deliver in write order
       // (timestamp is whole-second `datetime('now')`; seq is monotonic per write).
-      // Load-bearing for thinking-steps: the turn-end 'complete' marker is written
-      // just before the reply and must deliver first so the card finalizes above it.
+      // This is a GENERAL delivery-ordering correctness property, not a feature
+      // patch: any two rows written in the same second (e.g. a chat reply and an
+      // immediate follow-up) deliver in the order written. Do not drop `seq ASC`.
+      // (It's also what lets a thinking-steps turn-end 'complete' marker, written
+      // just before the reply, finalize the card above the answer.)
       `SELECT * FROM messages_out
        WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
        ORDER BY timestamp ASC, seq ASC`,
