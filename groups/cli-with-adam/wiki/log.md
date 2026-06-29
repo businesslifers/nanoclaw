@@ -19,15 +19,7 @@ Terminal Agent has **read-only** access to `/workspace/global/wiki/`. Janet (`dm
 
 ## [2026-05-03] lint | 0 issues found, 0 fixed
 
-Wiki is in clean initial state: no content pages, no sources, no orphans, no broken cross-refs. Global wiki cross-reference in index.md resolves correctly.
-
-## [2026-05-03] lint | 0 issues found, 0 fixed
-
-No changes since previous lint. Wiki remains in scaffolded-only state.
-
-## [2026-05-03] lint | 0 issues found, 0 fixed
-
-No changes. Wiki still in scaffolded-only state — no sources, no content pages.
+Wiki is in clean initial state: no content pages, no sources, no orphans, no broken cross-refs. Global wiki cross-reference in index.md resolves correctly. (Two duplicate entries from this date collapsed during 2026-06-28 lint.)
 
 ## [2026-05-10] lint | 0 issues found, 0 fixed
 
@@ -55,3 +47,8 @@ No changes. Wiki still scaffolded-only — no sources, no content pages. All cro
 
 Wiki still scaffolded-only — no sources, no content pages. All cross-references clean.
 One issue: three duplicate `[2026-05-03] lint` entries in log.md. Reported to user; awaiting confirmation to fix.
+
+## [2026-06-28] lint | 1 issue found, 1 fixed
+
+Wiki still scaffolded-only — no sources, no content pages. All cross-references clean. Global wiki resolves.
+Fixed: collapsed three duplicate `[2026-05-03] lint` entries into one (carried over from 2026-06-21 lint).
