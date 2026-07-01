@@ -24,6 +24,10 @@ import { listWikis } from './wiki/discovery.js';
 //       opus   — in 15,   out 75,   cache-read 1.5,   cache-write 18.75
 //       sonnet — in 3,    out 15,   cache-read 0.3,   cache-write 3.75
 //       haiku  — in 1,    out 5,    cache-read 0.1,   cache-write 1.25
+//   - Claude Sonnet 5 (`claude-sonnet-5`): introductory pricing through
+//     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
+//     the standard sonnet rate above after that date; update the 'sonnet-5'
+//     entry then (platform.claude.com/docs/en/about-claude/pricing#claude-sonnet-5-introductory-pricing).
 //   - OpenAI gpt-5 family (ChatGPT Plus subscription OR API):
 //       gpt-5.4      — in 1.25, out 10,   cache-read 0.125, cache-write 1.25
 //       gpt-5.4-mini — in 0.25, out 2,    cache-read 0.025, cache-write 0.25
@@ -31,6 +35,7 @@ import { listWikis } from './wiki/discovery.js';
 //     automatic and just discounts reads, so cacheWrite mirrors input.
 const PRICING = {
   opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   'gpt-5.4': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
@@ -40,6 +45,7 @@ const PRICING = {
 function modelFamily(model: string): keyof typeof PRICING | null {
   const m = (model || '').toLowerCase();
   if (m.includes('opus')) return 'opus';
+  if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
   if (m.includes('gpt-5.4-mini') || m.includes('gpt-5-mini') || m.includes('gpt-5.4mini')) return 'gpt-5.4-mini';
