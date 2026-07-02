@@ -1,5 +1,5 @@
 diff --git a/dist/router.d.ts b/dist/router.d.ts
-index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11bfdffda6a 100644
+index ba5d893..b4a572c 100644
 --- a/dist/router.d.ts
 +++ b/dist/router.d.ts
 @@ -3,4 +3,6 @@
@@ -11,25 +11,26 @@ index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11b
 +export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse, req?: http.IncomingMessage): Promise<void>;
 +export declare function dispatchMutating(method: string, path: string, body: any, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1d190aef3 100644
+index 326434d..0bf93b4 100644
 --- a/dist/router.js
 +++ b/dist/router.js
-@@ -6,6 +6,14 @@ import { channelsPage } from './ui/pages/channels.js';
+@@ -6,6 +6,15 @@ import { channelsPage } from './ui/pages/channels.js';
  import { messagesPage } from './ui/pages/messages.js';
  import { usersPage } from './ui/pages/users.js';
  import { logsPage } from './ui/pages/logs.js';
 +import { wikisPage } from './ui/pages/wikis.js';
 +import { auditPage } from './ui/pages/audit.js';
 +import { tasksPage, cronDescribe } from './ui/pages/tasks.js';
++import { workItemsPage } from './ui/pages/work-items.js';
 +import { renderWikiMarkdown } from './ui/wiki-render.js';
-+import { getTasks } from './store.js';
++import { getTasks, getWorkItems } from './store.js';
 +import { getDashboardPermissions, getDashboardResolveActor, getDashboardHistoryProvider } from './server.js';
 +import { readFileSync, realpathSync } from 'node:fs';
 +import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from 'node:path';
  function json(res, data, status = 200) {
      res.writeHead(status, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify(data));
-@@ -14,7 +22,17 @@ function html(res, content) {
+@@ -14,7 +23,17 @@ function html(res, content) {
      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
      res.end(content);
  }
@@ -48,7 +49,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
      const s = getSnapshot();
      // --- API routes ---
      if (method === 'GET' && path === '/api/status') {
-@@ -45,13 +63,31 @@ export async function dispatch(method, path, params, res) {
+@@ -45,13 +64,31 @@ export async function dispatch(method, path, params, res) {
                  owners: s.users.filter((u) => u.privilege === 'owner').length,
                  globalAdmins: s.users.filter((u) => u.privilege === 'global_admin').length,
              },
@@ -81,7 +82,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
      }
      if (method === 'GET' && path === '/api/agent-groups') {
          if (!s)
-@@ -74,10 +110,66 @@ export async function dispatch(method, path, params, res) {
+@@ -74,10 +111,66 @@ export async function dispatch(method, path, params, res) {
              admins: group.admins,
          });
      }
@@ -149,7 +150,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
      }
      if (method === 'GET' && path === '/api/channels') {
          if (!s)
-@@ -105,6 +197,20 @@ export async function dispatch(method, path, params, res) {
+@@ -105,6 +198,20 @@ export async function dispatch(method, path, params, res) {
          return json(res, s.users);
      }
      if (method === 'GET' && path === '/api/tokens/summary') {
@@ -170,7 +171,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
          if (!s)
              return json(res, { error: 'No data yet' }, 503);
          return json(res, s.tokens);
-@@ -114,6 +220,32 @@ export async function dispatch(method, path, params, res) {
+@@ -114,6 +221,52 @@ export async function dispatch(method, path, params, res) {
              return json(res, { error: 'No data yet' }, 503);
          return json(res, { sessions: s.context_windows });
      }
@@ -194,6 +195,26 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
 +        const visible = all.filter((t) => permissions.canAccessAgentGroup(actor, t.agentGroupId));
 +        return json(res, visible);
 +    }
++    if (method === 'GET' && path === '/api/work-items') {
++        // Permission filter — defense in depth alongside the SSR layer. The
++        // snapshot bundles ALL work items; filter per viewer here. Unlike
++        // /api/tasks' single-ID check, work-item visibility is owner OR
++        // assignee — a single-ID filter would make a cross-team delegation
++        // invisible to the assignee's own admin.
++        const resolveActor = getDashboardResolveActor();
++        const permissions = getDashboardPermissions();
++        const all = getWorkItems();
++        if (!resolveActor || !permissions) {
++            // Permissions not configured — refuse to leak, return empty.
++            return json(res, []);
++        }
++        const actor = req ? resolveActor(req) : null;
++        if (!actor) return json(res, { error: 'Unauthorized' }, 401);
++        const visible = all.filter((w) =>
++            permissions.canAccessAgentGroup(actor, w.ownerAgentGroupId) ||
++            (w.assigneeAgentGroupId && permissions.canAccessAgentGroup(actor, w.assigneeAgentGroupId)));
++        return json(res, visible);
++    }
 +    if (method === 'GET' && path === '/api/cron/describe') {
 +        const expr = (params && params.get('expr')) || '';
 +        const text = cronDescribe(expr);
@@ -203,17 +224,18 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
      // --- HTML pages ---
      if (method === 'GET') {
          if (path === '/dashboard')
-@@ -130,6 +262,9 @@ export async function dispatch(method, path, params, res) {
+@@ -130,6 +283,10 @@ export async function dispatch(method, path, params, res) {
              return html(res, usersPage());
          if (path === '/dashboard/logs')
              return html(res, logsPage());
 +        if (path.startsWith('/dashboard/wikis')) return html(res, wikisPage());
 +        if (path === '/dashboard/audit') return html(res, auditPage());
 +        if (path === '/dashboard/tasks') return html(res, tasksPage());
++        if (path === '/dashboard/work-items') return html(res, workItemsPage());
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +274,87 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +296,144 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -277,6 +299,63 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
 +            return json(res, { error: err?.message || 'Internal Server Error' }, status);
 +        }
 +    }
++    // Work item create.
++    if (method === 'POST' && path === '/api/work-items') {
++        const fn = mutators && mutators.createWorkItem;
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator createWorkItem not configured' }, 503);
++        }
++        try {
++            const result = fn(body || {}, actorUserId);
++            return json(res, result);
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
++    // Work item action: cancel / reassign / note.
++    if (method === 'POST' && /^\/api\/work-items\/[^/]+\/action$/.test(path)) {
++        const id = decodeURIComponent(path.split('/')[3]);
++        const action = body && typeof body.action === 'string' ? body.action : '';
++        const fnName = action === 'cancel' ? 'cancelWorkItem'
++            : action === 'reassign' ? 'reassignWorkItem'
++            : action === 'note' ? 'addWorkItemNote'
++            : null;
++        if (!fnName) {
++            return json(res, { error: 'invalid action; expected cancel, reassign, or note' }, 400);
++        }
++        const fn = mutators && mutators[fnName];
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator ' + fnName + ' not configured' }, 503);
++        }
++        try {
++            const args = Object.assign({}, body || {}, { id });
++            delete args.action;
++            const result = fn(args, actorUserId);
++            return json(res, result);
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
++    // Work item field update (title / status / dates / kind / detail / parent / fields).
++    if (method === 'PATCH' && /^\/api\/work-items\/[^/]+$/.test(path)) {
++        const id = decodeURIComponent(path.split('/')[3]);
++        const fn = mutators && mutators.updateWorkItem;
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator updateWorkItem not configured' }, 503);
++        }
++        try {
++            const result = fn(Object.assign({}, body || {}, { id }), actorUserId);
++            return json(res, result);
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
 +    // Task update: prompt / recurrence / processAfter.
 +    if (method === 'PATCH' && /^\/api\/tasks\/[^/]+$/.test(path)) {
 +        const taskId = decodeURIComponent(path.split('/')[3]);
@@ -302,7 +381,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..71f9460e9cbc3af909d467a1be0042e1
 +    return json(res, { error: 'Not found' }, 404);
 +}
 diff --git a/dist/server.d.ts b/dist/server.d.ts
-index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..6188b8ea290f1825cb7cb750a7e5c1063a7f6c44 100644
+index 8507931..6188b8e 100644
 --- a/dist/server.d.ts
 +++ b/dist/server.d.ts
 @@ -1,4 +1,8 @@
@@ -316,7 +395,7 @@ index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..6188b8ea290f1825cb7cb750a7e5c106
  export declare function startDashboard(config?: DashboardConfig): void;
  export declare function stopDashboard(): Promise<void>;
 diff --git a/dist/server.js b/dist/server.js
-index f616ef5adfe7763270aa56d9685c1843819202de..6694782f030e43c64f1e237c79ac981261daec90 100644
+index f616ef5..6694782 100644
 --- a/dist/server.js
 +++ b/dist/server.js
 @@ -4,32 +4,86 @@
@@ -454,7 +533,7 @@ index f616ef5adfe7763270aa56d9685c1843819202de..6694782f030e43c64f1e237c79ac9812
          catch (err) {
              if (!res.headersSent) {
 diff --git a/dist/store.d.ts b/dist/store.d.ts
-index c7e717d5fc55e65cd6461e66df1ec931673e5698..1d2a6169c26ff771d97e3481ba297fba1bc5d522 100644
+index c7e717d..1d2a616 100644
 --- a/dist/store.d.ts
 +++ b/dist/store.d.ts
 @@ -3,10 +3,11 @@
@@ -471,20 +550,26 @@ index c7e717d5fc55e65cd6461e66df1ec931673e5698..1d2a6169c26ff771d97e3481ba297fba
  export declare function getLogBuffer(): string[];
  export declare function addLogClient(res: http.ServerResponse): void;
 diff --git a/dist/store.js b/dist/store.js
-index b12b787287c1cc6389280fc422b2dcba69697559..697c55eaba9c457997c501394018bda603b899fe 100644
+index b12b787..4e2bbba 100644
 --- a/dist/store.js
 +++ b/dist/store.js
-@@ -1,7 +1,9 @@
+@@ -1,15 +1,25 @@
  let snapshot = null;
  let lastUpdated = null;
 +let tasks = [];
++let workItems = [];
  export function setSnapshot(data) {
      snapshot = data;
 +    tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
++    workItems = Array.isArray(data && data.work_items) ? data.work_items : [];
      lastUpdated = new Date().toISOString();
  }
++export function getWorkItems() {
++    return workItems;
++}
  export function getSnapshot() {
-@@ -10,6 +12,9 @@ export function getSnapshot() {
+     return snapshot;
+ }
  export function getLastUpdated() {
      return lastUpdated;
  }
@@ -495,7 +580,7 @@ index b12b787287c1cc6389280fc422b2dcba69697559..697c55eaba9c457997c501394018bda6
  const LOG_BUFFER_MAX = 500;
  const logBuffer = [];
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..697a60c596708a97d8bc077786f90012e881f174 100644
+index 7cebaa6..697a60c 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -16,6 +16,26 @@ export interface DashboardSnapshot {
@@ -650,10 +735,10 @@ index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..697a60c596708a97d8bc077786f90012
 +    historyProvider?: DashboardHistoryProvider;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19e3ecad2a 100644
+index 36b9575..785768e 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3534 @@
+@@ -2,172 +2,3535 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -667,6 +752,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
 +    { href: '/dashboard/agent-groups', label: 'Teams', icon: '&#9654;', countKey: 'agentGroups' },
 +    { href: '/dashboard/sessions', label: 'Sessions', icon: '&#8635;', countKey: 'sessions' },
 +    { href: '/dashboard/tasks', label: 'Tasks', icon: '&#9202;' },
++    { href: '/dashboard/work-items', label: 'Work Items', icon: '&#9638;' },
 +    { href: '/dashboard/channels', label: 'Channels', icon: '&#8644;', countKey: 'channels' },
      { href: '/dashboard/messages', label: 'Messages', icon: '&#9993;' },
 -    { href: '/dashboard/users', label: 'Users', icon: '&#9679;' },
@@ -4293,7 +4379,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
        </a>`).join('\n');
      return `<!DOCTYPE html>
  <html lang="en">
-@@ -175,10 +3537,13 @@ export function layout(title, activePath, bodyHtml) {
+@@ -175,10 +3538,13 @@ export function layout(title, activePath, bodyHtml) {
    <meta charset="UTF-8">
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <meta name="dashboard-token" content="${token}">
@@ -4308,7 +4394,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
      async function api(path) {
        const headers = {};
        if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-@@ -186,6 +3544,25 @@ export function layout(title, activePath, bodyHtml) {
+@@ -186,6 +3552,25 @@ export function layout(title, activePath, bodyHtml) {
        if (!res.ok) throw new Error('API error: ' + res.status);
        return res.json();
      }
@@ -4334,7 +4420,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
      function badge(text, color) {
        return '<span class="badge badge-' + color + '">' + esc(text) + '</span>';
      }
-@@ -193,10 +3570,17 @@ export function layout(title, activePath, bodyHtml) {
+@@ -193,10 +3578,17 @@ export function layout(title, activePath, bodyHtml) {
        if (s == null) return '';
        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
      }
@@ -4353,7 +4439,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
        if (s < 60) return s + 's ago';
        if (s < 3600) return Math.floor(s/60) + 'm ago';
        if (s < 86400) return Math.floor(s/3600) + 'h ago';
-@@ -207,9 +3591,15 @@ export function layout(title, activePath, bodyHtml) {
+@@ -207,9 +3599,15 @@ export function layout(title, activePath, bodyHtml) {
        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
        return String(n);
      }
@@ -4370,7 +4456,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
      }
      function friendlyId(channelType, pid) {
        if (!pid) return '?';
-@@ -222,12 +3612,52 @@ export function layout(title, activePath, bodyHtml) {
+@@ -222,12 +3620,52 @@ export function layout(title, activePath, bodyHtml) {
        if (channelType === 'teams' && pid.startsWith('teams:')) return 'chat-' + pid.slice(6, 12);
        return truncId(pid, 20);
      }
@@ -4425,7 +4511,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..75f85b3a5667c475a2e0e26e738dec19
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9d747694d 100644
+index 0c33db8..4e91521 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -5382,14 +5468,14 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..eb8bf8b4b883c0aa6235f70dc8c43cc9
    `);
 diff --git a/dist/ui/pages/audit.d.ts b/dist/ui/pages/audit.d.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..aafb8fc3a07ef232f1ff65dafbf7ca8a5f429a03
+index 0000000..aafb8fc
 --- /dev/null
 +++ b/dist/ui/pages/audit.d.ts
 @@ -0,0 +1 @@
 +export declare function auditPage(): string;
 diff --git a/dist/ui/pages/audit.js b/dist/ui/pages/audit.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..9486e34005d56f52397af3c29867bd6fdd579b62
+index 0000000..9486e34
 --- /dev/null
 +++ b/dist/ui/pages/audit.js
 @@ -0,0 +1,112 @@
@@ -5506,7 +5592,7 @@ index 0000000000000000000000000000000000000000..9486e34005d56f52397af3c29867bd6f
 +  `);
 +}
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
+index 4433c2a..e047d6b 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -5764,7 +5850,7 @@ index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3d
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
+index 93fe37a..6094425 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -6006,7 +6092,7 @@ index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
+index 38aa022..517e1e2 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -6411,7 +6497,7 @@ index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a4133124a99e088 100644
+index 3e0cc9e..fb4a1db 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
 @@ -1,165 +1,530 @@
@@ -6524,6 +6610,14 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +          return ' <a class="ag-wiki-link" href="/dashboard/wikis?id=' + encodeURIComponent(g.id) +
 +            '" title="Open team wiki" aria-label="Open team wiki">\u{1F4D6}</a>';
 +        }
++
++        var health = data.health || { status: 'idle', reasons: [] };
++        var healthEl = document.getElementById('ov-health');
++        var healthLabel = health.status === 'operational' ? 'All Systems Operational'
++          : health.status === 'degraded' ? 'Degraded' : 'Idle';
++        healthEl.className = 'ov-health-pill ov-health-' + health.status;
++        healthEl.title = (health.reasons || []).join(' · ') || (health.status === 'operational' ? 'Healthy' : '');
++        healthEl.innerHTML = '<span class="ov-health-dot"></span><span class="ov-health-label">' + esc(healthLabel) + '</span>';
  
 -        // Cards
 -        document.getElementById('cards').innerHTML = [
@@ -6533,26 +6627,6 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -          cardHtml('Messaging Groups', data.channels.messagingGroups),
 -          cardHtml('Users', data.users.total, data.users.owners + ' owners, ' + data.users.globalAdmins + ' admins'),
 -          cardHtml('Uptime', formatUptime(data.uptime), data.assistantName),
--        ].join('');
-+        var health = data.health || { status: 'idle', reasons: [] };
-+        var healthEl = document.getElementById('ov-health');
-+        var healthLabel = health.status === 'operational' ? 'All Systems Operational'
-+          : health.status === 'degraded' ? 'Degraded' : 'Idle';
-+        healthEl.className = 'ov-health-pill ov-health-' + health.status;
-+        healthEl.title = (health.reasons || []).join(' · ') || (health.status === 'operational' ? 'Healthy' : '');
-+        healthEl.innerHTML = '<span class="ov-health-dot"></span><span class="ov-health-label">' + esc(healthLabel) + '</span>';
- 
--        // Token summary cards
--        var t = tokenData.totals || {};
--        var cacheHitRate = (t.cacheReadTokens && (t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens))
--          ? Math.round(t.cacheReadTokens / (t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens) * 100) : 0;
--
--        document.getElementById('tokens').innerHTML = [
--          cardHtml('API Requests', formatNum(t.requests || 0)),
--          cardHtml('Input Tokens', formatNum(t.inputTokens || 0)),
--          cardHtml('Output Tokens', formatNum(t.outputTokens || 0)),
--          cardHtml('Cache Read', formatNum(t.cacheReadTokens || 0), cacheHitRate + '% cache hit rate'),
--          cardHtml('Cache Created', formatNum(t.cacheCreationTokens || 0)),
 +        var liveChannels = data.channels.live || [];
 +        var channelChips = liveChannels.length
 +          ? liveChannels.map(function(c){ return '<span class="ov-chip">' + esc(c) + '</span>'; }).join('')
@@ -6566,8 +6640,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +          kpiCard('clock',   'UPTIME',           formatUptime(data.uptime), data.assistantName, 'gold'),
          ].join('');
  
--        // Token by model + group breakdown
--        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+-        // Token summary cards
 +        // Sortable By Model / By Agent tables. Click any column header to sort
 +        // by it (label column sorts alphabetically, the rest numerically);
 +        // clicking the active column toggles asc/desc. In-memory, resets on reload.
@@ -6614,7 +6687,17 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +        }
 +        function renderTokens(tokenData) {
 +        ovLastTokenData = tokenData;
-+        var t = tokenData.totals || {};
+         var t = tokenData.totals || {};
+-        var cacheHitRate = (t.cacheReadTokens && (t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens))
+-          ? Math.round(t.cacheReadTokens / (t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens) * 100) : 0;
+-
+-        document.getElementById('tokens').innerHTML = [
+-          cardHtml('API Requests', formatNum(t.requests || 0)),
+-          cardHtml('Input Tokens', formatNum(t.inputTokens || 0)),
+-          cardHtml('Output Tokens', formatNum(t.outputTokens || 0)),
+-          cardHtml('Cache Read', formatNum(t.cacheReadTokens || 0), cacheHitRate + '% cache hit rate'),
+-          cardHtml('Cache Created', formatNum(t.cacheCreationTokens || 0)),
+-        ].join('');
 +        var hitRateRaw = (typeof t.cacheHitRate === 'number')
 +          ? t.cacheHitRate
 +          : (t.cacheReadTokens && (t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens))
@@ -6627,23 +6710,13 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +          tokenCell('CACHE READ', formatNum(t.cacheReadTokens || 0), hitRatePct + '% hit rate') +
 +          tokenCell('CACHE CREATED', formatNum(t.cacheCreationTokens || 0)) +
 +          tokenCell('TOTAL COST', fmtUsd(t.costUsd || 0), null, true);
- 
--        // By model
--        detailHtml += '<div class="detail-panel"><h4 style="color:#ccc;margin-bottom:8px">By Model</h4>';
++
 +        var detailHtml = '';
--        var models = tokenData.byModel || {};
--        detailHtml += '<table><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
 +        var modelRows = ovSortRows(tokenData.byModel, ovSort.model);
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Model</h3>' +
 +          '<table class="ov-table"><thead><tr>' + ovSortTh('model', 'label', 'Model') + ovSortTh('model', 'requests', 'Requests') + ovSortTh('model', 'in', 'In') + ovSortTh('model', 'out', 'Out') + ovSortTh('model', 'cacheRead', 'Cache Read') + ovSortTh('model', 'cacheWrite', 'Cache Write') + ovSortTh('model', 'cost', 'Cost') + '</tr></thead><tbody>';
--        for (var m in models) {
--          var mv = models[m];
 +        for (var mi = 0; mi < modelRows.length; mi++) {
 +          var mEntry = modelRows[mi], mv = mEntry.v;
--          detailHtml += '<tr><td>' + badge(m, 'blue') + '</td><td>' + formatNum(mv.requests) + '</td>' +
--            '<td>' + formatNum(mv.inputTokens) + '</td><td>' + formatNum(mv.outputTokens) + '</td>' +
--            '<td style="color:#4ade80">' + formatNum(mv.cacheReadTokens) + '</td>' +
--            '<td style="color:#facc15">' + formatNum(mv.cacheCreationTokens) + '</td></tr>';
 +          detailHtml += '<tr><td>' + badge(mEntry.key, 'blue') + '</td>' +
 +            '<td>' + formatNum(mv.requests) + '</td>' +
 +            '<td>' + formatNum(mv.inputTokens) + '</td>' +
@@ -6651,7 +6724,23 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +            '<td class="ov-num-cache-read">' + formatNum(mv.cacheReadTokens) + '</td>' +
 +            '<td class="ov-num-cache-write">' + formatNum(mv.cacheCreationTokens) + '</td>' +
 +            '<td class="ov-num-cost">' + fmtUsd(mv.costUsd || 0) + '</td></tr>';
-         }
++        }
++        detailHtml += '</tbody></table></div>';
+ 
+-        // Token by model + group breakdown
+-        var detailHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+-
+-        // By model
+-        detailHtml += '<div class="detail-panel"><h4 style="color:#ccc;margin-bottom:8px">By Model</h4>';
+-        var models = tokenData.byModel || {};
+-        detailHtml += '<table><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
+-        for (var m in models) {
+-          var mv = models[m];
+-          detailHtml += '<tr><td>' + badge(m, 'blue') + '</td><td>' + formatNum(mv.requests) + '</td>' +
+-            '<td>' + formatNum(mv.inputTokens) + '</td><td>' + formatNum(mv.outputTokens) + '</td>' +
+-            '<td style="color:#4ade80">' + formatNum(mv.cacheReadTokens) + '</td>' +
+-            '<td style="color:#facc15">' + formatNum(mv.cacheCreationTokens) + '</td></tr>';
+-        }
 -        detailHtml += '</table></div>';
 -
 -        // By group
@@ -6660,8 +6749,6 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -        detailHtml += '<table><tr><th>Group</th><th>Requests</th><th>In</th><th>Out</th><th>Cache Read</th><th>Cache Write</th></tr>';
 -        for (var gid in groups) {
 -          var gv = groups[gid];
-+        detailHtml += '</tbody></table></div>';
-+
 +        var teamRows = ovSortRows(tokenData.byGroup, ovSort.team, function(k, v){ return v.name || k; });
 +        detailHtml += '<div class="ov-panel"><h3 class="ov-panel-title">By Agent</h3>' +
 +          '<table class="ov-table"><thead><tr>' + ovSortTh('team', 'label', 'Agent') + ovSortTh('team', 'requests', 'Requests') + ovSortTh('team', 'in', 'In') + ovSortTh('team', 'out', 'Out') + ovSortTh('team', 'cacheRead', 'Cache Read') + ovSortTh('team', 'cacheWrite', 'Cache Write') + ovSortTh('team', 'cost', 'Cost') + '</tr></thead><tbody>';
@@ -6741,20 +6828,6 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +        });
          if (buckets.length === 0) {
 -          document.getElementById('chart').innerHTML = '<div class="loading">No activity data</div>';
--        } else {
--          document.getElementById('chart').innerHTML =
--            '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:11px">' + badge('inbound', 'blue') + ' ' + badge('outbound', 'green') + '</div>' +
--            buckets.map(function(b) {
--              var hour = b.hour.slice(11, 13) + ':00';
--              var inW = Math.max(2, (b.inbound / maxVal) * 300);
--              var outW = Math.max(2, (b.outbound / maxVal) * 300);
--              return '<div class="chart-bar-row">' +
--                '<span class="chart-label">' + hour + '</span>' +
--                '<div class="chart-bar chart-bar-in" style="width:' + inW + 'px"></div>' +
--                '<div class="chart-bar chart-bar-out" style="width:' + outW + 'px"></div>' +
--                '<span class="chart-value">' + b.inbound + '/' + b.outbound + '</span>' +
--                '</div>';
--            }).join('');
 +          document.getElementById('ov-chart').innerHTML = '<div class="ov-loading">No activity data</div>';
 +          return;
 +        }
@@ -6842,9 +6915,28 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 +          infraHtml += '<div class="ov-infra-warn">' +
 +            health.reasons.map(function(r){ return esc(r); }).join(' · ') +
 +            '</div>';
-         }
++        }
 +        document.getElementById('ov-infra').innerHTML = infraHtml;
- 
++
++        var agentGroupsList = Array.isArray(agentGroups) ? agentGroups : [];
++        if (agentGroupsList.length === 0) {
++          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No teams</div>';
+         } else {
+-          document.getElementById('chart').innerHTML =
+-            '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:11px">' + badge('inbound', 'blue') + ' ' + badge('outbound', 'green') + '</div>' +
+-            buckets.map(function(b) {
+-              var hour = b.hour.slice(11, 13) + ':00';
+-              var inW = Math.max(2, (b.inbound / maxVal) * 300);
+-              var outW = Math.max(2, (b.outbound / maxVal) * 300);
+-              return '<div class="chart-bar-row">' +
+-                '<span class="chart-label">' + hour + '</span>' +
+-                '<div class="chart-bar chart-bar-in" style="width:' + inW + 'px"></div>' +
+-                '<div class="chart-bar chart-bar-out" style="width:' + outW + 'px"></div>' +
+-                '<span class="chart-value">' + b.inbound + '/' + b.outbound + '</span>' +
+-                '</div>';
+-            }).join('');
+-        }
+-
 -        // Groups list
 -        var groupsList = data.agentGroups.list || [];
 -        document.getElementById('groups').innerHTML = groupsList.length === 0
@@ -6854,10 +6946,6 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
 -              return '<tr><td><a href="/dashboard/agent-groups?id=' + esc(g.id) + '">' + esc(g.name) + '</a></td>' +
 -              '<td>' + esc(g.folder) + '</td></tr>';
 -            }).join('') + '</table>';
-+        var agentGroupsList = Array.isArray(agentGroups) ? agentGroups : [];
-+        if (agentGroupsList.length === 0) {
-+          document.getElementById('ov-groups').innerHTML = '<div class="ov-loading">No teams</div>';
-+        } else {
 +          // Order leads first, with sub-agents immediately under their lead, mirroring
 +          // the Agent Groups page list view. Reuses the .agent-groups-v2 CSS scope so
 +          // tags, indent and link styling stay in lockstep.
@@ -7056,7 +7144,7 @@ index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..1c742db837ce21686817034e8a413312
    `);
  }
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..ce5acd6c85c7e19a32b57017faec5ee961044ade 100644
+index 7e438eb..ce5acd6 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -7351,7 +7439,7 @@ index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..ce5acd6c85c7e19a32b57017faec5ee9
  }
 diff --git a/dist/ui/pages/tasks.d.ts b/dist/ui/pages/tasks.d.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec57f8e02eb
+index 0000000..96dd0c5
 --- /dev/null
 +++ b/dist/ui/pages/tasks.d.ts
 @@ -0,0 +1,3 @@
@@ -7360,7 +7448,7 @@ index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..482f03f696dc28b7174adb7ac6057a1f27a156eb
+index 0000000..482f03f
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
 @@ -0,0 +1,921 @@
@@ -8286,7 +8374,7 @@ index 0000000000000000000000000000000000000000..482f03f696dc28b7174adb7ac6057a1f
 +    }
 +}
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe8a5d6d30e177421c8d7b78af81da78962..531e82e5e7a7a6d6fc84644528073b9f2dd4a86e 100644
+index ea390fe..531e82e 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -8624,7 +8712,7 @@ index ea390fe8a5d6d30e177421c8d7b78af81da78962..531e82e5e7a7a6d6fc84644528073b9f
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa53ce9376
+index 0000000..69e3f97
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,797 @@
@@ -9425,9 +9513,916 @@ index 0000000000000000000000000000000000000000..fab790bd3f08de77d606449e8c2321aa
 +  </style>
 +  `);
 +}
+diff --git a/dist/ui/pages/work-items.js b/dist/ui/pages/work-items.js
+new file mode 100644
+index 0000000..4875fae
+--- /dev/null
++++ b/dist/ui/pages/work-items.js
+@@ -0,0 +1,901 @@
++/**
++ * Work Items page — one canonical store, three switchable views:
++ *   Kanban   — columns = the fixed status enum, click-to-move (touch-first)
++ *              with native drag layered on top as a desktop nicety;
++ *   List     — grouped by owner team, sorted by due date, overdue highlighted;
++ *   Timeline — CSS-grid week/day calendar, chips positioned by due date,
++ *              delivered (completed_at) vs still-planned distinguished.
++ *
++ * All three views render from ONE fetched dataset (/api/work-items, which
++ * the server filters per-viewer by owner-OR-assignee access). Mutations go
++ * through the injected host mutators via POST/PATCH /api/work-items*.
++ *
++ * Same architecture as tasks.js: framework-free, client script inlined in a
++ * single <script> tag, single quotes + string concat only (the outer template
++ * literal would eat backticks / ${}).
++ */
++import { layout } from '../layout.js';
++
++export function workItemsPage() {
++    return layout('Work Items', '/dashboard/work-items', `
++    <div id="wi-page" class="wi-v2"><div class="ov-loading">Loading…</div></div>
++    <style>
++    .wi-v2 .ov-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 12px; }
++    .wi-v2 .ov-header-title h2 { font-size: 24px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.3px; }
++    .wi-v2 .ov-subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
++    .wi-v2 .wi-new-btn {
++      background: linear-gradient(135deg, #2dd4bf, #0ea5e9); color: #06202b; border: 0; border-radius: 7px;
++      padding: 9px 16px; font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer;
++      box-shadow: 0 2px 10px rgba(45, 212, 191, 0.25);
++    }
++    .wi-v2 .wi-new-btn:hover { filter: brightness(1.1); }
++    .wi-v2 .wi-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
++    .wi-v2 .wi-views { display: inline-flex; background: #0f172a; border: 1px solid #1e293b; border-radius: 7px; overflow: hidden; }
++    .wi-v2 .wi-view-btn {
++      background: transparent; color: #94a3b8; border: 0; padding: 7px 14px; font-size: 12px; font-family: inherit;
++      cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-right: 1px solid #1e293b;
++    }
++    .wi-v2 .wi-view-btn:last-child { border-right: 0; }
++    .wi-v2 .wi-view-btn:hover { color: #cbd5e1; }
++    .wi-v2 .wi-view-btn.active { background: rgba(45, 212, 191, 0.1); color: #2dd4bf; font-weight: 600; }
++    .wi-v2 .wi-search {
++      flex: 1; min-width: 180px; background: #0f172a; color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px;
++      padding: 8px 12px; font-size: 13px; font-family: inherit;
++    }
++    .wi-v2 .wi-search:focus { outline: none; border-color: #2dd4bf; }
++    .wi-v2 .wi-select {
++      background: #0f172a; color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 8px 10px;
++      font-size: 12.5px; font-family: inherit; max-width: 220px;
++    }
++    .wi-v2 .wi-select:focus { outline: none; border-color: #2dd4bf; }
++    .wi-v2 .wi-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
++    .wi-v2 .wi-chip {
++      background: #0f172a; color: #94a3b8; border: 1px solid #1e293b; border-radius: 999px; padding: 5px 11px;
++      font-size: 11.5px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
++      transition: color 0.12s, background 0.12s, border-color 0.12s;
++    }
++    .wi-v2 .wi-chip:hover { border-color: #334155; color: #cbd5e1; }
++    .wi-v2 .wi-chip.active { color: #e2e8f0; background: rgba(45, 212, 191, 0.08); border-color: rgba(45, 212, 191, 0.4); }
++    .wi-v2 .wi-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #475569; }
++    .wi-v2 .wi-chip.active .wi-chip-dot { background: currentColor; }
++
++    /* Badges shared by all three views */
++    .wi-v2 .wi-avatar {
++      width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
++      color: #0b0f1a; font-weight: 700; font-size: 10.5px; flex: 0 0 auto; vertical-align: middle;
++    }
++    .wi-v2 .wi-human {
++      width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
++      background: #1e2944; border: 1px solid #334155; color: #cbd5e1; font-weight: 700; font-size: 10px; flex: 0 0 auto;
++      vertical-align: middle;
++    }
++    .wi-v2 .wi-who { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #94a3b8; min-width: 0; }
++    .wi-v2 .wi-who .wi-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
++    .wi-v2 .wi-flow-arrow { color: #475569; font-size: 10px; }
++    .wi-v2 .wi-kind {
++      display: inline-flex; align-items: center; gap: 4px; font-size: 10px; text-transform: uppercase;
++      letter-spacing: 0.4px; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: #14203a;
++    }
++    .wi-v2 .wi-due { font-size: 11px; color: #94a3b8; white-space: nowrap; }
++    .wi-v2 .wi-due.overdue { color: #f87171; font-weight: 700; }
++    .wi-v2 .wi-due.soon { color: #fbbf24; }
++    .wi-v2 .wi-notes-count { font-size: 10.5px; color: #64748b; }
++    .wi-v2 .wi-parent-crumb { font-size: 10.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .wi-v2 .wi-parent-crumb .wi-crumb-link { color: #67e8f9; cursor: pointer; }
++    .wi-v2 .wi-empty { color: #64748b; font-size: 12.5px; padding: 32px; text-align: center; }
++
++    /* ── Kanban ── */
++    .wi-v2 .wi-board { display: grid; grid-template-columns: repeat(5, minmax(230px, 1fr)); gap: 12px; align-items: start; overflow-x: auto; }
++    .wi-v2 .wi-col { background: #0b1222; border: 1px solid #17203a; border-radius: 10px; min-height: 120px; display: flex; flex-direction: column; }
++    .wi-v2 .wi-col.drag-over { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.04); }
++    .wi-v2 .wi-col-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #17203a; }
++    .wi-v2 .wi-col-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
++    .wi-v2 .wi-col-count { font-size: 10.5px; color: #64748b; background: #14203a; border-radius: 999px; padding: 1px 8px; }
++    .wi-v2 .wi-col-cards { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
++    .wi-v2 .wi-card {
++      background: #101a30; border: 1px solid #1c2946; border-radius: 8px; padding: 10px 11px; cursor: pointer;
++      display: flex; flex-direction: column; gap: 7px; transition: border-color 0.12s, transform 0.12s;
++    }
++    .wi-v2 .wi-card:hover { border-color: #2dd4bf66; }
++    .wi-v2 .wi-card.dragging { opacity: 0.5; }
++    .wi-v2 .wi-card-top { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
++    .wi-v2 .wi-card-title { font-size: 12.5px; color: #f1f5f9; font-weight: 600; line-height: 1.35; word-break: break-word; }
++    .wi-v2 .wi-card-detail { font-size: 11px; color: #94a3b8; line-height: 1.4; word-break: break-word; }
++    .wi-v2 .wi-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
++    .wi-v2 .wi-move-btn {
++      background: transparent; border: 1px solid #1e293b; color: #64748b; border-radius: 5px; font-size: 10px;
++      font-family: inherit; padding: 2px 7px; cursor: pointer;
++    }
++    .wi-v2 .wi-move-btn:hover { color: #2dd4bf; border-color: #2dd4bf66; }
++    .wi-v2 .wi-move-menu {
++      position: absolute; background: #0d1426; border: 1px solid #1f2944; border-radius: 8px; z-index: 60;
++      box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 4px; display: flex; flex-direction: column; min-width: 150px;
++    }
++    .wi-v2 .wi-move-menu button {
++      background: transparent; border: 0; color: #cbd5e1; font-family: inherit; font-size: 12px; text-align: left;
++      padding: 7px 10px; border-radius: 5px; cursor: pointer; display: flex; align-items: center; gap: 8px;
++    }
++    .wi-v2 .wi-move-menu button:hover { background: rgba(45, 212, 191, 0.1); color: #2dd4bf; }
++
++    /* ── List ── */
++    .wi-v2 .wi-list-group { margin-bottom: 18px; background: #0b1222; border: 1px solid #17203a; border-radius: 10px; overflow: hidden; }
++    .wi-v2 .wi-list-group-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid #17203a; }
++    .wi-v2 .wi-list-group-name { font-size: 13px; font-weight: 700; color: #f1f5f9; }
++    .wi-v2 .wi-table { width: 100%; border-collapse: collapse; }
++    .wi-v2 .wi-table td { padding: 9px 14px; border-bottom: 1px solid #131c33; font-size: 12px; color: #cbd5e1; vertical-align: middle; }
++    .wi-v2 .wi-table tr:last-child td { border-bottom: 0; }
++    .wi-v2 .wi-table tr { cursor: pointer; }
++    .wi-v2 .wi-table tr:hover td { background: rgba(45, 212, 191, 0.03); }
++    .wi-v2 .wi-table tr.overdue-row td:first-child { box-shadow: inset 2px 0 0 #f87171; }
++    .wi-v2 .wi-row-title { color: #f1f5f9; font-weight: 600; font-size: 12.5px; }
++    .wi-v2 .wi-status-pill {
++      display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
++      letter-spacing: 0.4px; padding: 3px 9px; border-radius: 999px; background: #14203a; white-space: nowrap;
++    }
++    .wi-v2 .wi-status-dot { width: 7px; height: 7px; border-radius: 50%; }
++
++    /* ── Timeline ── */
++    .wi-v2 .wi-cal { background: #0b1222; border: 1px solid #17203a; border-radius: 10px; overflow: hidden; }
++    .wi-v2 .wi-cal-head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid #17203a; }
++    .wi-v2 .wi-cal-dow { padding: 8px 10px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #64748b; text-align: left; }
++    .wi-v2 .wi-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
++    .wi-v2 .wi-cal-cell { min-height: 92px; border-bottom: 1px solid #131c33; border-right: 1px solid #131c33; padding: 6px; }
++    .wi-v2 .wi-cal-cell:nth-child(7n) { border-right: 0; }
++    .wi-v2 .wi-cal-daynum { font-size: 10.5px; color: #64748b; margin-bottom: 5px; }
++    .wi-v2 .wi-cal-cell.today { background: rgba(45, 212, 191, 0.05); }
++    .wi-v2 .wi-cal-cell.today .wi-cal-daynum { color: #2dd4bf; font-weight: 700; }
++    .wi-v2 .wi-cal-cell.past { background: rgba(0, 0, 0, 0.15); }
++    .wi-v2 .wi-cal-chip {
++      display: flex; align-items: center; gap: 5px; font-size: 10.5px; border-radius: 5px; padding: 3px 6px;
++      margin-bottom: 4px; cursor: pointer; border: 1px solid transparent; overflow: hidden;
++    }
++    .wi-v2 .wi-cal-chip .wi-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .wi-v2 .wi-cal-chip.planned { border-color: rgba(103, 232, 249, 0.35); color: #67e8f9; background: rgba(103, 232, 249, 0.06); }
++    .wi-v2 .wi-cal-chip.delivered { background: rgba(52, 211, 153, 0.14); color: #34d399; border-color: rgba(52, 211, 153, 0.3); }
++    .wi-v2 .wi-cal-chip.overdue { border-color: rgba(248, 113, 113, 0.45); color: #f87171; background: rgba(248, 113, 113, 0.07); }
++    .wi-v2 .wi-cal-nav { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #17203a; }
++    .wi-v2 .wi-cal-nav button {
++      background: #0f172a; border: 1px solid #1e293b; color: #94a3b8; border-radius: 6px; padding: 4px 10px;
++      font-family: inherit; font-size: 12px; cursor: pointer;
++    }
++    .wi-v2 .wi-cal-nav button:hover { color: #2dd4bf; border-color: #2dd4bf66; }
++    .wi-v2 .wi-cal-nav .wi-cal-label { font-size: 12.5px; font-weight: 600; color: #e2e8f0; }
++    .wi-v2 .wi-legend { display: inline-flex; gap: 14px; margin-left: auto; font-size: 10.5px; color: #64748b; align-items: center; }
++    .wi-v2 .wi-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
++
++    /* ── Drawer ── */
++    .wi-v2 .wi-drawer-backdrop { position: fixed; inset: 0; background: rgba(8, 12, 24, 0.55); z-index: 50; }
++    .wi-v2 .wi-drawer {
++      position: fixed; top: 0; right: 0; bottom: 0; width: 660px; max-width: 100%; background: #0d1426;
++      border-left: 1px solid #1f2944; z-index: 51; display: flex; flex-direction: column;
++      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
++    }
++    .wi-v2 .wi-drawer-header { display: flex; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid #1f2944; }
++    .wi-v2 .wi-drawer-header h3 { font-size: 14px; font-weight: 600; color: #f1f5f9; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++    .wi-v2 .wi-drawer-close { background: transparent; border: 0; color: #64748b; cursor: pointer; font-size: 15px; padding: 4px; }
++    .wi-v2 .wi-drawer-close:hover { color: #f87171; }
++    .wi-v2 .wi-drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
++    .wi-v2 .wi-field { margin-bottom: 14px; }
++    .wi-v2 .wi-label { display: block; font-size: 10.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
++    .wi-v2 .wi-input, .wi-v2 .wi-textarea, .wi-v2 .wi-drawer select {
++      width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px;
++      padding: 8px 10px; font-size: 12.5px; font-family: inherit; box-sizing: border-box;
++    }
++    .wi-v2 .wi-input:focus, .wi-v2 .wi-textarea:focus, .wi-v2 .wi-drawer select:focus { outline: none; border-color: #2dd4bf; }
++    .wi-v2 .wi-textarea { min-height: 64px; resize: vertical; }
++    .wi-v2 .wi-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
++    .wi-v2 .wi-seg { display: inline-flex; background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; overflow: hidden; }
++    .wi-v2 .wi-seg button { background: transparent; border: 0; border-right: 1px solid #1e293b; color: #94a3b8; font-family: inherit; font-size: 11.5px; padding: 6px 12px; cursor: pointer; }
++    .wi-v2 .wi-seg button:last-child { border-right: 0; }
++    .wi-v2 .wi-seg button.active { background: rgba(45, 212, 191, 0.1); color: #2dd4bf; font-weight: 600; }
++    .wi-v2 .wi-drawer-actions { display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid #1f2944; align-items: center; }
++    .wi-v2 .wi-btn-primary {
++      background: #2dd4bf; color: #06202b; border: 0; border-radius: 6px; padding: 9px 18px; font-size: 12.5px;
++      font-weight: 700; font-family: inherit; cursor: pointer;
++    }
++    .wi-v2 .wi-btn-primary:hover { filter: brightness(1.1); }
++    .wi-v2 .wi-btn-primary:disabled { opacity: 0.5; cursor: default; }
++    .wi-v2 .wi-btn-danger { background: transparent; color: #f87171; border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 6px; padding: 8px 14px; font-size: 12px; font-family: inherit; cursor: pointer; margin-left: auto; }
++    .wi-v2 .wi-btn-danger:hover { background: rgba(248, 113, 113, 0.1); }
++    .wi-v2 .wi-drawer-error { color: #f87171; font-size: 12px; padding: 0 18px 10px; }
++    .wi-v2 .wi-meta-line { font-size: 11px; color: #64748b; margin-bottom: 12px; line-height: 1.6; }
++    .wi-v2 .wi-note { border-left: 2px solid #1f2944; padding: 6px 0 6px 12px; margin-bottom: 10px; }
++    .wi-v2 .wi-note-head { font-size: 10.5px; color: #64748b; margin-bottom: 3px; }
++    .wi-v2 .wi-note-head .who { color: #94a3b8; font-weight: 600; }
++    .wi-v2 .wi-note-body { font-size: 12.5px; color: #cbd5e1; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
++    .wi-v2 .wi-note-compose { display: flex; gap: 8px; margin-top: 10px; }
++    .wi-v2 .wi-note-compose textarea { flex: 1; min-height: 48px; }
++    .wi-v2 .wi-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 11.5px; }
++    .wi-v2 .wi-kv .k { color: #64748b; }
++    .wi-v2 .wi-kv .v { color: #cbd5e1; word-break: break-all; }
++    .wi-v2 .wi-kv .v a { color: #67e8f9; }
++    @media (max-width: 1100px) { .wi-v2 .wi-board { grid-template-columns: repeat(5, 230px); } }
++    </style>
++    <script>
++    (function () {
++      var STATUSES = [
++        { key: 'open',        label: 'Open',        color: '#67e8f9' },
++        { key: 'in_progress', label: 'In Progress', color: '#2dd4bf' },
++        { key: 'blocked',     label: 'Blocked',     color: '#f87171' },
++        { key: 'done',        label: 'Done',        color: '#34d399' },
++        { key: 'cancelled',   label: 'Cancelled',   color: '#64748b' }
++      ];
++      var KINDS = [
++        { key: 'task',         label: 'Task',        icon: '&#9670;', color: '#67e8f9' },
++        { key: 'delegation',   label: 'Delegation',  icon: '&#8644;', color: '#c084fc' },
++        { key: 'deliverable',  label: 'Deliverable', icon: '&#9635;', color: '#fbbf24' },
++        { key: 'content_slot', label: 'Slot',        icon: '&#9636;', color: '#38bdf8' },
++        { key: 'cadence',      label: 'Cadence',     icon: '&#8635;', color: '#34d399' }
++      ];
++      var WELL_KNOWN_FIELDS = ['clusterLabel', 'liveUrl', 'sourceRef'];
++
++      var state = {
++        items: [],
++        teams: [],
++        users: [],
++        view: localStorage.getItem('wi.view') || 'kanban',
++        search: '',
++        team: localStorage.getItem('wi.team') || '',
++        kinds: {},
++        showClosed: localStorage.getItem('wi.showClosed') !== '0',
++        calOffset: 0,   // weeks relative to current week block
++        drawer: null    // { mode: 'create'|'edit', id?, saving? }
++      };
++      KINDS.forEach(function (k) { state.kinds[k.key] = true; });
++
++      function statusOf(key) { for (var i = 0; i < STATUSES.length; i++) if (STATUSES[i].key === key) return STATUSES[i]; return STATUSES[0]; }
++      function kindOf(key) { for (var i = 0; i < KINDS.length; i++) if (KINDS[i].key === key) return KINDS[i]; return KINDS[0]; }
++      function byId(id) { for (var i = 0; i < state.items.length; i++) if (state.items[i].id === id) return state.items[i]; return null; }
++
++      function hueFor(s) {
++        var h = 0; s = s || '';
++        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
++        return Math.abs(h) % 360;
++      }
++      function teamAvatar(id, name) {
++        var hue = hueFor(id || name || '');
++        var style = 'background: linear-gradient(135deg, hsl(' + hue + ' 65% 55%), hsl(' + ((hue + 40) % 360) + ' 65% 45%))';
++        return '<span class="wi-avatar" style="' + style + '">' + esc((name || '?').charAt(0).toUpperCase()) + '</span>';
++      }
++      function humanAvatar(name) {
++        return '<span class="wi-human">' + esc((name || '?').charAt(0).toUpperCase()) + '</span>';
++      }
++
++      // ── date helpers ──
++      function dayKey(v) {
++        if (!v) return null;
++        if (/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) return v;
++        var d = new Date(v);
++        if (isNaN(d.getTime())) return null;
++        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
++      }
++      function todayKey() { return dayKey(new Date().toISOString().slice(0, 10) + 'T12:00:00') || new Date().toISOString().slice(0, 10); }
++      var TODAY = (function () {
++        var d = new Date();
++        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
++      })();
++      function isTerminal(s) { return s === 'done' || s === 'cancelled'; }
++      function isOverdue(item) {
++        var dk = dayKey(item.dueAt);
++        return !!dk && !isTerminal(item.status) && dk < TODAY;
++      }
++      function isSoon(item) {
++        var dk = dayKey(item.dueAt);
++        if (!dk || isTerminal(item.status)) return false;
++        var due = new Date(dk + 'T00:00:00').getTime();
++        var now = new Date(TODAY + 'T00:00:00').getTime();
++        var diff = Math.round((due - now) / 86400000);
++        return diff >= 0 && diff <= 3;
++      }
++      function dueText(item) {
++        var dk = dayKey(item.dueAt);
++        if (!dk) return '';
++        var due = new Date(dk + 'T00:00:00').getTime();
++        var now = new Date(TODAY + 'T00:00:00').getTime();
++        var diff = Math.round((due - now) / 86400000);
++        if (diff === 0) return 'due today';
++        if (diff === 1) return 'due tomorrow';
++        if (diff === -1) return 'overdue 1d';
++        if (diff < 0) return 'overdue ' + (-diff) + 'd';
++        if (diff <= 14) return 'due in ' + diff + 'd';
++        return 'due ' + dk;
++      }
++
++      // ── shared render helpers ──
++      function whoHtml(item) {
++        var owner = '<span class="wi-who">' + teamAvatar(item.ownerAgentGroupId, item.ownerName) +
++          '<span class="wi-who-name">' + esc(item.ownerName) + '</span></span>';
++        if (!item.assigneeName) return owner;
++        var same = item.assigneeKind === 'team' && item.assigneeAgentGroupId === item.ownerAgentGroupId;
++        if (same) return owner;
++        var av = item.assigneeKind === 'human' ? humanAvatar(item.assigneeName) : teamAvatar(item.assigneeAgentGroupId, item.assigneeName);
++        return owner + ' <span class="wi-flow-arrow">&#10132;</span> <span class="wi-who">' + av +
++          '<span class="wi-who-name">' + esc(item.assigneeName) + '</span></span>';
++      }
++      function kindBadge(item) {
++        var k = kindOf(item.kind);
++        return '<span class="wi-kind" style="color:' + k.color + '">' + k.icon + ' ' + k.label + '</span>';
++      }
++      function dueBadge(item) {
++        if (!item.dueAt) return '';
++        var cls = isOverdue(item) ? ' overdue' : (isSoon(item) ? ' soon' : '');
++        return '<span class="wi-due' + cls + '">&#9202; ' + esc(dueText(item)) + '</span>';
++      }
++      function statusPill(item) {
++        var s = statusOf(item.status);
++        return '<span class="wi-status-pill" style="color:' + s.color + '"><span class="wi-status-dot" style="background:' + s.color + '"></span>' +
++          s.label + (item.statusDetail ? ' &middot; <span style="text-transform:none;font-weight:500">' + esc(item.statusDetail) + '</span>' : '') + '</span>';
++      }
++
++      function visibleItems() {
++        var q = state.search.toLowerCase();
++        return state.items.filter(function (it) {
++          if (state.team && it.ownerAgentGroupId !== state.team && it.assigneeAgentGroupId !== state.team) return false;
++          if (!state.kinds[it.kind]) return false;
++          if (!state.showClosed && isTerminal(it.status)) return false;
++          if (q && (it.title + ' ' + (it.statusDetail || '') + ' ' + (it.ownerName || '') + ' ' + (it.assigneeName || '')).toLowerCase().indexOf(q) < 0) return false;
++          return true;
++        });
++      }
++
++      // ── top-level render ──
++      function render() {
++        var root = document.getElementById('wi-page');
++        var open = state.items.filter(function (i) { return !isTerminal(i.status); }).length;
++        var overdue = state.items.filter(isOverdue).length;
++
++        var html =
++          '<header class="ov-header">' +
++            '<div class="ov-header-title"><h2>Work Items</h2>' +
++            '<p class="ov-subtitle">Every team\\u2019s live work state — ' + open + ' open' +
++            (overdue ? ', <span style="color:#f87171;font-weight:700">' + overdue + ' overdue</span>' : '') +
++            '. Create, edit, reassign, or cancel; affected teams are woken automatically.</p></div>' +
++            '<button type="button" class="wi-new-btn" id="wi-new">+ New item</button>' +
++          '</header>' +
++          '<div class="wi-toolbar">' +
++            '<div class="wi-views">' + ['kanban', 'list', 'timeline'].map(function (v) {
++              var icons = { kanban: '&#9638;', list: '&#9776;', timeline: '&#9202;' };
++              var labels = { kanban: 'Kanban', list: 'List', timeline: 'Timeline' };
++              return '<button type="button" class="wi-view-btn' + (state.view === v ? ' active' : '') + '" data-view="' + v + '">' + icons[v] + ' ' + labels[v] + '</button>';
++            }).join('') + '</div>' +
++            '<input type="search" id="wi-search" class="wi-search" placeholder="Search title, detail, team\\u2026" value="' + esc(state.search) + '">' +
++            '<select id="wi-team" class="wi-select"><option value="">All teams</option>' +
++              state.teams.map(function (t) {
++                return '<option value="' + esc(t.id) + '"' + (state.team === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
++              }).join('') + '</select>' +
++            '<div class="wi-chips">' + KINDS.map(function (k) {
++              return '<button type="button" class="wi-chip' + (state.kinds[k.key] ? ' active' : '') + '" data-kind="' + k.key + '" style="' + (state.kinds[k.key] ? 'color:' + k.color : '') + '">' +
++                '<span class="wi-chip-dot"></span>' + k.label + '</button>';
++            }).join('') +
++            '<button type="button" class="wi-chip' + (state.showClosed ? ' active' : '') + '" id="wi-closed-toggle"><span class="wi-chip-dot"></span>Closed</button>' +
++            '</div>' +
++          '</div>' +
++          '<div id="wi-view"></div>' +
++          '<div id="wi-drawer-mount"></div>';
++
++        root.innerHTML = html;
++
++        document.getElementById('wi-new').onclick = function () { openDrawer({ mode: 'create' }); };
++        Array.prototype.forEach.call(root.querySelectorAll('.wi-view-btn'), function (b) {
++          b.onclick = function () { state.view = b.getAttribute('data-view'); localStorage.setItem('wi.view', state.view); render(); };
++        });
++        var search = document.getElementById('wi-search');
++        search.oninput = function () { state.search = search.value; renderView(); };
++        document.getElementById('wi-team').onchange = function (e) {
++          state.team = e.target.value; localStorage.setItem('wi.team', state.team); renderView();
++        };
++        Array.prototype.forEach.call(root.querySelectorAll('.wi-chip[data-kind]'), function (b) {
++          b.onclick = function () { var k = b.getAttribute('data-kind'); state.kinds[k] = !state.kinds[k]; render(); };
++        });
++        document.getElementById('wi-closed-toggle').onclick = function () {
++          state.showClosed = !state.showClosed;
++          localStorage.setItem('wi.showClosed', state.showClosed ? '1' : '0');
++          render();
++        };
++
++        renderView();
++        if (state.drawer) renderDrawer();
++      }
++
++      function renderView() {
++        var mount = document.getElementById('wi-view');
++        var items = visibleItems();
++        if (state.items.length === 0) {
++          mount.innerHTML = '<div class="wi-empty">No work items yet. Agents create them with <code>create_work_item</code>, or click \\u201c+ New item\\u201d.</div>';
++          return;
++        }
++        if (state.view === 'list') mount.innerHTML = listHtml(items);
++        else if (state.view === 'timeline') mount.innerHTML = timelineHtml(items);
++        else mount.innerHTML = kanbanHtml(items);
++        bindView(mount);
++      }
++
++      // ── Kanban ──
++      function cardHtml(item) {
++        var bits = ['<div class="wi-card" draggable="true" data-id="' + esc(item.id) + '">'];
++        bits.push('<div class="wi-card-top">' + kindBadge(item) + '<button type="button" class="wi-move-btn" data-move="' + esc(item.id) + '">move &#9662;</button></div>');
++        bits.push('<div class="wi-card-title">' + esc(item.title) + '</div>');
++        if (item.statusDetail) bits.push('<div class="wi-card-detail">' + esc(item.statusDetail) + '</div>');
++        if (item.parentTitle) bits.push('<div class="wi-parent-crumb">&#8627; <span class="wi-crumb-link" data-open="' + esc(item.parentId) + '">' + esc(item.parentTitle) + '</span></div>');
++        var foot = [whoHtml(item)];
++        var right = [];
++        if (item.dueAt) right.push(dueBadge(item));
++        if (item.noteCount) right.push('<span class="wi-notes-count">&#9998; ' + item.noteCount + '</span>');
++        bits.push('<div class="wi-card-foot">' + foot.join('') + '<span style="display:inline-flex;gap:8px;align-items:center">' + right.join('') + '</span></div>');
++        bits.push('</div>');
++        return bits.join('');
++      }
++
++      function kanbanHtml(items) {
++        var cols = STATUSES.filter(function (s) { return state.showClosed || !isTerminal(s.key); });
++        return '<div class="wi-board">' + cols.map(function (s) {
++          var colItems = items.filter(function (i) { return i.status === s.key; });
++          colItems.sort(function (a, b) { return (dayKey(a.dueAt) || '9999') < (dayKey(b.dueAt) || '9999') ? -1 : 1; });
++          return '<div class="wi-col" data-status="' + s.key + '">' +
++            '<div class="wi-col-head"><span class="wi-status-dot" style="background:' + s.color + ';width:8px;height:8px;border-radius:50%"></span>' +
++            '<span class="wi-col-title" style="color:' + s.color + '">' + s.label + '</span>' +
++            '<span class="wi-col-count">' + colItems.length + '</span></div>' +
++            '<div class="wi-col-cards">' + colItems.map(cardHtml).join('') + '</div></div>';
++        }).join('') + '</div>';
++      }
++
++      // ── List ──
++      function listHtml(items) {
++        var groups = {};
++        items.forEach(function (i) {
++          var key = i.ownerAgentGroupId;
++          (groups[key] = groups[key] || { name: i.ownerName, id: key, items: [] }).items.push(i);
++        });
++        var keys = Object.keys(groups).sort(function (a, b) { return groups[a].name < groups[b].name ? -1 : 1; });
++        if (!keys.length) return '<div class="wi-empty">Nothing matches the current filters.</div>';
++        return keys.map(function (k) {
++          var g = groups[k];
++          g.items.sort(function (a, b) { return (dayKey(a.dueAt) || '9999-99-99') < (dayKey(b.dueAt) || '9999-99-99') ? -1 : 1; });
++          return '<div class="wi-list-group">' +
++            '<div class="wi-list-group-head">' + teamAvatar(g.id, g.name) + '<span class="wi-list-group-name">' + esc(g.name) + '</span>' +
++            '<span class="wi-col-count">' + g.items.length + '</span></div>' +
++            '<table class="wi-table"><tbody>' + g.items.map(function (i) {
++              return '<tr data-id="' + esc(i.id) + '" class="' + (isOverdue(i) ? 'overdue-row' : '') + '">' +
++                '<td style="width:38%"><div class="wi-row-title">' + esc(i.title) + '</div>' +
++                (i.parentTitle ? '<div class="wi-parent-crumb">&#8627; ' + esc(i.parentTitle) + '</div>' : '') + '</td>' +
++                '<td>' + kindBadge(i) + '</td>' +
++                '<td>' + statusPill(i) + '</td>' +
++                '<td>' + whoHtml(i) + '</td>' +
++                '<td>' + (i.kind === 'cadence'
++                  ? '<span class="wi-due">wk done: ' + esc(i.cadenceLastCompletedPeriod || 'never') + '</span>'
++                  : dueBadge(i)) + '</td>' +
++                '<td><span class="wi-notes-count">' + (i.noteCount ? '&#9998; ' + i.noteCount : '') + '</span></td>' +
++                '<td><span class="wi-due">' + timeAgo(i.updatedAt) + '</span></td>' +
++              '</tr>';
++            }).join('') + '</tbody></table></div>';
++        }).join('');
++      }
++
++      // ── Timeline (CSS-grid week/day calendar) ──
++      function timelineHtml(items) {
++        // 4-week window (1 past + 3 ahead), shiftable with the nav arrows.
++        var base = new Date(TODAY + 'T00:00:00');
++        var monday = new Date(base.getTime() - ((base.getDay() + 6) % 7) * 86400000 - 7 * 86400000 + state.calOffset * 7 * 86400000 * 4);
++        var days = [];
++        for (var i = 0; i < 28; i++) days.push(new Date(monday.getTime() + i * 86400000));
++        function dk(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
++
++        var byDay = {};
++        items.forEach(function (it) {
++          var cls, key;
++          if (it.status === 'done') { key = dayKey(it.completedAt) || dayKey(it.dueAt); cls = 'delivered'; }
++          else if (it.status === 'cancelled') { return; }
++          else { key = dayKey(it.dueAt); cls = isOverdue(it) ? 'overdue' : 'planned'; }
++          if (!key) return;
++          (byDay[key] = byDay[key] || []).push({ item: it, cls: cls });
++        });
++
++        var dows = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
++        var monthFmt = days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' \\u2013 ' +
++          days[27].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
++        var html = '<div class="wi-cal">' +
++          '<div class="wi-cal-nav">' +
++            '<button type="button" id="wi-cal-prev">&#8592;</button>' +
++            '<button type="button" id="wi-cal-today">Today</button>' +
++            '<button type="button" id="wi-cal-next">&#8594;</button>' +
++            '<span class="wi-cal-label">' + monthFmt + '</span>' +
++            '<span class="wi-legend">' +
++              '<span><span class="swatch" style="background:rgba(103,232,249,0.25);border:1px solid #67e8f9"></span>planned</span>' +
++              '<span><span class="swatch" style="background:rgba(52,211,153,0.4)"></span>delivered</span>' +
++              '<span><span class="swatch" style="background:rgba(248,113,113,0.35)"></span>overdue</span>' +
++            '</span>' +
++          '</div>' +
++          '<div class="wi-cal-head">' + dows.map(function (d) { return '<div class="wi-cal-dow">' + d + '</div>'; }).join('') + '</div>' +
++          '<div class="wi-cal-grid">' + days.map(function (d) {
++            var key = dk(d);
++            var cls = key === TODAY ? ' today' : (key < TODAY ? ' past' : '');
++            var chips = (byDay[key] || []).map(function (e) {
++              return '<div class="wi-cal-chip ' + e.cls + '" data-id="' + esc(e.item.id) + '" title="' + esc(e.item.title + ' — ' + e.item.ownerName) + '">' +
++                teamAvatar(e.item.ownerAgentGroupId, e.item.ownerName) +
++                '<span class="wi-chip-title">' + esc(e.item.title) + '</span></div>';
++            }).join('');
++            var label = d.getDate() === 1
++              ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
++              : String(d.getDate());
++            return '<div class="wi-cal-cell' + cls + '"><div class="wi-cal-daynum">' + label + '</div>' + chips + '</div>';
++          }).join('') + '</div></div>';
++        return html;
++      }
++
++      // ── view event binding ──
++      function bindView(mount) {
++        Array.prototype.forEach.call(mount.querySelectorAll('[data-id]'), function (el) {
++          el.addEventListener('click', function (ev) {
++            if (ev.target.closest('.wi-move-btn') || ev.target.closest('.wi-crumb-link')) return;
++            openDrawer({ mode: 'edit', id: el.getAttribute('data-id') });
++          });
++        });
++        Array.prototype.forEach.call(mount.querySelectorAll('.wi-crumb-link'), function (el) {
++          el.addEventListener('click', function (ev) {
++            ev.stopPropagation();
++            openDrawer({ mode: 'edit', id: el.getAttribute('data-open') });
++          });
++        });
++        // click-to-move: the primary Kanban interaction (touch-friendly)
++        Array.prototype.forEach.call(mount.querySelectorAll('.wi-move-btn'), function (btn) {
++          btn.addEventListener('click', function (ev) {
++            ev.stopPropagation();
++            showMoveMenu(btn, btn.getAttribute('data-move'));
++          });
++        });
++        // native drag layered on top as a desktop nicety — same moveItem() path
++        Array.prototype.forEach.call(mount.querySelectorAll('.wi-card'), function (card) {
++          card.addEventListener('dragstart', function (ev) {
++            ev.dataTransfer.setData('text/plain', card.getAttribute('data-id'));
++            card.classList.add('dragging');
++          });
++          card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
++        });
++        Array.prototype.forEach.call(mount.querySelectorAll('.wi-col'), function (col) {
++          col.addEventListener('dragover', function (ev) { ev.preventDefault(); col.classList.add('drag-over'); });
++          col.addEventListener('dragleave', function () { col.classList.remove('drag-over'); });
++          col.addEventListener('drop', function (ev) {
++            ev.preventDefault();
++            col.classList.remove('drag-over');
++            var id = ev.dataTransfer.getData('text/plain');
++            if (id) moveItem(id, col.getAttribute('data-status'));
++          });
++        });
++        var prev = document.getElementById('wi-cal-prev');
++        if (prev) {
++          prev.onclick = function () { state.calOffset--; renderView(); };
++          document.getElementById('wi-cal-next').onclick = function () { state.calOffset++; renderView(); };
++          document.getElementById('wi-cal-today').onclick = function () { state.calOffset = 0; renderView(); };
++        }
++      }
++
++      function showMoveMenu(anchor, id) {
++        closeMoveMenu();
++        var item = byId(id);
++        if (!item) return;
++        var menu = document.createElement('div');
++        menu.className = 'wi-move-menu';
++        menu.id = 'wi-move-menu';
++        STATUSES.forEach(function (s) {
++          if (s.key === item.status) return;
++          var b = document.createElement('button');
++          b.innerHTML = '<span class="wi-status-dot" style="background:' + s.color + ';width:8px;height:8px;border-radius:50%"></span>' + s.label;
++          b.onclick = function () { closeMoveMenu(); moveItem(id, s.key); };
++          menu.appendChild(b);
++        });
++        document.querySelector('.wi-v2').appendChild(menu);
++        var r = anchor.getBoundingClientRect();
++        menu.style.left = Math.min(r.left, window.innerWidth - 170) + 'px';
++        menu.style.top = (r.bottom + 4 + window.scrollY) + 'px';
++        setTimeout(function () {
++          document.addEventListener('click', closeMoveMenu, { once: true });
++        }, 0);
++      }
++      function closeMoveMenu() {
++        var m = document.getElementById('wi-move-menu');
++        if (m) m.remove();
++      }
++
++      function moveItem(id, status) {
++        var item = byId(id);
++        if (!item || item.status === status) return;
++        item.status = status; // optimistic
++        renderView();
++        mutate('PATCH', '/api/work-items/' + encodeURIComponent(id), { status: status })
++          .then(function () { refetchSoon(); })
++          .catch(function (e) { alert('Move failed: ' + e.message); refetch(); });
++      }
++
++      // ── Drawer (create / edit) ──
++      function openDrawer(d) { state.drawer = d; renderDrawer(); }
++      function closeDrawer() {
++        state.drawer = null;
++        var m = document.getElementById('wi-drawer-mount');
++        if (m) m.innerHTML = '';
++      }
++
++      function assigneeModeOf(item) {
++        if (!item) return 'none';
++        if (item.assigneeAgentGroupId) return 'team';
++        if (item.assigneeUserId || (item.assigneeKind === 'human' && item.assigneeName)) return 'human';
++        return 'none';
++      }
++
++      function renderDrawer() {
++        var mount = document.getElementById('wi-drawer-mount');
++        if (!mount || !state.drawer) return;
++        var isEdit = state.drawer.mode === 'edit';
++        var item = isEdit ? byId(state.drawer.id) : null;
++        if (isEdit && !item) { closeDrawer(); return; }
++
++        var mode = state.drawer.assigneeMode || assigneeModeOf(item);
++        state.drawer.assigneeMode = mode;
++
++        var teamOptions = state.teams.map(function (t) {
++          var sel = item && item.assigneeAgentGroupId === t.id ? ' selected' : '';
++          return '<option value="' + esc(t.id) + '"' + sel + '>' + esc(t.name) + '</option>';
++        }).join('');
++        var userOptions = state.users.map(function (u) {
++          var name = u.display_name || u.id;
++          var sel = item && item.assigneeUserId === u.id ? ' selected' : '';
++          return '<option value="' + esc(u.id) + '"' + sel + '>' + esc(name) + '</option>';
++        }).join('');
++        var ownerOptions = state.teams.map(function (t) {
++          var sel = item ? (item.ownerAgentGroupId === t.id ? ' selected' : '') : (state.team === t.id ? ' selected' : '');
++          return '<option value="' + esc(t.id) + '"' + sel + '>' + esc(t.name) + '</option>';
++        }).join('');
++        var ownerForParent = item ? item.ownerAgentGroupId : null;
++        var parentOptions = '<option value="">— none —</option>' + state.items.filter(function (p) {
++          if (item && p.id === item.id) return false;
++          if (ownerForParent && p.ownerAgentGroupId !== ownerForParent) return false;
++          return !isTerminal(p.status);
++        }).map(function (p) {
++          var sel = item && item.parentId === p.id ? ' selected' : '';
++          var t = p.title.length > 70 ? p.title.slice(0, 67) + '\\u2026' : p.title;
++          return '<option value="' + esc(p.id) + '"' + sel + '>' + esc(t) + '</option>';
++        }).join('');
++
++        var fieldsRows = '';
++        if (item && item.fields) {
++          var keys = Object.keys(item.fields);
++          if (keys.length) {
++            fieldsRows = '<div class="wi-field"><span class="wi-label">Fields</span><div class="wi-kv">' + keys.map(function (k) {
++              var v = String(item.fields[k]);
++              var isUrl = /^https?:\\/\\//.test(v);
++              var known = WELL_KNOWN_FIELDS.indexOf(k) >= 0;
++              return '<span class="k">' + esc(k) + (known ? '' : ' *') + '</span><span class="v">' +
++                (isUrl ? '<a href="' + esc(v) + '" target="_blank" rel="noopener noreferrer">' + esc(v) + '</a>' : esc(v)) + '</span>';
++            }).join('') + '</div></div>';
++          }
++        }
++
++        var notesHtml = '';
++        if (item) {
++          var notes = item.notes || [];
++          notesHtml = '<div class="wi-field"><span class="wi-label">Notes (' + (item.noteCount || 0) + ')</span>' +
++            (notes.length === 0 ? '<div class="wi-note-body" style="color:#64748b">No notes yet.</div>' : notes.map(function (n) {
++              return '<div class="wi-note"><div class="wi-note-head"><span class="who">' + esc(n.authorName || n.authorKind) + '</span> &middot; ' +
++                esc(new Date(n.ts).toLocaleString()) + ' &middot; ' + esc(n.authorKind) + '</div>' +
++                '<div class="wi-note-body">' + esc(n.note) + '</div></div>';
++            }).join('')) +
++            '<div class="wi-note-compose"><textarea id="wi-note-input" class="wi-textarea" placeholder="Add a note (visible to the team\\u2019s agent)\\u2026"></textarea>' +
++            '<button type="button" class="wi-btn-primary" id="wi-note-add">Add</button></div></div>';
++        }
++
++        var dueVal = item && item.dueAt ? (dayKey(item.dueAt) || '') : '';
++        var followVal = item && item.followUpAt ? String(item.followUpAt).slice(0, 16) : '';
++
++        var html =
++          '<div class="wi-drawer-backdrop" id="wi-backdrop"></div>' +
++          '<div class="wi-drawer" role="dialog" aria-modal="true">' +
++            '<div class="wi-drawer-header"><h3>' + (isEdit ? esc(item.title) : 'New work item') + '</h3>' +
++              (isEdit ? statusPill(item) : '') +
++              '<button type="button" class="wi-drawer-close" id="wi-drawer-close">&#10005;</button></div>' +
++            '<div class="wi-drawer-body">' +
++              (isEdit
++                ? '<div class="wi-meta-line">' + kindBadge(item) + ' &nbsp; id <code>' + esc(item.id) + '</code> &middot; created ' +
++                  esc(new Date(item.createdAt).toLocaleString()) + ' by ' + esc(item.createdByKind) +
++                  (item.completedAt ? ' &middot; <span style="color:#34d399">delivered ' + esc(new Date(item.completedAt).toLocaleString()) + '</span>' : '') +
++                  '</div>'
++                : '') +
++              '<div class="wi-field"><span class="wi-label">Title</span><input id="wi-f-title" class="wi-input" value="' + (item ? esc(item.title) : '') + '" placeholder="What must happen"></div>' +
++              '<div class="wi-grid2">' +
++                '<div class="wi-field"><span class="wi-label">' + (isEdit ? 'Status' : 'Owner team (the board it lives on)') + '</span>' +
++                  (isEdit
++                    ? '<select id="wi-f-status">' + STATUSES.map(function (s) {
++                        return '<option value="' + s.key + '"' + (item.status === s.key ? ' selected' : '') + '>' + s.label + '</option>';
++                      }).join('') + '</select>'
++                    : '<select id="wi-f-owner">' + ownerOptions + '</select>') +
++                '</div>' +
++                '<div class="wi-field"><span class="wi-label">Kind</span><select id="wi-f-kind">' + KINDS.map(function (k) {
++                  return '<option value="' + k.key + '"' + (item && item.kind === k.key ? ' selected' : '') + '>' + k.label + '</option>';
++                }).join('') + '</select></div>' +
++              '</div>' +
++              '<div class="wi-field"><span class="wi-label">Status detail (free text, team-specific)</span>' +
++                '<input id="wi-f-detail" class="wi-input" value="' + (item && item.statusDetail ? esc(item.statusDetail) : '') + '" placeholder="e.g. waiting on voice gate"></div>' +
++              '<div class="wi-field"><span class="wi-label">Assignee</span>' +
++                '<div class="wi-seg" id="wi-f-assignee-mode">' +
++                  '<button type="button" data-mode="none" class="' + (mode === 'none' ? 'active' : '') + '">None</button>' +
++                  '<button type="button" data-mode="team" class="' + (mode === 'team' ? 'active' : '') + '">Team</button>' +
++                  '<button type="button" data-mode="human" class="' + (mode === 'human' ? 'active' : '') + '">Human</button>' +
++                '</div>' +
++                '<div style="margin-top:8px">' +
++                  '<select id="wi-f-assignee-team" style="display:' + (mode === 'team' ? 'block' : 'none') + '">' + teamOptions + '</select>' +
++                  '<select id="wi-f-assignee-user" style="display:' + (mode === 'human' ? 'block' : 'none') + '">' + userOptions + '</select>' +
++                '</div>' +
++              '</div>' +
++              '<div class="wi-grid2">' +
++                '<div class="wi-field"><span class="wi-label">Due date</span><input type="date" id="wi-f-due" class="wi-input" value="' + esc(dueVal) + '"></div>' +
++                '<div class="wi-field"><span class="wi-label">Follow-up (nag if still open)</span><input type="datetime-local" id="wi-f-follow" class="wi-input" value="' + esc(followVal) + '"></div>' +
++              '</div>' +
++              '<div class="wi-field"><span class="wi-label">Parent item</span><select id="wi-f-parent">' + parentOptions + '</select></div>' +
++              fieldsRows +
++              (!isEdit ? '<div class="wi-field"><span class="wi-label">Initial note</span><textarea id="wi-f-note" class="wi-textarea" placeholder="Context, links, acceptance criteria\\u2026"></textarea></div>' : '') +
++              notesHtml +
++            '</div>' +
++            '<div class="wi-drawer-error" id="wi-drawer-error"></div>' +
++            '<div class="wi-drawer-actions">' +
++              '<button type="button" class="wi-btn-primary" id="wi-save">' + (isEdit ? 'Save changes' : 'Create item') + '</button>' +
++              (isEdit && item.status !== 'cancelled' ? '<button type="button" class="wi-btn-danger" id="wi-cancel-item">Cancel item</button>' : '') +
++            '</div>' +
++          '</div>';
++
++        mount.innerHTML = html;
++
++        document.getElementById('wi-backdrop').onclick = closeDrawer;
++        document.getElementById('wi-drawer-close').onclick = closeDrawer;
++        Array.prototype.forEach.call(mount.querySelectorAll('#wi-f-assignee-mode button'), function (b) {
++          b.onclick = function () {
++            state.drawer.assigneeMode = b.getAttribute('data-mode');
++            renderDrawer();
++          };
++        });
++
++        var noteAdd = document.getElementById('wi-note-add');
++        if (noteAdd) {
++          noteAdd.onclick = function () {
++            var text = document.getElementById('wi-note-input').value.trim();
++            if (!text || !item) return;
++            noteAdd.disabled = true;
++            mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action', { action: 'note', note: text })
++              .then(function () { return refetch(); })
++              .then(function () { renderDrawer(); })
++              .catch(function (e) { showDrawerError(e.message); noteAdd.disabled = false; });
++          };
++        }
++
++        var cancelBtn = document.getElementById('wi-cancel-item');
++        if (cancelBtn) {
++          cancelBtn.onclick = function () {
++            if (!confirm('Cancel this work item? The assignee (or owner) team will be notified.')) return;
++            mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action', { action: 'cancel' })
++              .then(function () { closeDrawer(); return refetch(); })
++              .catch(function (e) { showDrawerError(e.message); });
++          };
++        }
++
++        document.getElementById('wi-save').onclick = function () { saveDrawer(isEdit, item); };
++      }
++
++      function showDrawerError(msg) {
++        var el = document.getElementById('wi-drawer-error');
++        if (el) el.textContent = msg;
++      }
++
++      function drawerAssigneePayload(isEdit, item) {
++        var mode = state.drawer.assigneeMode;
++        var out = {};
++        if (mode === 'team') {
++          var t = document.getElementById('wi-f-assignee-team').value;
++          if (t) out.assigneeAgentGroupId = t;
++        } else if (mode === 'human') {
++          var u = document.getElementById('wi-f-assignee-user').value;
++          if (u) out.assigneeUserId = u;
++        }
++        return out;
++      }
++
++      function saveDrawer(isEdit, item) {
++        var btn = document.getElementById('wi-save');
++        btn.disabled = true;
++        showDrawerError('');
++        var title = document.getElementById('wi-f-title').value.trim();
++        var kind = document.getElementById('wi-f-kind').value;
++        var detail = document.getElementById('wi-f-detail').value;
++        var due = document.getElementById('wi-f-due').value || null;
++        var follow = document.getElementById('wi-f-follow').value || null;
++        var parent = document.getElementById('wi-f-parent').value || null;
++        if (follow) { try { follow = new Date(follow).toISOString(); } catch (e) { /* keep raw */ } }
++
++        if (!isEdit) {
++          var payload = {
++            title: title,
++            ownerAgentGroupId: document.getElementById('wi-f-owner').value,
++            kind: kind,
++            statusDetail: detail || null,
++            dueAt: due,
++            followUpAt: follow,
++            parentId: parent,
++            note: (document.getElementById('wi-f-note') || { value: '' }).value.trim() || null
++          };
++          var ap = drawerAssigneePayload(false, null);
++          for (var k in ap) payload[k] = ap[k];
++          mutate('POST', '/api/work-items', payload)
++            .then(function () { closeDrawer(); return refetch(); })
++            .catch(function (e) { showDrawerError(e.message); btn.disabled = false; });
++          return;
++        }
++
++        // Edit = one PATCH for fields, plus a reassign action if the assignee changed.
++        var patch = {
++          title: title,
++          status: document.getElementById('wi-f-status').value,
++          kind: kind,
++          statusDetail: detail || null,
++          dueAt: due,
++          followUpAt: follow,
++          parentId: parent || null
++        };
++        var beforeMode = assigneeModeOf(item);
++        var nowMode = state.drawer.assigneeMode;
++        var ap2 = drawerAssigneePayload(true, item);
++        var assigneeChanged =
++          nowMode !== beforeMode ||
++          (nowMode === 'team' && ap2.assigneeAgentGroupId !== item.assigneeAgentGroupId) ||
++          (nowMode === 'human' && ap2.assigneeUserId !== item.assigneeUserId);
++
++        mutate('PATCH', '/api/work-items/' + encodeURIComponent(item.id), patch)
++          .then(function () {
++            if (!assigneeChanged) return null;
++            return mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action',
++              Object.keys(ap2).length ? Object.assign({ action: 'reassign' }, ap2) : { action: 'reassign' });
++          })
++          .then(function () { closeDrawer(); return refetch(); })
++          .catch(function (e) { showDrawerError(e.message); btn.disabled = false; });
++      }
++
++      // ── data loading ──
++      function load() {
++        return Promise.all([
++          api('/api/work-items'),
++          api('/api/agent-groups'),
++          api('/api/users').catch(function () { return []; })
++        ]).then(function (res) {
++          state.items = Array.isArray(res[0]) ? res[0] : [];
++          var groups = Array.isArray(res[1]) ? res[1] : [];
++          state.teams = groups.map(function (g) { return { id: g.id, name: g.name }; })
++            .sort(function (a, b) { return a.name < b.name ? -1 : 1; });
++          state.users = (Array.isArray(res[2]) ? res[2] : []).slice()
++            .sort(function (a, b) { return (a.display_name || a.id) < (b.display_name || b.id) ? -1 : 1; });
++        });
++      }
++      function refetch() {
++        return api('/api/work-items').then(function (rows) {
++          state.items = Array.isArray(rows) ? rows : [];
++          render();
++        });
++      }
++      var refetchTimer = null;
++      function refetchSoon() {
++        // The pusher is nudged by every mutator, but the snapshot lands
++        // asynchronously (~1s) — fetch now for the optimistic state and once
++        // more after the push settles.
++        refetch();
++        if (refetchTimer) clearTimeout(refetchTimer);
++        refetchTimer = setTimeout(refetch, 1500);
++      }
++
++      load().then(render).catch(function (e) {
++        document.getElementById('wi-page').innerHTML = '<div class="ov-loading">Error: ' + esc(e.message) + '</div>';
++      });
++      setInterval(function () {
++        if (state.drawer) return; // don't clobber an open drawer
++        api('/api/work-items').then(function (rows) {
++          var next = JSON.stringify(rows);
++          if (next !== JSON.stringify(state.items)) { state.items = rows; render(); }
++        }).catch(function () { /* transient */ });
++      }, 30000);
++    })();
++    </script>
++  `);
++}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82e6b153d0
+index 0000000..d872c31
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,211 @@
@@ -9643,7 +10638,7 @@ index 0000000000000000000000000000000000000000..020f9ff064a34f67526c453053122b82
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5d6a76e243b21fbde07dbe495537523ec0d90ed3 100644
+index 27d581b..5d6a76e 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,10 @@

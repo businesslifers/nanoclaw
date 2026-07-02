@@ -93,11 +93,11 @@ import { getUserRoles, getAdminsOfAgentGroup } from './modules/permissions/db/us
 import { getUserDmsForUser } from './modules/permissions/db/user-dms.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
-import { configFromDb, type ContainerConfig } from './container-config.js';
-import { getContainerConfig } from './db/container-configs.js';
+import { getLiveContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
 import { collectTasks, type SessionRef } from './dashboard-tasks.js';
+import { collectWorkItems } from './dashboard-work-items.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
 
@@ -246,6 +246,7 @@ function postJson(config: PusherConfig, urlPath: string, data: unknown): void {
   req.end();
 }
 
+// eslint-disable-next-line no-control-regex -- intentional: strip ANSI escape sequences from log lines
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function startLogTail(config: PusherConfig): void {
@@ -305,12 +306,8 @@ function collectSnapshot(): Record<string, unknown> {
   // Per-container CPU/memory readings for the active set. This is the
   // input to the CPU watchdog AND a snapshot consumer in its own right
   // (rendered as columns on the dashboard Sessions table).
-  const activeContainers = getActiveContainerNames();
-  const containerStats = collectContainerStats(activeContainers);
-  // GC the watchdog against the *active session set*, not this stats batch —
-  // collectContainerStats returns [] on a transient docker failure, and
-  // GC'ing on the empty batch would wipe the high-CPU window on every hiccup.
-  cpuWatchdog.record(containerStats, new Set(activeContainers.keys()));
+  const containerStats = collectContainerStats(getActiveContainerNames());
+  cpuWatchdog.record(containerStats);
 
   // Decorate each session row with its current CPU/mem reading so the
   // dashboard can render columns without a second join. Sessions whose
@@ -369,6 +366,7 @@ function collectSnapshot(): Record<string, unknown> {
     messages,
     wikis: collectWikis(),
     tasks,
+    work_items: collectWorkItems(),
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
     audit: getRecentAudit(200),
@@ -434,6 +432,21 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   const allAgentGroups = getAllAgentGroups();
   const agentById = new Map(allAgentGroups.map((g) => [g.id, g] as const));
 
+  // Pre-fetch container config per group once so we can resolve effective
+  // provider/model for the group AND for sub-agent destination rows without
+  // an N+1 lookup. The dashboard surfaces the same value the runtime would
+  // pick — agent_groups.agent_provider falls through to container_configs.provider
+  // (mirroring resolveProviderName in container-runner.ts), and similarly for model.
+  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfig(g.id)] as const));
+  const effectiveProvider = (gid: string): string | null => {
+    const ag = agentById.get(gid);
+    return ag?.agent_provider || containerConfigById.get(gid)?.provider || null;
+  };
+  const effectiveModel = (gid: string): string | null => {
+    const ag = agentById.get(gid);
+    return ag?.model || containerConfigById.get(gid)?.model || null;
+  };
+
   // Pre-compute parent + sub-agent-count for every group based on the
   // `parent` destination convention that create_agent sets up. Cheap: one
   // getDestinations() per group, reused below. Agents not created via
@@ -465,8 +478,8 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       return {
         ...d,
         target_name: t?.name ?? null,
-        target_provider: t?.agent_provider ?? null,
-        target_model: null,
+        target_provider: effectiveProvider(d.target_id),
+        target_model: effectiveModel(d.target_id),
       };
     });
     const members = getMembers(g.id).map((m) => {
@@ -496,18 +509,15 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       id: g.id,
       name: g.name,
       folder: g.folder,
-      agent_provider: g.agent_provider,
-      model: null,
+      agent_provider: effectiveProvider(g.id),
+      model: effectiveModel(g.id),
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
       // Read from the DB (source of truth). The on-disk container.json
       // only exists for groups that have spawned a session, so reading
-      // from disk would hide config changes for never-run groups.
-      container_config: ((): ContainerConfig | null => {
-        const row = getContainerConfig(g.id);
-        return row ? configFromDb(row, g) : null;
-      })(),
+      // from disk hides config changes for never-run groups.
+      container_config: containerConfigById.get(g.id) ?? null,
       sessionCount: sessions.length,
       runningSessions: running.length,
       // Lifetime inbound-message count across this group's sessions — the
@@ -517,8 +527,8 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       destinations,
       members,
       admins,
-      created_at: g.created_at,
       hidden_in_dashboard: (g.hidden_in_dashboard ?? 0) === 1,
+      created_at: g.created_at,
     };
   });
 }
@@ -626,7 +636,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
       // Claude Code transcript (.claude-shared/projects/*.jsonl)
       const claudeEntries = scanJsonlTokens(path.join(sessionsDir, agDir));
       allEntries.push(...claudeEntries.map((e) => ({ ...e, agentGroupId: agDir })));
-      // Codex app-server trace log (per-group .codex-shared/logs_2.sqlite)
+      // Codex app-server logs (logs_2.sqlite per session)
       const codexEntries = scanCodexTokens(path.join(sessionsDir, agDir));
       allEntries.push(...codexEntries.map((e) => ({ ...e, agentGroupId: agDir })));
     }
@@ -637,9 +647,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   // than the cutoff; entries with timestamp='' (Codex without scrapable
   // timestamp) are kept in every range as a best-effort fallback.
   const spec = rangeSpec(range, nowMs);
-  const filtered = spec.cutoffIso
-    ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso)
-    : allEntries;
+  const filtered = spec.cutoffIso ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso) : allEntries;
 
   const byModel: Record<
     string,
@@ -800,63 +808,36 @@ function scanJsonlTokens(agentDir: string): TokenEntry[] {
 }
 
 /**
- * Pull Codex per-turn token usage from a group's app-server trace log.
+ * Pull Codex per-turn token usage from each session's app-server logs.
  *
- * Codex writes a `logs_2.sqlite` feedback-trace DB under its CODEX_HOME. The
- * current /add-codex layout mounts CODEX_HOME from a per-GROUP `.codex-shared`
- * dir, so the DB is per group. (The old hand-backported provider used a
- * per-SESSION `<sess>/codex/` CODEX_HOME, so this used to scan
- * `<sess>/codex/logs_2.sqlite` — a path the new layout never creates, which
- * left the Codex token panel silently empty.) We locate the DB anywhere under
- * `.codex-shared` (codex's exact subpath has drifted across versions) and
- * degrade to no entries if it's absent or its schema differs.
- *
- * Each `response.completed` body carries a JSON usage block like:
+ * Codex stores structured trace data in `<session>/codex/logs_2.sqlite`;
+ * every `response.completed` SSE event carries a JSON usage block like:
  *   "usage":{"input_tokens":N,"input_tokens_details":{"cached_tokens":C},"output_tokens":M,...}
- * Model name appears as `model=<name>` in the same body. We pair the two into
- * an entry shaped like the Claude-side bag so both feed the same totals.
+ * Model name is earlier in the same log body as `model=<name>` in the
+ * tracing spans. We pair the two to synthesise an entry shaped like the
+ * Claude-side bag so both feed the same totals.
  *
  * Cache semantics differ: Claude reports cache read + creation separately,
  * Codex reports cached_tokens (reads only). We bucket them as cacheReadTokens
  * and leave cacheCreationTokens=0 for Codex.
- *
- * NOTE: unverified against a live codex@0.138 run (needs vault auth + a real
- * turn — no `.codex-shared` exists until then). If the panel stays empty once
- * a codex group runs, the fallback is to capture usage from the provider's
- * app-server `turn/completed` stream and persist it ourselves rather than
- * scraping codex's internal DB.
  */
-function findCodexTraceDbs(root: string, maxDepth = 3): string[] {
-  const found: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    let ents: fs.Dirent[];
-    try {
-      ents = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of ents) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && e.name === 'logs_2.sqlite') found.push(full);
-      else if (e.isDirectory() && depth > 0) walk(full, depth - 1);
-    }
-  };
-  walk(root, maxDepth);
-  return found;
-}
-
 function scanCodexTokens(agentDir: string): TokenEntry[] {
   const entries: TokenEntry[] = [];
-  const dbPaths = findCodexTraceDbs(path.join(agentDir, '.codex-shared'));
-  if (dbPaths.length === 0) return entries;
-
+  let sessNames: string[];
+  try {
+    sessNames = fs.readdirSync(agentDir).filter((d) => d.startsWith('sess-'));
+  } catch {
+    return entries;
+  }
   const usageRe = /"usage":\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
   // Best-effort ISO timestamp scrape from the log body — matches the standard
   // 2025-01-02T03:04:05(.000)Z shape that Codex's tracing layer emits. If we
   // can't find one, the entry gets `timestamp: ''` and is treated as
   // "always include" by the range filter (matches the pre-range behavior).
   const tsRe = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/;
-  for (const dbPath of dbPaths) {
+  for (const sess of sessNames) {
+    const dbPath = path.join(agentDir, sess, 'codex', 'logs_2.sqlite');
+    if (!fs.existsSync(dbPath)) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true });
@@ -893,7 +874,7 @@ function scanCodexTokens(agentDir: string): TokenEntry[] {
         });
       }
     } catch {
-      /* missing `logs` table / different schema / locked DB — skip */
+      /* skip session */
     } finally {
       db?.close();
     }
@@ -1013,9 +994,9 @@ function scanActivity(range: RangeKey, nowMs = Date.now()) {
               const sql = spec.cutoffIso
                 ? `SELECT timestamp FROM ${table} WHERE timestamp > ?`
                 : `SELECT timestamp FROM ${table}`;
-              const rows = (spec.cutoffIso
-                ? db.prepare(sql).all(spec.cutoffIso)
-                : db.prepare(sql).all()) as { timestamp: string }[];
+              const rows = (spec.cutoffIso ? db.prepare(sql).all(spec.cutoffIso) : db.prepare(sql).all()) as {
+                timestamp: string;
+              }[];
               for (const row of rows) {
                 if (!row.timestamp) continue;
                 const key = bucketKeyOf(row.timestamp, spec.granularity);
