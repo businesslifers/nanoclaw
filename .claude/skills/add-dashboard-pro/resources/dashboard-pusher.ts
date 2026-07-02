@@ -24,6 +24,10 @@ import { listWikis } from './wiki/discovery.js';
 //       opus   — in 15,   out 75,   cache-read 1.5,   cache-write 18.75
 //       sonnet — in 3,    out 15,   cache-read 0.3,   cache-write 3.75
 //       haiku  — in 1,    out 5,    cache-read 0.1,   cache-write 1.25
+//   - Claude Sonnet 5 (`claude-sonnet-5`): introductory pricing through
+//     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
+//     the standard sonnet rate above after that date; update the 'sonnet-5'
+//     entry then (platform.claude.com/docs/en/about-claude/pricing#claude-sonnet-5-introductory-pricing).
 //   - OpenAI gpt-5 family (ChatGPT Plus subscription OR API):
 //       gpt-5.4      — in 1.25, out 10,   cache-read 0.125, cache-write 1.25
 //       gpt-5.4-mini — in 0.25, out 2,    cache-read 0.025, cache-write 0.25
@@ -31,6 +35,7 @@ import { listWikis } from './wiki/discovery.js';
 //     automatic and just discounts reads, so cacheWrite mirrors input.
 const PRICING = {
   opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   'gpt-5.4': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
@@ -40,6 +45,7 @@ const PRICING = {
 function modelFamily(model: string): keyof typeof PRICING | null {
   const m = (model || '').toLowerCase();
   if (m.includes('opus')) return 'opus';
+  if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
   if (m.includes('gpt-5.4-mini') || m.includes('gpt-5-mini') || m.includes('gpt-5.4mini')) return 'gpt-5.4-mini';
@@ -87,11 +93,11 @@ import { getUserRoles, getAdminsOfAgentGroup } from './modules/permissions/db/us
 import { getUserDmsForUser } from './modules/permissions/db/user-dms.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
-import { configFromDb, type ContainerConfig } from './container-config.js';
-import { getContainerConfig } from './db/container-configs.js';
+import { getLiveContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
 import { collectTasks, type SessionRef } from './dashboard-tasks.js';
+import { collectWorkItems } from './dashboard-work-items.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
 
@@ -240,6 +246,7 @@ function postJson(config: PusherConfig, urlPath: string, data: unknown): void {
   req.end();
 }
 
+// eslint-disable-next-line no-control-regex -- intentional: strip ANSI escape sequences from log lines
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function startLogTail(config: PusherConfig): void {
@@ -299,12 +306,8 @@ function collectSnapshot(): Record<string, unknown> {
   // Per-container CPU/memory readings for the active set. This is the
   // input to the CPU watchdog AND a snapshot consumer in its own right
   // (rendered as columns on the dashboard Sessions table).
-  const activeContainers = getActiveContainerNames();
-  const containerStats = collectContainerStats(activeContainers);
-  // GC the watchdog against the *active session set*, not this stats batch —
-  // collectContainerStats returns [] on a transient docker failure, and
-  // GC'ing on the empty batch would wipe the high-CPU window on every hiccup.
-  cpuWatchdog.record(containerStats, new Set(activeContainers.keys()));
+  const containerStats = collectContainerStats(getActiveContainerNames());
+  cpuWatchdog.record(containerStats);
 
   // Decorate each session row with its current CPU/mem reading so the
   // dashboard can render columns without a second join. Sessions whose
@@ -363,6 +366,7 @@ function collectSnapshot(): Record<string, unknown> {
     messages,
     wikis: collectWikis(),
     tasks,
+    work_items: collectWorkItems(),
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
     audit: getRecentAudit(200),
@@ -428,6 +432,21 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   const allAgentGroups = getAllAgentGroups();
   const agentById = new Map(allAgentGroups.map((g) => [g.id, g] as const));
 
+  // Pre-fetch container config per group once so we can resolve effective
+  // provider/model for the group AND for sub-agent destination rows without
+  // an N+1 lookup. The dashboard surfaces the same value the runtime would
+  // pick — agent_groups.agent_provider falls through to container_configs.provider
+  // (mirroring resolveProviderName in container-runner.ts), and similarly for model.
+  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfig(g.id)] as const));
+  const effectiveProvider = (gid: string): string | null => {
+    const ag = agentById.get(gid);
+    return ag?.agent_provider || containerConfigById.get(gid)?.provider || null;
+  };
+  const effectiveModel = (gid: string): string | null => {
+    const ag = agentById.get(gid);
+    return ag?.model || containerConfigById.get(gid)?.model || null;
+  };
+
   // Pre-compute parent + sub-agent-count for every group based on the
   // `parent` destination convention that create_agent sets up. Cheap: one
   // getDestinations() per group, reused below. Agents not created via
@@ -459,8 +478,8 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       return {
         ...d,
         target_name: t?.name ?? null,
-        target_provider: t?.agent_provider ?? null,
-        target_model: null,
+        target_provider: effectiveProvider(d.target_id),
+        target_model: effectiveModel(d.target_id),
       };
     });
     const members = getMembers(g.id).map((m) => {
@@ -490,18 +509,15 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       id: g.id,
       name: g.name,
       folder: g.folder,
-      agent_provider: g.agent_provider,
-      model: null,
+      agent_provider: effectiveProvider(g.id),
+      model: effectiveModel(g.id),
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
       // Read from the DB (source of truth). The on-disk container.json
       // only exists for groups that have spawned a session, so reading
-      // from disk would hide config changes for never-run groups.
-      container_config: ((): ContainerConfig | null => {
-        const row = getContainerConfig(g.id);
-        return row ? configFromDb(row, g) : null;
-      })(),
+      // from disk hides config changes for never-run groups.
+      container_config: containerConfigById.get(g.id) ?? null,
       sessionCount: sessions.length,
       runningSessions: running.length,
       // Lifetime inbound-message count across this group's sessions — the
@@ -511,8 +527,8 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       destinations,
       members,
       admins,
-      created_at: g.created_at,
       hidden_in_dashboard: (g.hidden_in_dashboard ?? 0) === 1,
+      created_at: g.created_at,
     };
   });
 }
@@ -631,9 +647,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   // than the cutoff; entries with timestamp='' (Codex without scrapable
   // timestamp) are kept in every range as a best-effort fallback.
   const spec = rangeSpec(range, nowMs);
-  const filtered = spec.cutoffIso
-    ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso)
-    : allEntries;
+  const filtered = spec.cutoffIso ? allEntries.filter((e) => !e.timestamp || e.timestamp > spec.cutoffIso) : allEntries;
 
   const byModel: Record<
     string,
@@ -1007,9 +1021,9 @@ function scanActivity(range: RangeKey, nowMs = Date.now()) {
               const sql = spec.cutoffIso
                 ? `SELECT timestamp FROM ${table} WHERE timestamp > ?`
                 : `SELECT timestamp FROM ${table}`;
-              const rows = (spec.cutoffIso
-                ? db.prepare(sql).all(spec.cutoffIso)
-                : db.prepare(sql).all()) as { timestamp: string }[];
+              const rows = (spec.cutoffIso ? db.prepare(sql).all(spec.cutoffIso) : db.prepare(sql).all()) as {
+                timestamp: string;
+              }[];
               for (const row of rows) {
                 if (!row.timestamp) continue;
                 const key = bucketKeyOf(row.timestamp, spec.granularity);
@@ -1122,5 +1136,16 @@ function collectWikis() {
     name: g.name,
     folder: g.folder,
   }));
-  return listWikis(process.cwd(), groups);
+  const wikis = listWikis(process.cwd(), groups);
+  // Surface the repo-level "global" wiki even when it lives under
+  // groups/global/wiki/ rather than the convention root <repoRoot>/wiki/.
+  // Only synthesize it when discovery didn't already find a global wiki, so a
+  // real root wiki/ (or a registered 'global' agent group) still takes priority.
+  if (!wikis.some((w) => w.isGlobal)) {
+    const fallback = listWikis(process.cwd(), [{ id: '_global', name: 'Global', folder: 'global' }]).find(
+      (w) => w.id === '_global',
+    );
+    if (fallback) wikis.push({ ...fallback, isGlobal: true });
+  }
+  return wikis;
 }
