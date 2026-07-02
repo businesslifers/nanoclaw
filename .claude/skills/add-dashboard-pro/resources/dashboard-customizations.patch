@@ -9515,10 +9515,10 @@ index 0000000..69e3f97
 +}
 diff --git a/dist/ui/pages/work-items.js b/dist/ui/pages/work-items.js
 new file mode 100644
-index 0000000..4875fae
+index 0000000..7448be4
 --- /dev/null
 +++ b/dist/ui/pages/work-items.js
-@@ -0,0 +1,901 @@
+@@ -0,0 +1,1018 @@
 +/**
 + * Work Items page — one canonical store, three switchable views:
 + *   Kanban   — columns = the fixed status enum, click-to-move (touch-first)
@@ -9613,6 +9613,18 @@ index 0000000..4875fae
 +    .wi-v2 .wi-col-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 +    .wi-v2 .wi-col-count { font-size: 10.5px; color: #64748b; background: #14203a; border-radius: 999px; padding: 1px 8px; }
 +    .wi-v2 .wi-col-cards { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
++    .wi-v2 .wi-col-empty {
++      border: 1px dashed #1c2946; border-radius: 8px; padding: 16px 10px; text-align: center;
++      color: #3e4c66; font-size: 11px;
++    }
++    .wi-v2 #wi-toast {
++      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(8px);
++      background: #0d1426; border: 1px solid rgba(248, 113, 113, 0.45); color: #f1a5a5;
++      border-radius: 8px; padding: 10px 16px; font-size: 12.5px; z-index: 70;
++      opacity: 0; pointer-events: none; transition: opacity 0.18s, transform 0.18s;
++      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); max-width: 80vw;
++    }
++    .wi-v2 #wi-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 +    .wi-v2 .wi-card {
 +      background: #101a30; border: 1px solid #1c2946; border-radius: 8px; padding: 10px 11px; cursor: pointer;
 +      display: flex; flex-direction: column; gap: 7px; transition: border-color 0.12s, transform 0.12s;
@@ -9752,7 +9764,10 @@ index 0000000..4875fae
 +
 +      var state = {
 +        items: [],
-+        teams: [],
++        teams: [],        // lead agent groups only — one entry per TEAM (Teams-page convention)
++        childrenOf: {},   // lead id → lane agent groups wired under it
++        teamMembers: {},  // lead id → [lead id, ...lane ids] for team-scoped filtering
++        agentName: {},    // any agent group id → display name
 +        users: [],
 +        view: localStorage.getItem('wi.view') || 'kanban',
 +        search: '',
@@ -9796,6 +9811,35 @@ index 0000000..4875fae
 +        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 +      })();
 +      function isTerminal(s) { return s === 'done' || s === 'cancelled'; }
++
++      // Which statuses a DASHBOARD user may move an item to. An item worked
++      // by an agent (team assignee — or unassigned, where the owner team's
++      // agent is the de facto worker) only accepts 'open' (in effect a
++      // re-schedule) or 'cancelled' from a human; the agent moves its own
++      // card through in_progress / blocked / done as it actually works.
++      // Items assigned to a human can be moved anywhere. The host mutator
++      // enforces the same rule — this is UX, not the security boundary.
++      function allowedDashboardStatuses(item) {
++        if (item.assigneeKind === 'human') return STATUSES.map(function (s) { return s.key; });
++        return ['open', 'cancelled'];
++      }
++      function canMoveTo(item, status) {
++        return allowedDashboardStatuses(item).indexOf(status) >= 0;
++      }
++
++      var toastTimer = null;
++      function toast(msg) {
++        var el = document.getElementById('wi-toast');
++        if (!el) {
++          el = document.createElement('div');
++          el.id = 'wi-toast';
++          document.querySelector('.wi-v2').appendChild(el);
++        }
++        el.textContent = msg;
++        el.className = 'show';
++        if (toastTimer) clearTimeout(toastTimer);
++        toastTimer = setTimeout(function () { el.className = ''; }, 2600);
++      }
 +      function isOverdue(item) {
 +        var dk = dayKey(item.dueAt);
 +        return !!dk && !isTerminal(item.status) && dk < TODAY;
@@ -9850,8 +9894,11 @@ index 0000000..4875fae
 +
 +      function visibleItems() {
 +        var q = state.search.toLowerCase();
++        // Team filter matches the whole team: the lead AND every lane agent
++        // wired under it (an item owned by a lane belongs on its team's board).
++        var members = state.team ? (state.teamMembers[state.team] || [state.team]) : null;
 +        return state.items.filter(function (it) {
-+          if (state.team && it.ownerAgentGroupId !== state.team && it.assigneeAgentGroupId !== state.team) return false;
++          if (members && members.indexOf(it.ownerAgentGroupId) < 0 && members.indexOf(it.assigneeAgentGroupId) < 0) return false;
 +          if (!state.kinds[it.kind]) return false;
 +          if (!state.showClosed && isTerminal(it.status)) return false;
 +          if (q && (it.title + ' ' + (it.statusDetail || '') + ' ' + (it.ownerName || '') + ' ' + (it.assigneeName || '')).toLowerCase().indexOf(q) < 0) return false;
@@ -9921,10 +9968,8 @@ index 0000000..4875fae
 +      function renderView() {
 +        var mount = document.getElementById('wi-view');
 +        var items = visibleItems();
-+        if (state.items.length === 0) {
-+          mount.innerHTML = '<div class="wi-empty">No work items yet. Agents create them with <code>create_work_item</code>, or click \\u201c+ New item\\u201d.</div>';
-+          return;
-+        }
++        // No global empty state: the Kanban board always renders its columns
++        // (an empty board is still a board); List/Timeline handle their own.
 +        if (state.view === 'list') mount.innerHTML = listHtml(items);
 +        else if (state.view === 'timeline') mount.innerHTML = timelineHtml(items);
 +        else mount.innerHTML = kanbanHtml(items);
@@ -9956,7 +10001,9 @@ index 0000000..4875fae
 +            '<div class="wi-col-head"><span class="wi-status-dot" style="background:' + s.color + ';width:8px;height:8px;border-radius:50%"></span>' +
 +            '<span class="wi-col-title" style="color:' + s.color + '">' + s.label + '</span>' +
 +            '<span class="wi-col-count">' + colItems.length + '</span></div>' +
-+            '<div class="wi-col-cards">' + colItems.map(cardHtml).join('') + '</div></div>';
++            '<div class="wi-col-cards">' +
++              (colItems.length ? colItems.map(cardHtml).join('') : '<div class="wi-col-empty">No items</div>') +
++            '</div></div>';
 +        }).join('') + '</div>';
 +      }
 +
@@ -10064,16 +10111,26 @@ index 0000000..4875fae
 +            showMoveMenu(btn, btn.getAttribute('data-move'));
 +          });
 +        });
-+        // native drag layered on top as a desktop nicety — same moveItem() path
++        // native drag layered on top as a desktop nicety — same moveItem() path.
++        // draggedId is tracked separately because dataTransfer.getData is
++        // unreadable during dragover, and we want disallowed columns to show
++        // a no-drop cursor (no preventDefault) instead of a green highlight.
++        var draggedId = null;
 +        Array.prototype.forEach.call(mount.querySelectorAll('.wi-card'), function (card) {
 +          card.addEventListener('dragstart', function (ev) {
-+            ev.dataTransfer.setData('text/plain', card.getAttribute('data-id'));
++            draggedId = card.getAttribute('data-id');
++            ev.dataTransfer.setData('text/plain', draggedId);
 +            card.classList.add('dragging');
 +          });
-+          card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
++          card.addEventListener('dragend', function () { draggedId = null; card.classList.remove('dragging'); });
 +        });
 +        Array.prototype.forEach.call(mount.querySelectorAll('.wi-col'), function (col) {
-+          col.addEventListener('dragover', function (ev) { ev.preventDefault(); col.classList.add('drag-over'); });
++          col.addEventListener('dragover', function (ev) {
++            var item = draggedId ? byId(draggedId) : null;
++            if (item && !canMoveTo(item, col.getAttribute('data-status')) && item.status !== col.getAttribute('data-status')) return;
++            ev.preventDefault();
++            col.classList.add('drag-over');
++          });
 +          col.addEventListener('dragleave', function () { col.classList.remove('drag-over'); });
 +          col.addEventListener('drop', function (ev) {
 +            ev.preventDefault();
@@ -10097,13 +10154,22 @@ index 0000000..4875fae
 +        var menu = document.createElement('div');
 +        menu.className = 'wi-move-menu';
 +        menu.id = 'wi-move-menu';
++        var allowed = allowedDashboardStatuses(item);
 +        STATUSES.forEach(function (s) {
 +          if (s.key === item.status) return;
++          if (allowed.indexOf(s.key) < 0) return;
 +          var b = document.createElement('button');
 +          b.innerHTML = '<span class="wi-status-dot" style="background:' + s.color + ';width:8px;height:8px;border-radius:50%"></span>' + s.label;
 +          b.onclick = function () { closeMoveMenu(); moveItem(id, s.key); };
 +          menu.appendChild(b);
 +        });
++        if (allowed.length < STATUSES.length) {
++          var hint = document.createElement('button');
++          hint.disabled = true;
++          hint.style.cssText = 'color:#3e4c66;cursor:default;font-size:10.5px';
++          hint.textContent = 'agent-worked \\u2014 agent moves the rest';
++          menu.appendChild(hint);
++        }
 +        document.querySelector('.wi-v2').appendChild(menu);
 +        var r = anchor.getBoundingClientRect();
 +        menu.style.left = Math.min(r.left, window.innerWidth - 170) + 'px';
@@ -10120,11 +10186,16 @@ index 0000000..4875fae
 +      function moveItem(id, status) {
 +        var item = byId(id);
 +        if (!item || item.status === status) return;
++        if (!canMoveTo(item, status)) {
++          toast('Agent-worked item: you can only re-open or cancel it \\u2014 the agent moves it through ' +
++            'In Progress / Blocked / Done as it actually works.');
++          return;
++        }
 +        item.status = status; // optimistic
 +        renderView();
 +        mutate('PATCH', '/api/work-items/' + encodeURIComponent(id), { status: status })
 +          .then(function () { refetchSoon(); })
-+          .catch(function (e) { alert('Move failed: ' + e.message); refetch(); });
++          .catch(function (e) { toast('Move failed: ' + e.message); refetch(); });
 +      }
 +
 +      // ── Drawer (create / edit) ──
@@ -10152,15 +10223,29 @@ index 0000000..4875fae
 +        var mode = state.drawer.assigneeMode || assigneeModeOf(item);
 +        state.drawer.assigneeMode = mode;
 +
++        // Assignee select mirrors the Teams page hierarchy: an <optgroup> per
++        // team with the lead first and its lane agents indented — you can
++        // assign to a lane, but it's always presented under its team.
++        var assigneeOpt = function (id, label) {
++          var sel = item && item.assigneeAgentGroupId === id ? ' selected' : '';
++          return '<option value="' + esc(id) + '"' + sel + '>' + esc(label) + '</option>';
++        };
 +        var teamOptions = state.teams.map(function (t) {
-+          var sel = item && item.assigneeAgentGroupId === t.id ? ' selected' : '';
-+          return '<option value="' + esc(t.id) + '"' + sel + '>' + esc(t.name) + '</option>';
++          var kids = state.childrenOf[t.id] || [];
++          if (kids.length === 0) return assigneeOpt(t.id, t.name);
++          return '<optgroup label="' + esc(t.name) + '">' +
++            assigneeOpt(t.id, t.name + ' (lead)') +
++            kids.map(function (k) { return assigneeOpt(k.id, '\\u21B3 ' + k.name); }).join('') +
++            '</optgroup>';
 +        }).join('');
 +        var userOptions = state.users.map(function (u) {
 +          var name = u.display_name || u.id;
 +          var sel = item && item.assigneeUserId === u.id ? ' selected' : '';
 +          return '<option value="' + esc(u.id) + '"' + sel + '>' + esc(name) + '</option>';
 +        }).join('');
++        // Owner = the board the item lives on — always a TEAM (lead), never a
++        // lane agent. Items created BY lane agents still land on their own
++        // board via the MCP path; the dashboard picker offers teams only.
 +        var ownerOptions = state.teams.map(function (t) {
 +          var sel = item ? (item.ownerAgentGroupId === t.id ? ' selected' : '') : (state.team === t.id ? ' selected' : '');
 +          return '<option value="' + esc(t.id) + '"' + sel + '>' + esc(t.name) + '</option>';
@@ -10219,22 +10304,7 @@ index 0000000..4875fae
 +                  (item.completedAt ? ' &middot; <span style="color:#34d399">delivered ' + esc(new Date(item.completedAt).toLocaleString()) + '</span>' : '') +
 +                  '</div>'
 +                : '') +
-+              '<div class="wi-field"><span class="wi-label">Title</span><input id="wi-f-title" class="wi-input" value="' + (item ? esc(item.title) : '') + '" placeholder="What must happen"></div>' +
-+              '<div class="wi-grid2">' +
-+                '<div class="wi-field"><span class="wi-label">' + (isEdit ? 'Status' : 'Owner team (the board it lives on)') + '</span>' +
-+                  (isEdit
-+                    ? '<select id="wi-f-status">' + STATUSES.map(function (s) {
-+                        return '<option value="' + s.key + '"' + (item.status === s.key ? ' selected' : '') + '>' + s.label + '</option>';
-+                      }).join('') + '</select>'
-+                    : '<select id="wi-f-owner">' + ownerOptions + '</select>') +
-+                '</div>' +
-+                '<div class="wi-field"><span class="wi-label">Kind</span><select id="wi-f-kind">' + KINDS.map(function (k) {
-+                  return '<option value="' + k.key + '"' + (item && item.kind === k.key ? ' selected' : '') + '>' + k.label + '</option>';
-+                }).join('') + '</select></div>' +
-+              '</div>' +
-+              '<div class="wi-field"><span class="wi-label">Status detail (free text, team-specific)</span>' +
-+                '<input id="wi-f-detail" class="wi-input" value="' + (item && item.statusDetail ? esc(item.statusDetail) : '') + '" placeholder="e.g. waiting on voice gate"></div>' +
-+              '<div class="wi-field"><span class="wi-label">Assignee</span>' +
++              '<div class="wi-field"><span class="wi-label">Assignee (who does the work)</span>' +
 +                '<div class="wi-seg" id="wi-f-assignee-mode">' +
 +                  '<button type="button" data-mode="none" class="' + (mode === 'none' ? 'active' : '') + '">None</button>' +
 +                  '<button type="button" data-mode="team" class="' + (mode === 'team' ? 'active' : '') + '">Team</button>' +
@@ -10245,6 +10315,25 @@ index 0000000..4875fae
 +                  '<select id="wi-f-assignee-user" style="display:' + (mode === 'human' ? 'block' : 'none') + '">' + userOptions + '</select>' +
 +                '</div>' +
 +              '</div>' +
++              '<div class="wi-field"><span class="wi-label">Title</span><input id="wi-f-title" class="wi-input" value="' + (item ? esc(item.title) : '') + '" placeholder="What must happen"></div>' +
++              '<div class="wi-grid2">' +
++                '<div class="wi-field"><span class="wi-label">' + (isEdit ? 'Status' : 'Owner team (the board it lives on)') + '</span>' +
++                  (isEdit
++                    ? '<select id="wi-f-status">' + STATUSES.filter(function (s) {
++                        // Same rule as Kanban moves: agent-worked items only
++                        // offer their current status + open + cancelled here.
++                        return s.key === item.status || canMoveTo(item, s.key);
++                      }).map(function (s) {
++                        return '<option value="' + s.key + '"' + (item.status === s.key ? ' selected' : '') + '>' + s.label + '</option>';
++                      }).join('') + '</select>'
++                    : '<select id="wi-f-owner">' + ownerOptions + '</select>') +
++                '</div>' +
++                '<div class="wi-field"><span class="wi-label">Kind</span><select id="wi-f-kind">' + KINDS.map(function (k) {
++                  return '<option value="' + k.key + '"' + (item && item.kind === k.key ? ' selected' : '') + '>' + k.label + '</option>';
++                }).join('') + '</select></div>' +
++              '</div>' +
++              '<div class="wi-field"><span class="wi-label">Status detail (free text, team-specific)</span>' +
++                '<input id="wi-f-detail" class="wi-input" value="' + (item && item.statusDetail ? esc(item.statusDetail) : '') + '" placeholder="e.g. waiting on voice gate"></div>' +
 +              '<div class="wi-grid2">' +
 +                '<div class="wi-field"><span class="wi-label">Due date</span><input type="date" id="wi-f-due" class="wi-input" value="' + esc(dueVal) + '"></div>' +
 +                '<div class="wi-field"><span class="wi-label">Follow-up (nag if still open)</span><input type="datetime-local" id="wi-f-follow" class="wi-input" value="' + esc(followVal) + '"></div>' +
@@ -10265,10 +10354,18 @@ index 0000000..4875fae
 +
 +        document.getElementById('wi-backdrop').onclick = closeDrawer;
 +        document.getElementById('wi-drawer-close').onclick = closeDrawer;
-+        Array.prototype.forEach.call(mount.querySelectorAll('#wi-f-assignee-mode button'), function (b) {
++        // Mode switch toggles in place — NEVER re-renders the drawer, so
++        // everything already typed (title, dates, detail, note) survives.
++        var modeButtons = mount.querySelectorAll('#wi-f-assignee-mode button');
++        Array.prototype.forEach.call(modeButtons, function (b) {
 +          b.onclick = function () {
-+            state.drawer.assigneeMode = b.getAttribute('data-mode');
-+            renderDrawer();
++            var next = b.getAttribute('data-mode');
++            state.drawer.assigneeMode = next;
++            Array.prototype.forEach.call(modeButtons, function (other) {
++              other.classList.toggle('active', other === b);
++            });
++            document.getElementById('wi-f-assignee-team').style.display = next === 'team' ? 'block' : 'none';
++            document.getElementById('wi-f-assignee-user').style.display = next === 'human' ? 'block' : 'none';
 +          };
 +        });
 +
@@ -10384,8 +10481,28 @@ index 0000000..4875fae
 +        ]).then(function (res) {
 +          state.items = Array.isArray(res[0]) ? res[0] : [];
 +          var groups = Array.isArray(res[1]) ? res[1] : [];
-+          state.teams = groups.map(function (g) { return { id: g.id, name: g.name }; })
-+            .sort(function (a, b) { return a.name < b.name ? -1 : 1; });
++          // Teams-page convention: a TEAM is a lead agent group (no parentId,
++          // or a parentId pointing outside the list) plus the lane agents
++          // wired under it via the parent-destination convention (parentId).
++          var byId = {};
++          groups.forEach(function (g) { byId[g.id] = g; });
++          var byName = function (a, b) { return a.name < b.name ? -1 : 1; };
++          state.agentName = {};
++          state.childrenOf = {};
++          groups.forEach(function (g) {
++            state.agentName[g.id] = g.name;
++            if (g.parentId && byId[g.parentId]) {
++              (state.childrenOf[g.parentId] = state.childrenOf[g.parentId] || []).push({ id: g.id, name: g.name });
++            }
++          });
++          state.teams = groups.filter(function (g) { return !g.parentId || !byId[g.parentId]; })
++            .map(function (g) { return { id: g.id, name: g.name }; })
++            .sort(byName);
++          state.teamMembers = {};
++          state.teams.forEach(function (t) {
++            var kids = (state.childrenOf[t.id] || []).sort(byName);
++            state.teamMembers[t.id] = [t.id].concat(kids.map(function (k) { return k.id; }));
++          });
 +          state.users = (Array.isArray(res[2]) ? res[2] : []).slice()
 +            .sort(function (a, b) { return (a.display_name || a.id) < (b.display_name || b.id) ? -1 : 1; });
 +        });
