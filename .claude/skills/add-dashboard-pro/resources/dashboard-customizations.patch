@@ -9518,7 +9518,7 @@ new file mode 100644
 index 0000000..7448be4
 --- /dev/null
 +++ b/dist/ui/pages/work-items.js
-@@ -0,0 +1,1018 @@
+@@ -0,0 +1,1026 @@
 +/**
 + * Work Items page — one canonical store, three switchable views:
 + *   Kanban   — columns = the fixed status enum, click-to-move (touch-first)
@@ -9710,6 +9710,8 @@ index 0000000..7448be4
 +    .wi-v2 .wi-drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
 +    .wi-v2 .wi-field { margin-bottom: 14px; }
 +    .wi-v2 .wi-label { display: block; font-size: 10.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 6px; }
++    .wi-v2 .wi-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; border: 1px solid #475569; color: #64748b; font-size: 9px; font-style: normal; font-weight: 700; margin-left: 6px; cursor: help; vertical-align: middle; text-transform: none; letter-spacing: normal; }
++    .wi-v2 .wi-info:hover { border-color: #2dd4bf; color: #2dd4bf; }
 +    .wi-v2 .wi-input, .wi-v2 .wi-textarea, .wi-v2 .wi-drawer select {
 +      width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px;
 +      padding: 8px 10px; font-size: 12.5px; font-family: inherit; box-sizing: border-box;
@@ -10213,6 +10215,10 @@ index 0000000..7448be4
 +        return 'none';
 +      }
 +
++      function fieldLabel(text, tip) {
++        return '<span class="wi-label">' + esc(text) + '<span class="wi-info" title="' + esc(tip) + '">i</span></span>';
++      }
++
 +      function renderDrawer() {
 +        var mount = document.getElementById('wi-drawer-mount');
 +        if (!mount || !state.drawer) return;
@@ -10304,7 +10310,7 @@ index 0000000..7448be4
 +                  (item.completedAt ? ' &middot; <span style="color:#34d399">delivered ' + esc(new Date(item.completedAt).toLocaleString()) + '</span>' : '') +
 +                  '</div>'
 +                : '') +
-+              '<div class="wi-field"><span class="wi-label">Assignee (who does the work)</span>' +
++              '<div class="wi-field">' + fieldLabel('Assignee (who does the work)', 'Who does the work: pick a team, a specific person, or leave unset for now.') +
 +                '<div class="wi-seg" id="wi-f-assignee-mode">' +
 +                  '<button type="button" data-mode="none" class="' + (mode === 'none' ? 'active' : '') + '">None</button>' +
 +                  '<button type="button" data-mode="team" class="' + (mode === 'team' ? 'active' : '') + '">Team</button>' +
@@ -10315,9 +10321,11 @@ index 0000000..7448be4
 +                  '<select id="wi-f-assignee-user" style="display:' + (mode === 'human' ? 'block' : 'none') + '">' + userOptions + '</select>' +
 +                '</div>' +
 +              '</div>' +
-+              '<div class="wi-field"><span class="wi-label">Title</span><input id="wi-f-title" class="wi-input" value="' + (item ? esc(item.title) : '') + '" placeholder="What must happen"></div>' +
++              '<div class="wi-field">' + fieldLabel('Title', 'Short summary shown on cards in every view.') + '<input id="wi-f-title" class="wi-input" value="' + (item ? esc(item.title) : '') + '" placeholder="What must happen"></div>' +
 +              '<div class="wi-grid2">' +
-+                '<div class="wi-field"><span class="wi-label">' + (isEdit ? 'Status' : 'Owner team (the board it lives on)') + '</span>' +
++                '<div class="wi-field">' + (isEdit
++                    ? fieldLabel('Status', 'Current stage. Agent-worked items only allow reopen or cancel here; the agent moves it through in progress, blocked, and done.')
++                    : fieldLabel('Owner team (the board it lives on)', 'Which team board this item lives on. Independent of who is assigned to do the work.')) +
 +                  (isEdit
 +                    ? '<select id="wi-f-status">' + STATUSES.filter(function (s) {
 +                        // Same rule as Kanban moves: agent-worked items only
@@ -10328,19 +10336,19 @@ index 0000000..7448be4
 +                      }).join('') + '</select>'
 +                    : '<select id="wi-f-owner">' + ownerOptions + '</select>') +
 +                '</div>' +
-+                '<div class="wi-field"><span class="wi-label">Kind</span><select id="wi-f-kind">' + KINDS.map(function (k) {
++                '<div class="wi-field">' + fieldLabel('Kind', 'Task, delegation, deliverable, slot, or cadence. Used for the icon and grouping only.') + '<select id="wi-f-kind">' + KINDS.map(function (k) {
 +                  return '<option value="' + k.key + '"' + (item && item.kind === k.key ? ' selected' : '') + '>' + k.label + '</option>';
 +                }).join('') + '</select></div>' +
 +              '</div>' +
-+              '<div class="wi-field"><span class="wi-label">Status detail (free text, team-specific)</span>' +
++              '<div class="wi-field">' + fieldLabel('Status detail (free text, team-specific)', 'Optional free text shown next to the status, for example waiting on voice gate.') +
 +                '<input id="wi-f-detail" class="wi-input" value="' + (item && item.statusDetail ? esc(item.statusDetail) : '') + '" placeholder="e.g. waiting on voice gate"></div>' +
 +              '<div class="wi-grid2">' +
-+                '<div class="wi-field"><span class="wi-label">Due date</span><input type="date" id="wi-f-due" class="wi-input" value="' + esc(dueVal) + '"></div>' +
-+                '<div class="wi-field"><span class="wi-label">Follow-up (nag if still open)</span><input type="datetime-local" id="wi-f-follow" class="wi-input" value="' + esc(followVal) + '"></div>' +
++                '<div class="wi-field">' + fieldLabel('Due date', 'When this item is due. Drives the Timeline view and overdue highlighting.') + '<input type="date" id="wi-f-due" class="wi-input" value="' + esc(dueVal) + '"></div>' +
++                '<div class="wi-field">' + fieldLabel('Follow-up (nag if still open)', 'Optional. Sends a nag if the item is still open at this time.') + '<input type="datetime-local" id="wi-f-follow" class="wi-input" value="' + esc(followVal) + '"></div>' +
 +              '</div>' +
-+              '<div class="wi-field"><span class="wi-label">Parent item</span><select id="wi-f-parent">' + parentOptions + '</select></div>' +
++              '<div class="wi-field">' + fieldLabel('Parent item', 'Optional. Link under a parent item for grouping and breadcrumbs.') + '<select id="wi-f-parent">' + parentOptions + '</select></div>' +
 +              fieldsRows +
-+              (!isEdit ? '<div class="wi-field"><span class="wi-label">Initial note</span><textarea id="wi-f-note" class="wi-textarea" placeholder="Context, links, acceptance criteria\\u2026"></textarea></div>' : '') +
++              (!isEdit ? '<div class="wi-field">' + fieldLabel('Initial note', 'Optional context, links, or acceptance criteria added as the first note.') + '<textarea id="wi-f-note" class="wi-textarea" placeholder="Context, links, acceptance criteria\\u2026"></textarea></div>' : '') +
 +              notesHtml +
 +            '</div>' +
 +            '<div class="wi-drawer-error" id="wi-drawer-error"></div>' +
