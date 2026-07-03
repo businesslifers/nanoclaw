@@ -6,6 +6,10 @@ export interface AgentGroup {
   folder: string;
   /** @deprecated Use container_configs.provider instead. */
   agent_provider: string | null;
+  /** Not a DB column here — model lives in container_configs.model. Optional
+   *  so the dashboard-pro pusher's `ag?.model` fallback compiles; undefined at
+   *  runtime so it falls through to the container-config model. */
+  model?: string | null;
   created_at: string;
   /** Dashboard Pro: 1 to hide this group from the dashboard's default view. */
   hidden_in_dashboard?: number;

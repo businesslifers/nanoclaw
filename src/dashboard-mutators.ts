@@ -28,6 +28,13 @@ import {
 } from './modules/scheduling/db.js';
 import { inboundDbPath } from './session-manager.js';
 import { nudgePusher } from './dashboard-pusher.js';
+import {
+  addWorkItemNote,
+  cancelWorkItem,
+  createWorkItem,
+  reassignWorkItem,
+  updateWorkItem,
+} from './dashboard-work-items-mutators.js';
 
 export class MutatorAuthError extends Error {
   readonly status = 403;
@@ -43,6 +50,7 @@ export class MutatorNotFoundError extends Error {
 }
 
 const NAME_MAX = 80;
+// eslint-disable-next-line no-control-regex -- intentional: reject control chars in names
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
 
 function validateName(raw: unknown): string {
@@ -74,6 +82,14 @@ export interface MutatorContext {
     pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     updateTask(args: UpdateTaskMutatorArgs, actorUserId: string): TaskMutatorResult;
+    /** Work-item CRUD — see src/dashboard-work-items-mutators.ts. Loose arg
+     *  types here on purpose: the dashboard package passes parsed JSON through
+     *  and the mutators do their own validation. */
+    createWorkItem(args: unknown, actorUserId: string): unknown;
+    updateWorkItem(args: unknown, actorUserId: string): unknown;
+    reassignWorkItem(args: unknown, actorUserId: string): unknown;
+    cancelWorkItem(args: unknown, actorUserId: string): unknown;
+    addWorkItemNote(args: unknown, actorUserId: string): unknown;
   };
 }
 
@@ -188,6 +204,11 @@ export function buildDashboardMutatorContext(): MutatorContext {
       pauseTask,
       resumeTask,
       updateTask,
+      createWorkItem: (args, actorUserId) => createWorkItem(args as never, actorUserId),
+      updateWorkItem: (args, actorUserId) => updateWorkItem(args as never, actorUserId),
+      reassignWorkItem: (args, actorUserId) => reassignWorkItem(args as never, actorUserId),
+      cancelWorkItem: (args, actorUserId) => cancelWorkItem(args as never, actorUserId),
+      addWorkItemNote: (args, actorUserId) => addWorkItemNote(args as never, actorUserId),
     },
   };
 }

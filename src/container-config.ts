@@ -87,3 +87,18 @@ export function materializeContainerJson(agentGroupId: string): ContainerConfig 
 
   return config;
 }
+
+/**
+ * Read-only, non-throwing view of a group's live container config — resolves
+ * the DB row into a ContainerConfig (with `provider`/`model`) without the file
+ * write or throw that materializeContainerJson does. Returns null if the group
+ * or its config row is absent. Used by the dashboard-pro pusher to surface each
+ * team's effective provider/model.
+ */
+export function getLiveContainerConfig(agentGroupId: string): ContainerConfig | null {
+  const group = getAgentGroup(agentGroupId);
+  if (!group) return null;
+  const row = getContainerConfig(agentGroupId);
+  if (!row) return null;
+  return configFromDb(row, group);
+}
