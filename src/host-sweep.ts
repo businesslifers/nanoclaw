@@ -164,6 +164,18 @@ async function sweep(): Promise<void> {
   }
   // MODULE-HOOK:approvals-reason-sweep:end
 
+  // Work-item reliability sweep: delegation follow-ups, deliverable tier
+  // cascade, weekly cadence RAG. Central-DB scan once per tick — not per
+  // session. Replaces LPG's three per-team cron scripts.
+  // MODULE-HOOK:work-items-sweep:start
+  try {
+    const { sweepWorkItems } = await import('./modules/work-items/sweep.js');
+    await sweepWorkItems();
+  } catch (err) {
+    log.error('Work-items sweep failed', { err });
+  }
+  // MODULE-HOOK:work-items-sweep:end
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 

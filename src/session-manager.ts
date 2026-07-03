@@ -35,6 +35,7 @@ import {
   upsertSessionRouting,
   insertMessage,
   migrateMessagesInTable,
+  ensureWorkItemsCacheTable,
 } from './db/session-db.js';
 import { log } from './log.js';
 import type { Session } from './types.js';
@@ -345,6 +346,7 @@ function extractAttachmentFiles(
 export function openInboundDb(agentGroupId: string, sessionId: string): Database.Database {
   const db = openInboundDbRaw(inboundDbPath(agentGroupId, sessionId));
   migrateMessagesInTable(db);
+  ensureWorkItemsCacheTable(db);
   return db;
 }
 

@@ -133,6 +133,20 @@ async function spawnContainer(session: Session): Promise<void> {
   }
   writeSessionRouting(agentGroup.id, session.id);
 
+  // Refresh the work-items projection so the container's list_work_items
+  // reads current state on wake. Guarded: teams with zero work_items rows
+  // skip the rewrite entirely — no central-DB scan + session-DB write added
+  // to the spawn latency of agents that never touch the feature.
+  try {
+    const { teamHasWorkItems } = await import('./db/work-items.js');
+    if (hasTable(getDb(), 'work_items') && teamHasWorkItems(agentGroup.id)) {
+      const { refreshWorkItemsProjection } = await import('./modules/work-items/projection.js');
+      refreshWorkItemsProjection(agentGroup.id);
+    }
+  } catch (err) {
+    log.warn('work-items projection refresh on spawn failed', { agentGroupId: agentGroup.id, err });
+  }
+
   // Materialize container.json from DB — writes fresh file and returns
   // the config object, threaded through provider resolution, buildMounts,
   // and buildContainerArgs so we don't re-read.

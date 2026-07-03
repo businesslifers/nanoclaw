@@ -148,6 +148,67 @@ CREATE TABLE pending_sender_approvals (
   created_at         TEXT NOT NULL,
   UNIQUE(messaging_group_id, sender_identity)
 );
+
+-- Canonical cross-team work-item store (migration 103). One row per tracked
+-- unit of work across every team: tasks, cross-team delegations, owner-blocked
+-- deliverables, content-calendar slots (parents), weekly cadence obligations.
+--   status: fixed core enum 'open'|'in_progress'|'blocked'|'done'|'cancelled'
+--           (cross-team Kanban must mean the same thing everywhere);
+--           status_detail is free-text, team-specific, display-only.
+--   kind:   'task'|'delegation'|'deliverable'|'content_slot'|'cadence' —
+--           advisory/unenforced; filters + routes host sweep logic.
+--   owner_agent_group_id is always a team (the board the item lives on);
+--   assignee is a team OR a human (assignee_user_id), never both required.
+--   assignee_label holds the raw human label when name resolution against
+--   users.display_name found no match (never silently swallowed).
+--   completed_at is set by the mutation layer when status transitions to
+--   'done' (never client-supplied); cleared if the item is reopened.
+--   reminder_tier / reminder_last_sent_at: sweep dedup state (deliverable
+--   tier cascade + cadence daily RAG + delegation re-nag throttle).
+--   cadence_*: weekly-stream obligations (ISO dow / period stamps).
+CREATE TABLE work_items (
+  id                            TEXT PRIMARY KEY,
+  owner_agent_group_id          TEXT NOT NULL REFERENCES agent_groups(id),
+  assignee_agent_group_id       TEXT REFERENCES agent_groups(id),
+  assignee_user_id              TEXT REFERENCES users(id),
+  assignee_label                TEXT,
+  parent_id                     TEXT REFERENCES work_items(id),
+  kind                          TEXT NOT NULL DEFAULT 'task',
+  title                         TEXT NOT NULL,
+  status                        TEXT NOT NULL DEFAULT 'open',
+  status_detail                 TEXT,
+  due_at                        TEXT,
+  follow_up_at                  TEXT,
+  completed_at                  TEXT,
+  reminder_tier                 TEXT,
+  reminder_last_sent_at         TEXT,
+  cadence_expected_dow          INTEGER,
+  cadence_period_label          TEXT,
+  cadence_last_completed_period TEXT,
+  fields_json                   TEXT,
+  created_by_kind               TEXT NOT NULL,   -- 'agent' | 'dashboard_user' | 'system'
+  created_by_id                 TEXT,
+  created_at                    TEXT NOT NULL,
+  updated_at                    TEXT NOT NULL
+);
+CREATE INDEX idx_work_items_owner ON work_items(owner_agent_group_id, status);
+CREATE INDEX idx_work_items_assignee ON work_items(assignee_agent_group_id, status);
+CREATE INDEX idx_work_items_due ON work_items(due_at);
+CREATE INDEX idx_work_items_parent ON work_items(parent_id);
+
+-- The agent's own running narrative per work item (LPG-style handoff notes:
+-- dozens of timestamped paragraphs). Deliberately separate from
+-- dashboard_audit, which is a structured before/after compliance log of
+-- dashboard-actor mutations — different volume, different shape.
+CREATE TABLE work_item_notes (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  ts           TEXT NOT NULL,
+  author_kind  TEXT NOT NULL,   -- 'agent' | 'dashboard_user' | 'system'
+  author_id    TEXT,
+  note         TEXT NOT NULL
+);
+CREATE INDEX idx_work_item_notes_item ON work_item_notes(work_item_id, ts);
 `;
 
 /**
@@ -220,6 +281,41 @@ CREATE TABLE IF NOT EXISTS session_routing (
   channel_type TEXT,
   platform_id  TEXT,
   thread_id    TEXT
+);
+
+-- Read-only projection of the central work_items table for this session's
+-- agent group (owner OR assignee). Containers can't reach data/v2.db, so
+-- the host rewrites this table on container wake and after any work-item
+-- mutation touching the group (src/modules/work-items/projection.ts). Only
+-- carries non-terminal items plus done/cancelled items completed within the
+-- last 14 days — bounded, not a historical archive. The container's
+-- list_work_items MCP tool reads it; the container never writes it.
+CREATE TABLE IF NOT EXISTS work_items_cache (
+  id                            TEXT PRIMARY KEY,
+  relation                      TEXT NOT NULL,   -- 'owner' | 'assignee' | 'both'
+  owner_agent_group_id          TEXT NOT NULL,
+  owner_name                    TEXT,
+  assignee_agent_group_id       TEXT,
+  assignee_user_id              TEXT,
+  assignee_name                 TEXT,
+  assignee_kind                 TEXT,            -- 'team' | 'human' | NULL
+  parent_id                     TEXT,
+  parent_title                  TEXT,
+  kind                          TEXT NOT NULL,
+  title                         TEXT NOT NULL,
+  status                        TEXT NOT NULL,
+  status_detail                 TEXT,
+  due_at                        TEXT,
+  follow_up_at                  TEXT,
+  completed_at                  TEXT,
+  cadence_expected_dow          INTEGER,
+  cadence_period_label          TEXT,
+  cadence_last_completed_period TEXT,
+  fields_json                   TEXT,
+  created_by_kind               TEXT,
+  created_at                    TEXT,
+  updated_at                    TEXT,
+  refreshed_at                  TEXT NOT NULL
 );
 `;
 

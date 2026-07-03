@@ -339,6 +339,45 @@ export function migrateMessagesInTable(db: Database.Database): void {
 }
 
 /**
+ * Lazily create the work_items_cache projection table on pre-existing
+ * session DBs (fresh sessions get it from INBOUND_SCHEMA). Same idiom as
+ * migrateMessagesInTable — called from session-manager's openInboundDb so
+ * every host-side open guarantees the table exists before the projection
+ * writer or the container's list_work_items tool touches it.
+ */
+export function ensureWorkItemsCacheTable(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS work_items_cache (
+      id                            TEXT PRIMARY KEY,
+      relation                      TEXT NOT NULL,
+      owner_agent_group_id          TEXT NOT NULL,
+      owner_name                    TEXT,
+      assignee_agent_group_id       TEXT,
+      assignee_user_id              TEXT,
+      assignee_name                 TEXT,
+      assignee_kind                 TEXT,
+      parent_id                     TEXT,
+      parent_title                  TEXT,
+      kind                          TEXT NOT NULL,
+      title                         TEXT NOT NULL,
+      status                        TEXT NOT NULL,
+      status_detail                 TEXT,
+      due_at                        TEXT,
+      follow_up_at                  TEXT,
+      completed_at                  TEXT,
+      cadence_expected_dow          INTEGER,
+      cadence_period_label          TEXT,
+      cadence_last_completed_period TEXT,
+      fields_json                   TEXT,
+      created_by_kind               TEXT,
+      created_at                    TEXT,
+      updated_at                    TEXT,
+      refreshed_at                  TEXT NOT NULL
+    );
+  `);
+}
+
+/**
  * Look up an inbound row's source_session_id by its message id. Returns null
  * if the row doesn't exist or the column is NULL (channel inbound or
  * pre-migration a2a inbound). Used by a2a routing to route replies back to
