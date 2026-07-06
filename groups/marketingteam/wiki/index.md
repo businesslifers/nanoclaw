@@ -3,8 +3,8 @@ scope: group
 group: marketingteam
 title: Marketing Team
 description: Marketing Team wiki — Janet maintains; entries scoped to Mettro Digital marketing operations (Google Ads, GA4, clients, conversion analysis).
-updated: 2026-06-26
-lint: 2026-06-26
+updated: 2026-07-03
+lint: 2026-07-03
 ---
 
 # Marketing Team Wiki — Index
@@ -33,7 +33,8 @@ Every wiki page should be linked here under its category with a one-line summary
 
 - [Reporting Pipeline](topics/reporting-pipeline.md) — Daily Collector → Analyst → Reporter pipeline; schedules, scripts, failure handling
 - [Client List](topics/client-list.md) — 7 active clients (6 Carpet One locations + Haus Of Rattan); QLD Capital paused Apr 24, 2026; account IDs and MCC structure
-- [Google Ads collector outage Jun 2026](topics/google-ads-proxy-h2-break.md) — RESOLVED Jun 17. 11-day collector outage; real cause was a stale `login-customer-id` header (not the infra/proxy issue first diagnosed), fixed by removing it. Page also tracks the still-open May 31 month-end MTD date bug
+- [Google Ads collector outage Jun 2026](topics/google-ads-proxy-h2-break.md) — RESOLVED Jun 17. 11-day collector outage; real cause was a stale `login-customer-id` header (not the infra/proxy issue first diagnosed), fixed by removing it
+- [Collector month-end MTD date bug](topics/collector-month-end-mtd-bug.md) — OPEN recurring bug. Collector inverts the GA4 MTD range on a month's last day (start = next month's 1st > end), failing all 7 accounts; self-clears on the 1st. Confirmed May 31 & Jun 30; next risk Jul 31. One-line fix outstanding
 
 ### Source Summaries
 *One page per ingested source.*
