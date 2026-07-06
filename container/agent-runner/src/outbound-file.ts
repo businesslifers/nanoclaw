@@ -12,9 +12,9 @@
 import fs from 'fs';
 import path from 'path';
 
-import { getCurrentInReplyTo } from './current-batch.js';
 import { getAllDestinations } from './destinations.js';
 import { writeMessageOut } from './db/messages-out.js';
+import { getCurrentInReplyTo } from './db/session-state.js';
 import { getSessionRouting } from './db/session-routing.js';
 
 function log(msg: string): void {

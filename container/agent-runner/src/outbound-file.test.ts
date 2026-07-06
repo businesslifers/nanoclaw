@@ -9,8 +9,8 @@ import os from 'os';
 import path from 'path';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
+import { setCurrentInReplyTo, clearCurrentInReplyTo } from './db/session-state.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
-import { setCurrentInReplyTo, clearCurrentInReplyTo } from './current-batch.js';
 import { deliverGeneratedFile } from './outbound-file.js';
 
 let tmpDir: string;
