@@ -100,4 +100,29 @@ describe('codex host contribution against real core', () => {
     expect(containerPaths.some((p) => p.endsWith('AGENTS.md'))).toBe(true);
     expect(containerPaths).not.toContain('/home/node/.claude');
   });
+
+  it('mirrors per-group template skills from the Claude plane into .agents/skills', () => {
+    const ag = group('ag-codex-skills', 'codex-skills-group');
+    createAgentGroup(ag);
+    ensureContainerConfig(ag.id);
+    // A template stamps its skills as real dirs on the Claude plane; codex reads
+    // .agents/skills (RO-mounted), so the contribution must mirror them there.
+    const templateSkill = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared', 'skills', 'widget');
+    fs.mkdirSync(templateSkill, { recursive: true });
+    fs.writeFileSync(path.join(templateSkill, 'SKILL.md'), '---\nname: widget\n---\n');
+
+    const contributionFn = getProviderContainerConfig('codex');
+    contributionFn!({
+      sessionDir: path.join(DATA_DIR, 'v2-sessions', ag.id, 'session-1'),
+      agentGroupId: ag.id,
+      groupDir: path.join(GROUPS_DIR, ag.folder),
+      selectedSkills: [],
+      hostEnv: process.env,
+    });
+
+    const mirrored = path.join(GROUPS_DIR, ag.folder, '.agents', 'skills', 'widget');
+    expect(fs.existsSync(path.join(mirrored, 'SKILL.md'))).toBe(true);
+    // A real dir, not a symlink — so it survives syncCodexSkillLinks' symlink-only prune.
+    expect(fs.lstatSync(mirrored).isSymbolicLink()).toBe(false);
+  });
 });

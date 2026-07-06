@@ -19,6 +19,7 @@ vi.mock('../config.js', async (importOriginal) => ({
 import { composeGroupAgentsMd, CODEX_PROJECT_DOC_MAX_BYTES } from './codex-agents-md.js';
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../db/index.js';
 import { ensureContainerConfig, updateContainerConfigJson } from '../db/container-configs.js';
+import { PERSONA_PREPEND_FILE } from '../group-persona.js';
 import type { AgentGroup } from '../types.js';
 
 const TEST_ROOT = '/tmp/nanoclaw-agents-md-test';
@@ -55,9 +56,10 @@ describe('composeGroupAgentsMd cap handling', () => {
       composeGroupAgentsMd(g, groupDir);
       const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
       expect(doc).not.toContain('Omitted for size');
-      // Agent-authored skills must be told their persistent home — without
-      // this, authored skills land on ephemeral container paths and vanish.
-      expect(doc).toContain('/workspace/agent/skills');
+      // Agent-authored skills must be told a home that is BOTH persistent and
+      // codex-discovered (~/.codex/skills). /workspace/agent/skills is not
+      // scanned by codex, so authored skills there never trigger.
+      expect(doc).toContain('~/.codex/skills');
       expect(Buffer.byteLength(doc, 'utf-8')).toBeLessThanOrEqual(CODEX_PROJECT_DOC_MAX_BYTES);
     } finally {
       fs.rmSync(groupDir, { recursive: true, force: true });
@@ -105,6 +107,71 @@ describe('composeGroupAgentsMd cap handling', () => {
       expect(doc).toContain('MCP Server: bloated');
       expect(doc).toContain('short and useful');
       expect(doc).toContain('Memory System');
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('composeGroupAgentsMd persona', () => {
+  beforeEach(() => {
+    if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+    fs.mkdirSync(path.join(TEST_ROOT, 'data'), { recursive: true });
+    runMigrations(initTestDb());
+  });
+
+  afterEach(() => {
+    closeDb();
+    if (fs.existsSync(TEST_ROOT)) fs.rmSync(TEST_ROOT, { recursive: true });
+  });
+
+  it('inlines the persona as the first section, before the runtime contract', () => {
+    const g = group('persona');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      fs.writeFileSync(path.join(groupDir, PERSONA_PREPEND_FILE), 'You are an SDR agent.\n');
+      composeGroupAgentsMd(g, groupDir);
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(doc).toContain('You are an SDR agent.');
+      // First markdown heading (the HEADER is an HTML comment, not a `# ` heading).
+      const firstHeading = doc.split('\n').find((line) => line.startsWith('# '));
+      expect(firstHeading).toBe('# Persona');
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('never evicts the persona even when the doc exceeds the cap', () => {
+    const g = group('persona-big');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    updateContainerConfigJson(g.id, 'mcp_servers', {
+      bloat: { command: 'x', instructions: 'B'.repeat(CODEX_PROJECT_DOC_MAX_BYTES + 1024) },
+    });
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      fs.writeFileSync(path.join(groupDir, PERSONA_PREPEND_FILE), 'PERSONA_MARKER body');
+      composeGroupAgentsMd(g, groupDir);
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(Buffer.byteLength(doc, 'utf-8')).toBeLessThanOrEqual(CODEX_PROJECT_DOC_MAX_BYTES);
+      expect(doc).toContain('PERSONA_MARKER'); // survived eviction
+      expect(doc).toContain('Omitted for size');
+    } finally {
+      fs.rmSync(groupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits the persona section when no prepend file is present', () => {
+    const g = group('no-persona');
+    createAgentGroup(g);
+    ensureContainerConfig(g.id);
+    const groupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-md-'));
+    try {
+      composeGroupAgentsMd(g, groupDir);
+      const doc = fs.readFileSync(path.join(groupDir, 'AGENTS.md'), 'utf-8');
+      expect(doc).not.toContain('# Persona');
     } finally {
       fs.rmSync(groupDir, { recursive: true, force: true });
     }

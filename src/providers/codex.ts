@@ -31,6 +31,7 @@ import path from 'path';
 
 import { DATA_DIR } from '../config.js';
 import { getAgentGroup } from '../db/agent-groups.js';
+import { materializeTemplateSkills } from '../group-skills.js';
 import { composeGroupAgentsMd } from './codex-agents-md.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
@@ -52,6 +53,11 @@ registerProviderContainerConfig(
     const group = getAgentGroup(ctx.agentGroupId);
     if (group) composeGroupAgentsMd(group, ctx.groupDir);
     syncCodexSkillLinks(ctx.groupDir, ctx.selectedSkills);
+    // Template skills live on the Claude plane (.claude-shared/skills); codex
+    // reads .agents/skills (RO-mounted), so mirror them here, host-side, via the
+    // shared provider-agnostic helper. Real dirs survive the symlink-only prune
+    // above and coexist with the shared-skill symlinks it creates.
+    materializeTemplateSkills(ctx.agentGroupId, path.join(ctx.groupDir, '.agents', 'skills'));
 
     // No credential env here — OneCLI's container-config drives auth end to
     // end: the gateway serves a sentinel auth.json stub into ~/.codex for
@@ -70,6 +76,14 @@ registerProviderContainerConfig(
     const agentsDir = path.join(ctx.groupDir, '.agents');
     if (fs.existsSync(agentsDir)) {
       mounts.push({ hostPath: agentsDir, containerPath: '/workspace/agent/.agents', readonly: true });
+      // Codex only scans the CWD-level `.agents/skills` when the CWD is inside a
+      // git repo; the agent workspace (/workspace/agent) is not one, so skills
+      // materialized there are invisible. Codex DOES scan the user-level
+      // `$HOME/.agents/skills` unconditionally, so mount the same dir at $HOME
+      // to make the group's template + shared skills discoverable. Verified
+      // against codex-cli 0.141: user-level `.agents/skills` resolves at a
+      // non-git CWD. Skill materialization stays provider-neutral (group-skills.ts).
+      mounts.push({ hostPath: agentsDir, containerPath: '/home/node/.agents', readonly: true });
     }
 
     return { mounts };

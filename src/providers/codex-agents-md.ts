@@ -19,6 +19,7 @@ import path from 'path';
 
 import type { McpServerConfig } from '../container-config.js';
 import { getContainerConfig } from '../db/container-configs.js';
+import { readGroupPersona } from '../group-persona.js';
 import { log } from '../log.js';
 import type { AgentGroup } from '../types.js';
 
@@ -55,7 +56,7 @@ const NATIVE_RUNTIME_SKILLS_POINTER = [
   'Selected NanoClaw runtime skills are available as Codex-native skills at `/workspace/agent/.agents/skills`.',
   'Each skill directory contains a `SKILL.md` with its trigger description plus any supporting files, and points to the read-only shared skill source under `/app/skills`.',
   'Use skill discovery to load these skills only when their descriptions match the task. Full skill instructions live in the skill directories, not in `AGENTS.md`.',
-  'Skills YOU author or install yourself go in `/workspace/agent/skills/<name>/SKILL.md` — persistent, provider-neutral (they load under any agent provider this group runs on), and yours to write and update over time. They are linked into `$CODEX_HOME/skills` automatically at boot. Never write skills anywhere else: paths outside your workspace and `$CODEX_HOME` are ephemeral.',
+  'Skills YOU author or install yourself go in `~/.codex/skills/<name>/SKILL.md` — persistent across sessions and discovered by Codex automatically. Never write skills elsewhere: paths outside `~/.codex` and `~/.agents` are ephemeral or not discovered.',
 ].join('\n\n');
 
 interface AgentsMdSection {
@@ -79,6 +80,11 @@ export function composeGroupAgentsMd(group: AgentGroup, groupDir: string): void 
       .join('\n\n');
     if (body) sections.push({ name, content: `# ${name}\n\n${body}` });
   };
+
+  // Template persona first — the top of the system prompt. 'Persona' is not a
+  // droppable prefix (see fitAgentsMdToCap.isDroppable), so it is never evicted.
+  const persona = readGroupPersona(groupDir);
+  if (persona) pushSection('Persona', persona);
 
   const sharedBase = path.join(process.cwd(), 'container', 'AGENTS.md');
   if (fs.existsSync(sharedBase)) {
