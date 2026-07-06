@@ -1,5 +1,5 @@
 diff --git a/dist/router.d.ts b/dist/router.d.ts
-index ba5d893..b4a572c 100644
+index ba5d8934236d9327cfc7e6b5a54100963109aa9b..b4a572cedcf43fced6cc1d9e3f36b11bfdffda6a 100644
 --- a/dist/router.d.ts
 +++ b/dist/router.d.ts
 @@ -3,4 +3,6 @@
@@ -11,7 +11,7 @@ index ba5d893..b4a572c 100644
 +export declare function dispatch(method: string, path: string, params: URLSearchParams, res: http.ServerResponse, req?: http.IncomingMessage): Promise<void>;
 +export declare function dispatchMutating(method: string, path: string, body: any, actorUserId: string, mutators: DashboardMutators, res: http.ServerResponse): Promise<void>;
 diff --git a/dist/router.js b/dist/router.js
-index 326434d..0bf93b4 100644
+index 326434d184af3d5496de61b07c79bca0ceff7e7f..0bf93b4181da392548982bed12ab69fc89f39d98 100644
 --- a/dist/router.js
 +++ b/dist/router.js
 @@ -6,6 +6,15 @@ import { channelsPage } from './ui/pages/channels.js';
@@ -381,7 +381,7 @@ index 326434d..0bf93b4 100644
 +    return json(res, { error: 'Not found' }, 404);
 +}
 diff --git a/dist/server.d.ts b/dist/server.d.ts
-index 8507931..6188b8e 100644
+index 8507931fbaefd7e3670464de1c2b5b1cffbd666a..6188b8ea290f1825cb7cb750a7e5c1063a7f6c44 100644
 --- a/dist/server.d.ts
 +++ b/dist/server.d.ts
 @@ -1,4 +1,8 @@
@@ -395,7 +395,7 @@ index 8507931..6188b8e 100644
  export declare function startDashboard(config?: DashboardConfig): void;
  export declare function stopDashboard(): Promise<void>;
 diff --git a/dist/server.js b/dist/server.js
-index f616ef5..6694782 100644
+index f616ef5adfe7763270aa56d9685c1843819202de..6694782f030e43c64f1e237c79ac981261daec90 100644
 --- a/dist/server.js
 +++ b/dist/server.js
 @@ -4,32 +4,86 @@
@@ -533,7 +533,7 @@ index f616ef5..6694782 100644
          catch (err) {
              if (!res.headersSent) {
 diff --git a/dist/store.d.ts b/dist/store.d.ts
-index c7e717d..1d2a616 100644
+index c7e717d5fc55e65cd6461e66df1ec931673e5698..1d2a6169c26ff771d97e3481ba297fba1bc5d522 100644
 --- a/dist/store.d.ts
 +++ b/dist/store.d.ts
 @@ -3,10 +3,11 @@
@@ -550,7 +550,7 @@ index c7e717d..1d2a616 100644
  export declare function getLogBuffer(): string[];
  export declare function addLogClient(res: http.ServerResponse): void;
 diff --git a/dist/store.js b/dist/store.js
-index b12b787..4e2bbba 100644
+index b12b787287c1cc6389280fc422b2dcba69697559..4e2bbba189c4798eda6e6da3871638a4008d3d6b 100644
 --- a/dist/store.js
 +++ b/dist/store.js
 @@ -1,15 +1,25 @@
@@ -580,7 +580,7 @@ index b12b787..4e2bbba 100644
  const LOG_BUFFER_MAX = 500;
  const logBuffer = [];
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 7cebaa6..697a60c 100644
+index 7cebaa62bd48eb4dfbf14336d7c0435590d33286..697a60c596708a97d8bc077786f90012e881f174 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -16,6 +16,26 @@ export interface DashboardSnapshot {
@@ -735,7 +735,7 @@ index 7cebaa6..697a60c 100644
 +    historyProvider?: DashboardHistoryProvider;
  }
 diff --git a/dist/ui/layout.js b/dist/ui/layout.js
-index 36b9575..785768e 100644
+index 36b957573fba3d5046e9b50f844aefb9fde486e8..f8284c8f0fcdd1d2e9635640cf87e65145b433c4 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
 @@ -2,172 +2,3535 @@
@@ -4511,7 +4511,7 @@ index 36b9575..785768e 100644
    <div class="main">
      ${bodyHtml}
 diff --git a/dist/ui/pages/agent-groups.js b/dist/ui/pages/agent-groups.js
-index 0c33db8..4e91521 100644
+index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a0747ed0b548 100644
 --- a/dist/ui/pages/agent-groups.js
 +++ b/dist/ui/pages/agent-groups.js
 @@ -1,9 +1,8 @@
@@ -5468,14 +5468,14 @@ index 0c33db8..4e91521 100644
    `);
 diff --git a/dist/ui/pages/audit.d.ts b/dist/ui/pages/audit.d.ts
 new file mode 100644
-index 0000000..aafb8fc
+index 0000000000000000000000000000000000000000..aafb8fc3a07ef232f1ff65dafbf7ca8a5f429a03
 --- /dev/null
 +++ b/dist/ui/pages/audit.d.ts
 @@ -0,0 +1 @@
 +export declare function auditPage(): string;
 diff --git a/dist/ui/pages/audit.js b/dist/ui/pages/audit.js
 new file mode 100644
-index 0000000..9486e34
+index 0000000000000000000000000000000000000000..9486e34005d56f52397af3c29867bd6fdd579b62
 --- /dev/null
 +++ b/dist/ui/pages/audit.js
 @@ -0,0 +1,112 @@
@@ -5592,7 +5592,7 @@ index 0000000..9486e34
 +  `);
 +}
 diff --git a/dist/ui/pages/channels.js b/dist/ui/pages/channels.js
-index 4433c2a..e047d6b 100644
+index 4433c2a002a048a37cece8b88a4ca796e023e98b..e047d6b1fc1c71edc76b07fbcd268c3df68a2e79 100644
 --- a/dist/ui/pages/channels.js
 +++ b/dist/ui/pages/channels.js
 @@ -1,85 +1,197 @@
@@ -5850,7 +5850,7 @@ index 4433c2a..e047d6b 100644
      </script>
    `);
 diff --git a/dist/ui/pages/logs.js b/dist/ui/pages/logs.js
-index 93fe37a..6094425 100644
+index 93fe37af10c30bf3ab8ac49647914b3f71bae682..60944259b5ce5bf271e8f9a92d8732c6b2730536 100644
 --- a/dist/ui/pages/logs.js
 +++ b/dist/ui/pages/logs.js
 @@ -1,38 +1,68 @@
@@ -6092,7 +6092,7 @@ index 93fe37a..6094425 100644
      </script>
    `);
 diff --git a/dist/ui/pages/messages.js b/dist/ui/pages/messages.js
-index 38aa022..517e1e2 100644
+index 38aa0222f52843f75cfa2036c0ced06383c33fcc..517e1e2cb424d96e32526375e7379c05965b87de 100644
 --- a/dist/ui/pages/messages.js
 +++ b/dist/ui/pages/messages.js
 @@ -1,83 +1,347 @@
@@ -6497,7 +6497,7 @@ index 38aa022..517e1e2 100644
    `);
  }
 diff --git a/dist/ui/pages/overview.js b/dist/ui/pages/overview.js
-index 3e0cc9e..fb4a1db 100644
+index 3e0cc9e7eea0c3eff47ac352b547dbe59f3cfc81..fb4a1db837a53dbecb49c1ea699d1f2392d50f62 100644
 --- a/dist/ui/pages/overview.js
 +++ b/dist/ui/pages/overview.js
 @@ -1,165 +1,530 @@
@@ -7144,7 +7144,7 @@ index 3e0cc9e..fb4a1db 100644
    `);
  }
 diff --git a/dist/ui/pages/sessions.js b/dist/ui/pages/sessions.js
-index 7e438eb..ce5acd6 100644
+index 7e438eb56aede2fa7f775a99c3d9c8b52b1180d3..ce5acd6c85c7e19a32b57017faec5ee961044ade 100644
 --- a/dist/ui/pages/sessions.js
 +++ b/dist/ui/pages/sessions.js
 @@ -1,62 +1,243 @@
@@ -7439,7 +7439,7 @@ index 7e438eb..ce5acd6 100644
  }
 diff --git a/dist/ui/pages/tasks.d.ts b/dist/ui/pages/tasks.d.ts
 new file mode 100644
-index 0000000..96dd0c5
+index 0000000000000000000000000000000000000000..96dd0c59afa7282c41354377c58acec57f8e02eb
 --- /dev/null
 +++ b/dist/ui/pages/tasks.d.ts
 @@ -0,0 +1,3 @@
@@ -7448,7 +7448,7 @@ index 0000000..96dd0c5
 +export declare function cronDescribe(expr: string): string | null;
 diff --git a/dist/ui/pages/tasks.js b/dist/ui/pages/tasks.js
 new file mode 100644
-index 0000000..482f03f
+index 0000000000000000000000000000000000000000..482f03f696dc28b7174adb7ac6057a1f27a156eb
 --- /dev/null
 +++ b/dist/ui/pages/tasks.js
 @@ -0,0 +1,921 @@
@@ -8374,7 +8374,7 @@ index 0000000..482f03f
 +    }
 +}
 diff --git a/dist/ui/pages/users.js b/dist/ui/pages/users.js
-index ea390fe..531e82e 100644
+index ea390fe8a5d6d30e177421c8d7b78af81da78962..531e82e5e7a7a6d6fc84644528073b9f2dd4a86e 100644
 --- a/dist/ui/pages/users.js
 +++ b/dist/ui/pages/users.js
 @@ -1,84 +1,263 @@
@@ -8712,7 +8712,7 @@ index ea390fe..531e82e 100644
    `);
 diff --git a/dist/ui/pages/wikis.js b/dist/ui/pages/wikis.js
 new file mode 100644
-index 0000000..69e3f97
+index 0000000000000000000000000000000000000000..69e3f977505a7130066b917c9d753cb357c529e7
 --- /dev/null
 +++ b/dist/ui/pages/wikis.js
 @@ -0,0 +1,797 @@
@@ -9515,10 +9515,10 @@ index 0000000..69e3f97
 +}
 diff --git a/dist/ui/pages/work-items.js b/dist/ui/pages/work-items.js
 new file mode 100644
-index 0000000..7448be4
+index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a7190bf984b
 --- /dev/null
 +++ b/dist/ui/pages/work-items.js
-@@ -0,0 +1,1026 @@
+@@ -0,0 +1,1028 @@
 +/**
 + * Work Items page — one canonical store, three switchable views:
 + *   Kanban   — columns = the fixed status enum, click-to-move (touch-first)
@@ -10384,8 +10384,7 @@ index 0000000..7448be4
 +            if (!text || !item) return;
 +            noteAdd.disabled = true;
 +            mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action', { action: 'note', note: text })
-+              .then(function () { return refetch(); })
-+              .then(function () { renderDrawer(); })
++              .then(function () { refetchSoon(); })
 +              .catch(function (e) { showDrawerError(e.message); noteAdd.disabled = false; });
 +          };
 +        }
@@ -10395,7 +10394,7 @@ index 0000000..7448be4
 +          cancelBtn.onclick = function () {
 +            if (!confirm('Cancel this work item? The assignee (or owner) team will be notified.')) return;
 +            mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action', { action: 'cancel' })
-+              .then(function () { closeDrawer(); return refetch(); })
++              .then(function () { closeDrawer(); refetchSoon(); })
 +              .catch(function (e) { showDrawerError(e.message); });
 +          };
 +        }
@@ -10447,7 +10446,7 @@ index 0000000..7448be4
 +          var ap = drawerAssigneePayload(false, null);
 +          for (var k in ap) payload[k] = ap[k];
 +          mutate('POST', '/api/work-items', payload)
-+            .then(function () { closeDrawer(); return refetch(); })
++            .then(function () { closeDrawer(); refetchSoon(); })
 +            .catch(function (e) { showDrawerError(e.message); btn.disabled = false; });
 +          return;
 +        }
@@ -10476,7 +10475,7 @@ index 0000000..7448be4
 +            return mutate('POST', '/api/work-items/' + encodeURIComponent(item.id) + '/action',
 +              Object.keys(ap2).length ? Object.assign({ action: 'reassign' }, ap2) : { action: 'reassign' });
 +          })
-+          .then(function () { closeDrawer(); return refetch(); })
++          .then(function () { closeDrawer(); refetchSoon(); })
 +          .catch(function (e) { showDrawerError(e.message); btn.disabled = false; });
 +      }
 +
@@ -10523,9 +10522,12 @@ index 0000000..7448be4
 +      }
 +      var refetchTimer = null;
 +      function refetchSoon() {
-+        // The pusher is nudged by every mutator, but the snapshot lands
-+        // asynchronously (~1s) — fetch now for the optimistic state and once
-+        // more after the push settles.
++        // The pusher is nudged by every mutator (dashboard AND agent-side —
++        // see modules/work-items/wake.ts on the host), but the snapshot
++        // lands asynchronously (~1s) — fetch now for the optimistic state
++        // and once more after the push settles. Every mutation path (create,
++        // edit, cancel, note, move) uses this instead of a single refetch()
++        // so none of them can race the async push and show stale state.
 +        refetch();
 +        if (refetchTimer) clearTimeout(refetchTimer);
 +        refetchTimer = setTimeout(refetch, 1500);
@@ -10540,14 +10542,14 @@ index 0000000..7448be4
 +          var next = JSON.stringify(rows);
 +          if (next !== JSON.stringify(state.items)) { state.items = rows; render(); }
 +        }).catch(function () { /* transient */ });
-+      }, 30000);
++      }, 8000);
 +    })();
 +    </script>
 +  `);
 +}
 diff --git a/dist/ui/wiki-render.js b/dist/ui/wiki-render.js
 new file mode 100644
-index 0000000..d872c31
+index 0000000000000000000000000000000000000000..cfea060c0a511607770e31e9c12ba9cf69fd6a41
 --- /dev/null
 +++ b/dist/ui/wiki-render.js
 @@ -0,0 +1,211 @@
@@ -10763,7 +10765,7 @@ index 0000000..d872c31
 +  return '<div class="wk-meta">' + parts.join('') + '</div>';
 +}
 diff --git a/package.json b/package.json
-index 27d581b..5d6a76e 100644
+index 27d581bdf9e11476e840ff837dfbd0eed7953a91..5d6a76e243b21fbde07dbe495537523ec0d90ed3 100644
 --- a/package.json
 +++ b/package.json
 @@ -26,6 +26,10 @@

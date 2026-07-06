@@ -33,6 +33,24 @@ import { log } from '../../log.js';
 import { notifyAgent } from '../approvals/primitive.js';
 import { refreshWorkItemsProjection } from './projection.js';
 
+/**
+ * This module is dashboard-independent (works headless), so it can't hard-
+ * import dashboard-pusher.ts — that file only exists when /add-dashboard is
+ * installed. The dashboard integration registers a nudge callback at host
+ * startup when present; otherwise this is a no-op. Single choke point for
+ * BOTH mutation sources (dashboard mutators and agent-side delivery-action
+ * handlers) so neither can drift out of sync with the other again.
+ */
+let pusherNudge: (() => void) | null = null;
+
+export function setWorkItemsPusherNudge(fn: (() => void) | null): void {
+  pusherNudge = fn;
+}
+
+export function nudgeWorkItemsPusher(): void {
+  pusherNudge?.();
+}
+
 export type WorkItemMutationKind = 'create' | 'status_change' | 'reassign' | 'cancel' | 'note';
 
 export interface WakeDecisionInput {
@@ -96,6 +114,7 @@ export function affectedTeams(input: WakeDecisionInput): string[] {
  * item now has ≥1 row, so the has-items guard no longer skips it).
  */
 export function refreshAndWake(input: WakeDecisionInput, message: string): void {
+  nudgeWorkItemsPusher();
   for (const team of affectedTeams(input)) {
     refreshWorkItemsProjection(team);
   }

@@ -165,6 +165,16 @@ startDashboard({
 });
 ```
 
+**Work-items live update wiring.** Agent-driven work-item mutations (create/move/note via the MCP tool) go through `modules/work-items/actions.ts`, which is dashboard-independent and can't import `dashboard-pusher.ts` directly. Wire the nudge hook right after `startDashboardPusher(...)` so those mutations reach the live dashboard in ~1s instead of waiting for the next periodic snapshot (up to 60s) — without this, the Work Items page only picks up agent-driven changes on its next background poll, which reads as "doesn't update without a refresh":
+
+```ts
+// src/index.ts — right after startDashboardPusher({ ... })
+const { setWorkItemsPusherNudge } = await import('./modules/work-items/wake.js');
+setWorkItemsPusherNudge(nudgePusher);
+```
+
+`nudgePusher` must be in the same destructured import as `startDashboardPusher` (`const { startDashboardPusher, nudgePusher, getActivityForRange, getTokenSummaryForRange } = await import('./dashboard-pusher.js');`).
+
 Then edit `src/db/migrations/index.ts` to register `migration016` and `migration017`, edit `src/dashboard-pusher.ts` to import `getRecentAudit` + export `nudgePusher` + include `audit: getRecentAudit(200)` in the snapshot, and edit `src/index.ts` to pass `mutators` + `resolveActor` into `startDashboard` via `buildDashboardMutatorContext()`. The skill ships these snippets in `resources/` for copy/paste:
 
 ```bash
@@ -179,6 +189,7 @@ Verify after editing:
 ```bash
 grep -q 'buildDashboardMutatorContext' src/index.ts && \
   grep -q 'getActivityForRange' src/index.ts && \
+  grep -q 'setWorkItemsPusherNudge' src/index.ts && \
   grep -q 'nudgePusher' src/dashboard-pusher.ts && \
   grep -q 'getActivityForRange' src/dashboard-pusher.ts && \
   grep -q 'migration016' src/db/migrations/index.ts && \
@@ -282,7 +293,7 @@ On **Teams** (`/dashboard/agent-groups` — the page label is "Teams"), the tool
 
 The wiki redesign is visible at `/dashboard/wikis`.
 
-On **Work Items** (nav entry after Tasks), the header shows the open/overdue count and a "+ New item" button; the toolbar has the Kanban / List / Timeline view switcher, search, a team filter, and kind chips. With no items yet the page shows an empty-state hint. Create an item via the drawer and it appears in all three views in <1s; move it between Kanban columns via the "move ▾" picker (or drag on desktop); `/dashboard/audit` shows `work_item.*` rows for every mutation. View choice persists in `localStorage['wi.view']`.
+On **Work Items** (nav entry after Tasks), the header shows the open/overdue count and a "+ New item" button; the toolbar has the Kanban / List / Timeline view switcher, search, a team filter, and kind chips. With no items yet the page shows an empty-state hint. Create an item via the drawer and it appears in all three views in <1s; move it between Kanban columns via the "move ▾" picker (or drag on desktop); `/dashboard/audit` shows `work_item.*` rows for every mutation. View choice persists in `localStorage['wi.view']`. The page also updates live with no manual refresh: an 8s background poll (skipped while a drawer is open, so it never clobbers in-progress typing) picks up changes from *any* source, including an agent moving a card through `update_work_item` — those reach the page in ~1-9s (the host-side pusher nudge lands in ~1s, then the poll catches up within its 8s cadence) instead of waiting for the old 60s snapshot interval. Every dashboard-side mutation (create, edit, cancel, note) also self-refreshes via `refetchSoon()` (immediate + a 1.5s follow-up), so the item you just created can't disappear behind the async push landing a beat late.
 
 On **Tasks** (new nav entry between Sessions and Audit), the toolbar shows a search box and status chips (Pending / Processing / Paused). Below it, sections per agent group containing live scheduled tasks. Click a row to open the side drawer; edit prompt or cron and Save — the row updates in <1s via `nudgePusher`. Cancel (with confirmation) removes the task from the page; the audit log on `/dashboard/audit` shows a `task.cancel` row immediately. For `processing` tasks, the drawer is read-only and shows "Currently running" — actions reactivate when the turn completes. Cron expressions render human-readable; raw cron is in the schedule cell's tooltip and the drawer's edit input. A non-admin member of an agent group only sees that group's tasks; owners and global admins see everything.
 
@@ -297,6 +308,9 @@ rm patches/@nanoco__nanoclaw-dashboard@0.3.0.patch
 # Manually remove the getActiveContainerNames export from src/container-runner.ts
 # Manually remove the tasks mutators from src/dashboard-mutators.ts (the cancelTask/pauseTask/resumeTask/updateTask exports + the helpers under the "Task mutators" header)
 # Manually remove the permissions and historyProvider callbacks from the startDashboard call in src/index.ts
+# Manually remove the setWorkItemsPusherNudge(nudgePusher) wiring from src/index.ts too — once
+# src/dashboard-pusher.ts is reverted to the base (non-pro) version above, it no longer exports
+# nudgePusher, so leaving this line in place breaks the build.
 # Manually remove cronstrue from package.json then re-pin via pnpm install
 pnpm install
 pnpm run build
