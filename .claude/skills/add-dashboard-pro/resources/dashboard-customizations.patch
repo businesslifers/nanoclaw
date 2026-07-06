@@ -10557,7 +10557,7 @@ index 0000000..d872c31
 +/**
 + * Renders a markdown string for the given wiki. Internal links to other
 + * .md files (relative paths like "../summaries/foo.md") are rewritten to
-+ *   /dashboard/wikis/<wikiId>/page?path=<resolvedRelPath>
++ *   /dashboard/wikis?id=<wikiId>&path=<resolvedRelPath>
 + *
 + * `pagePath` is the wiki-relative path of the page being rendered, e.g.
 + * "concepts/foo.md" — used to resolve relative links.
@@ -10605,9 +10605,9 @@ index 0000000..d872c31
 +      const resolved = resolveRel(pagePath, href);
 +      if (!resolved) return;
 +      token.href =
-+        '/dashboard/wikis/' +
++        '/dashboard/wikis?id=' +
 +        encodeURIComponent(wikiId) +
-+        '/page?path=' +
++        '&path=' +
 +        encodeURIComponent(resolved);
 +    },
 +  });
