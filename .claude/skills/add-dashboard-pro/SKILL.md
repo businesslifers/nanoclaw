@@ -1,6 +1,6 @@
 ---
 name: add-dashboard-pro
-description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, "Agent Groups" relabelled to "Teams" throughout the UI, list/card view toggle on the Teams page, agent/sub-agent rename with audit log, a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes, a /dashboard/tasks page with cancel/pause/resume/edit actions for scheduled tasks, an overview-page timeframe selector (24h / week / month / all-time) that drives the activity chart and token-usage cells, and a /dashboard/work-items page (Kanban / List / Timeline over the cross-team work-item store, full create/edit/reassign/cancel). Requires /add-dashboard to have been run first.
+description: Layer the businesslifers customizations onto the base NanoClaw dashboard — wiki-page redesign, per-container CPU/memory columns on the Sessions table, "Agent Groups" relabelled to "Teams" throughout the UI, list/card view toggle on the Teams page, agent/sub-agent rename with audit log, a CPU-pinned watchdog that flips system health to "degraded" when any container stays above 80% CPU for ~5 minutes, a /dashboard/tasks page with cancel/pause/resume/edit actions for scheduled tasks, an overview-page timeframe selector (24h / week / month / all-time) that drives the activity chart and token-usage cells, and a /dashboard/work-items page (Kanban / List / Timeline over the cross-team work-item store, full create/edit/reassign/cancel). Auto-installs the host-side work-item core (central work_items store, reliability sweep, agent create_work_item/list_work_items MCP tools — formerly /add-work-items) when it's missing. Also handles changing the sidebar logo / favicon on an already-installed dashboard (formerly /update-dashboard-logo) — drop dashboard-logo.{svg,png,webp,jpg} at the install root or set DASHBOARD_LOGO_PATH, then re-run this skill. Requires /add-dashboard to have been run first. Triggers on "dashboard pro", "add work items", "work item feature", "install work-items", "change dashboard logo", "update dashboard logo".
 ---
 
 # /add-dashboard-pro — businesslifers dashboard customizations
@@ -19,14 +19,23 @@ Adds twelve things on top of the base `/add-dashboard` install. The patch also r
 10. **Overview timeframe selector** — the static "Last 24 hours" chip in the overview header becomes a `<select>` with four windows (Last 24 hours / Last week / Last month / All time). On change, the page re-fetches `/api/activity?range=<key>` and `/api/tokens/summary?range=<key>` and re-renders the Message Activity chart + Token Usage cells + by-model/by-agent breakdowns. The chart bucket granularity adapts (hourly for 24h, daily for week/month, weekly for all-time — capped at the most recent 52 weeks so long-lived installs stay readable). The 24h path stays as snapshot pushes (no extra steady-state cost); other ranges are computed on demand by a `historyProvider` callback exported from `src/dashboard-pusher.ts`. The user's selection persists under `localStorage['ov-window']`. Default is `24h`. For Codex agents whose log timestamps can't be scraped, entries are kept in every range as a best-effort fallback. The new `historyProvider` field must be wired into the `startDashboard(...)` call (see Step 3a below). The **By Model** and **By Agent** breakdown tables are fully sortable — **every** column header is clickable (label, Requests, In, Out, Cache Read, Cache Write, Cost). Click a column to sort by it (▼/▲ indicator on the active column, which also gets an `ov-sort-active` highlight); clicking the already-active column toggles direction. The label column (Model / Agent) sorts alphabetically and defaults to ascending; numeric columns default to descending. The initial sort is Cost descending, so the biggest spenders surface first. Note the right-hand breakdown panel is titled **By Agent** with an **Agent** column (not "By Team"/"Team") — a deliberate local override of the skill-wide Teams branding; the internal table identifier stays `team`. Sorting is client-side (a single delegated click listener on the static `#ov-token-detail` container, so it survives the innerHTML re-renders triggered by sort toggles and timeframe changes) and re-applies on every render; the per-table sort key + direction are in-memory only (reset on reload). Columns are declarative: numeric ones live in `OV_SORT_FIELDS` (column key → row field), the label column is the special `'label'` key with a per-table `labelOf` accessor, and each header is one `ovSortTh(table, col, label)` call.
 11. **Tasks page** — new `/dashboard/tasks` route listing every active scheduled task across all session inbound DBs, grouped by agent group with collapsible sections. Pulls from the snapshot's new `tasks` array (host scans `kind='task'` rows in pending/processing/paused statuses on every push). Operators can cancel, pause, resume, edit-prompt, and edit-schedule from the dashboard; each action runs through the existing mutator + audit + nudge flow with `canAccessAgentGroup` enforcement (member or higher — more permissive than rename). Cron expressions render human-readable via `cronstrue` (raw cron in tooltip and edit input). Editing happens in a side drawer that opens on row click, with debounced live human-readable cron preview. The drawer renders the prompt as **markdown** — headings, bold, italic, fenced/inline code, bulleted/ordered lists, links, and paragraphs are all formatted via a small client-side escape-first renderer (defined inline in `dist/ui/pages/tasks.js` as `renderMarkdown`). Output is HTML-injection safe: every untrusted character is HTML-escaped before any markdown transform; only `https?:`, `mailto:`, and same-origin links are emitted as `<a>` tags (others fall back to plain text). Action visibility per status matches the underlying scheduling primitives' refusal-to-act semantics: `processing` rows show no action buttons (subdued "currently running" note); `pending` shows Pause+Cancel; `paused` shows Resume+Cancel. Mutators reuse the four primitives in `src/modules/scheduling/db.ts` (`cancelTask`, `pauseTask`, `resumeTask`, `updateTask`); their `id OR series_id` matching means recurring chains are operated on at the live row, not the historical row the agent originally saw. Audit `target_id` is composite `<sessionId>:<taskId>` since `taskId` isn't globally unique across session DBs. The host's `startDashboard` accepts a new `permissions: { canAccessAgentGroup }` callback so the `/api/tasks` route can filter per-viewer without bundling host modules into the dashboard package.
 
-12. **Work Items page** — new `/dashboard/work-items` route over the host's cross-team work-item store (central `work_items` table, migration `103-work-items`): one fetched dataset, three switchable views — **Kanban** (columns = the fixed status enum `open | in_progress | blocked | done | cancelled`, always rendered even when empty — an empty board is still a board, with dashed "No items" placeholders per column; click-to-move as the primary touch-friendly interaction with native drag layered on top calling the same `moveItem()` path), **List** (grouped by owner team, sorted by due date, overdue rows highlighted), and **Timeline** (CSS-grid week/day calendar; chips positioned by due date, with delivered — `completed_at` — vs planned vs overdue distinguished). Full CRUD via a side drawer (assignee picked FIRST; switching the None/Team/Human assignee mode toggles in place and never re-renders the drawer, so typed fields survive): create, edit, reassign (team or human assignee), cancel, and append notes; every mutation runs through host mutators (`src/dashboard-work-items-mutators.ts`) with `canAccessAgentGroup` on the item's owner-OR-assignee, an additional target-team check on reassignment, audit rows (`target_type='work_item'`), projection refresh + wake-matrix notification of affected teams, and `nudgePusher`. **Teams vs agents**: pickers follow the Teams-page hierarchy (`parentId` from the parent-destination convention) — the team filter and the Owner select list only TEAMS (lead agent groups; the filter matches items owned/assigned to the lead OR any of its lane agents), while the assignee select is an `<optgroup>` per team with the lead first and its lanes indented (`↳`). **Dashboard status-move rule** (enforced host-side in `updateWorkItem`, mirrored in the UI's move menu / drag targets / drawer status select): items worked by an agent — team assignee, or unassigned where the owner team's agent is the de facto worker — only accept `open` (re-schedule) or `cancelled` from a human operator; the agent moves its own card through in_progress/blocked/done via its ungated MCP path; human-assigned items move anywhere. The `/api/work-items` read route filters per viewer by owner OR assignee (not the single-ID check `/api/tasks` uses — a single-ID filter would hide cross-team delegations from the assignee's own admin). Shared render helpers across all three views: deterministic gradient team avatars, circular-initials human badges, an "owner → assignee" flow indicator, kind badges, and overdue/soon due chips. **Host prerequisite**: the dashboard-independent work-item **core** — `src/db/work-items.ts`, `src/modules/work-items/`, migration 103, and the agent-side MCP tools — must be installed first via **`/add-work-items`** (the preflight below enforces it). This skill itself ships the two dashboard-coupled files (`src/dashboard-work-items.ts` + `src/dashboard-work-items-mutators.ts`, which import the base dashboard's pusher/mutators + `db/dashboard-audit`) in Step 3a, plus the dashboard-package patch. The core is not a skill resource here — it comes from `/add-work-items`.
+12. **Work Items page** — new `/dashboard/work-items` route over the host's cross-team work-item store (central `work_items` table, migration `103-work-items`): one fetched dataset, three switchable views — **Kanban** (columns = the fixed status enum `open | in_progress | blocked | done | cancelled`, always rendered even when empty — an empty board is still a board, with dashed "No items" placeholders per column; click-to-move as the primary touch-friendly interaction with native drag layered on top calling the same `moveItem()` path), **List** (grouped by owner team, sorted by due date, overdue rows highlighted), and **Timeline** (CSS-grid week/day calendar; chips positioned by due date, with delivered — `completed_at` — vs planned vs overdue distinguished). Full CRUD via a side drawer (assignee picked FIRST; switching the None/Team/Human assignee mode toggles in place and never re-renders the drawer, so typed fields survive): create, edit, reassign (team or human assignee), cancel, and append notes; every mutation runs through host mutators (`src/dashboard-work-items-mutators.ts`) with `canAccessAgentGroup` on the item's owner-OR-assignee, an additional target-team check on reassignment, audit rows (`target_type='work_item'`), projection refresh + wake-matrix notification of affected teams, and `nudgePusher`. **Teams vs agents**: pickers follow the Teams-page hierarchy (`parentId` from the parent-destination convention) — the team filter and the Owner select list only TEAMS (lead agent groups; the filter matches items owned/assigned to the lead OR any of its lane agents), while the assignee select is an `<optgroup>` per team with the lead first and its lanes indented (`↳`). **Dashboard status-move rule** (enforced host-side in `updateWorkItem`, mirrored in the UI's move menu / drag targets / drawer status select): items worked by an agent — team assignee, or unassigned where the owner team's agent is the de facto worker — only accept `open` (re-schedule) or `cancelled` from a human operator; the agent moves its own card through in_progress/blocked/done via its ungated MCP path; human-assigned items move anywhere. The `/api/work-items` read route filters per viewer by owner OR assignee (not the single-ID check `/api/tasks` uses — a single-ID filter would hide cross-team delegations from the assignee's own admin). Shared render helpers across all three views: deterministic gradient team avatars, circular-initials human badges, an "owner → assignee" flow indicator, kind badges, and overdue/soon due chips. **Host prerequisite**: the dashboard-independent work-item **core** — `src/db/work-items.ts`, `src/modules/work-items/`, migration 103, and the agent-side MCP tools — ships with this skill under `resources/work-items/` and is auto-installed by **Phase 0.5** below when missing. This skill also ships the two dashboard-coupled files (`src/dashboard-work-items.ts` + `src/dashboard-work-items-mutators.ts`, which import the base dashboard's pusher/mutators + `db/dashboard-audit`) in Step 3a, plus the dashboard-package patch.
 
 ## What this skill is NOT
 
 - Not a replacement for `/add-dashboard`. It assumes the base dashboard is already installed and only patches/extends it.
 - Not yet portable to non-Docker container runtimes (Apple Container etc.) — the watchdog shells out to `docker stats` and silently returns `[]` on other runtimes.
 
-## Phase 0: Preflight
+## Mode routing
+
+This skill has two modes:
+
+- **Mode A: fresh install** — the full flow below (Phase 0 → Phase 2).
+- **Mode B: logo update** — dashboard-pro is already installed and the operator only wants to change the sidebar logo / favicon. Re-running Mode A does not work for this — its preflight refuses to overwrite an existing patch. Jump straight to **"Mode B: update the logo on an existing install"** at the bottom of this file.
+
+Pick Mode B when `patches/@nanoco__nanoclaw-dashboard@0.3.0.patch` already exists and the request is about the logo/favicon. Otherwise proceed with Mode A.
+
+## Phase 0: Preflight (Mode A)
 
 Run this from the install root. The skill must NOT proceed if any check fails.
 
@@ -37,12 +46,11 @@ problems=()
 grep -q '@nanoco/nanoclaw-dashboard' package.json 2>/dev/null \
   || problems+=("@nanoco/nanoclaw-dashboard not in package.json — run /add-dashboard first")
 [ -f src/dashboard-pusher.ts ] || problems+=("src/dashboard-pusher.ts missing — run /add-dashboard first")
-[ -f src/db/work-items.ts ] || problems+=("src/db/work-items.ts missing — run /add-work-items first (the Work Items page needs the host work-item core)")
 [ -f src/container-runner.ts ] || problems+=("src/container-runner.ts missing")
 [ ! -f src/container-stats.ts ] || problems+=("src/container-stats.ts already exists — skill may already be applied")
 [ ! -f src/dashboard-tasks.ts ] || problems+=("src/dashboard-tasks.ts already exists — skill may already be applied")
 [ ! -f patches/@nanoco__nanoclaw-dashboard@0.3.0.patch ] \
-  || problems+=("patches/@nanoco__nanoclaw-dashboard@0.3.0.patch already exists — skill may already be applied")
+  || problems+=("patches/@nanoco__nanoclaw-dashboard@0.3.0.patch already exists — skill may already be applied (if you only want a new logo, use Mode B)")
 if [ ${#problems[@]} -gt 0 ]; then
   printf 'PRECONDITION FAILED:\n'; printf '  - %s\n' "${problems[@]}"
   echo 'Resolve the above before re-running.'
@@ -52,6 +60,31 @@ echo 'Preconditions OK — safe to apply.'
 ```
 
 If "skill may already be applied" fires, the operator should inspect what's already in place rather than blindly overwriting. A re-run after a partial install can be done by deleting the offending files first.
+
+## Phase 0.5: Install the work-item core (skipped when already present)
+
+The dashboard-independent work-item core — central `work_items` + `work_item_notes` tables (migration `103`), DB helpers (`src/db/work-items.ts`, `src/db/work-item-notes.ts`), the `src/modules/work-items/` module (reliability sweep: delegation follow-ups, deliverable tier cascade, weekly cadence RAG; per-session `work_items_cache` projection), and the agent-side MCP tools (`container/agent-runner/src/mcp-tools/work-items.ts`: `create_work_item`, `list_work_items`, …). Provenance: cut from `businesslifers/derek-v2` commits `70d916a6` + `4f21b127`.
+
+This core is **dashboard-independent** — the agent tools and the sweep run headless with no dashboard at all. For a headless install (work items without the dashboard), run just this phase and stop; nothing later in Mode A is needed.
+
+```bash
+if grep -q "migration103" src/db/migrations/index.ts 2>/dev/null; then
+  echo "work-item core already installed — skip to Phase 1."
+else
+  # 1. Copy the new source files (whole-file creations — never overwrite existing files)
+  S=.claude/skills/add-dashboard-pro/resources/work-items
+  cp -r "$S/src/."       src/
+  cp -r "$S/container/." container/
+  # 2. Apply the 8 wiring edits (idempotent, anchored inserts into modules/index.ts,
+  #    db/migrations/index.ts, db/schema.ts, db/session-db.ts, session-manager.ts,
+  #    host-sweep.ts, container-runner.ts, and the agent-runner mcp-tools barrel)
+  node "$S/wire.mjs"
+fi
+```
+
+Expect a `+`/`=` line per edit and `all wiring applied` from `wire.mjs`. If it prints `ANCHOR NOT FOUND` and exits non-zero, the tree has drifted past what this skill version understands — **do not build**; report it. (Re-running only ever prints `= already present`.)
+
+Migration `103` self-applies on the next host start; no manual migration step. If this phase actually installed the core (i.e. the `else` branch ran), two extra build steps apply at the end of Phase 1 — the agent-runner typecheck and the container image rebake (the MCP tools are agent-side); Step 5 calls them out.
 
 ## Phase 1: Apply
 
@@ -81,7 +114,7 @@ The replacement adds:
 
 If the operator has previously customized `src/dashboard-pusher.ts` themselves, those edits will be lost. The operator should diff before/after and re-apply any local-only changes on top.
 
-The pusher copy also collects `work_items` into the snapshot via `collectWorkItems()` from `src/dashboard-work-items.ts`. That file ships with this skill (Step 3a). The dashboard-independent work-item **core** it reads from (`src/db/work-items.ts`, `src/modules/work-items/`, migration 103, the agent MCP tool) must already be installed via **`/add-work-items`** — if it isn't, the copied pusher won't compile. The preflight enforces it.
+The pusher copy also collects `work_items` into the snapshot via `collectWorkItems()` from `src/dashboard-work-items.ts`. That file ships with this skill (Step 3a). The dashboard-independent work-item **core** it reads from (`src/db/work-items.ts`, `src/modules/work-items/`, migration 103, the agent MCP tool) was installed in Phase 0.5 — if that phase was skipped or failed, the copied pusher won't compile.
 
 ### 3a. Add the dashboard CRUD foundation to the host
 
@@ -101,7 +134,7 @@ cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts        
 # (they import the base dashboard's pusher/mutators + db/dashboard-audit) ship
 # WITH this skill — copied next. The dashboard-INDEPENDENT work-item core
 # (src/db/work-items.ts, src/modules/work-items/, migration 103, agent MCP tool)
-# must already be present via /add-work-items — the preflight above enforces it.
+# was installed by Phase 0.5 above.
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items.ts                         src/dashboard-work-items.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items-mutators.ts                src/dashboard-work-items-mutators.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items-mutators.test.ts           src/dashboard-work-items-mutators.test.ts
@@ -186,7 +219,7 @@ bash .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh
 
 The helper writes `patches/@nanoco__nanoclaw-dashboard@0.3.0.patch`. Commit that file alongside any custom `dashboard-logo.*` for reproducible installs.
 
-To change the logo later, run `/update-dashboard-logo` (the sister skill) — that re-bakes the patch and reapplies it without re-running the full install. Or invoke `bash .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh && pnpm install && pnpm run build` and restart the service yourself.
+To change the logo later, re-run this skill in **Mode B** (see the bottom of this file) — that re-bakes the patch and reapplies it without re-running the full install. Or invoke `bash .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh && pnpm install && pnpm run build` and restart the service yourself.
 
 Add the `patchedDependencies` entry to `pnpm-workspace.yaml` if it isn't already there:
 
@@ -204,6 +237,13 @@ pnpm install         # applies the patch into node_modules
 pnpm run build       # compiles host TS — must finish clean
 ```
 
+If Phase 0.5 actually installed the work-item core this run (its `else` branch ran), also:
+
+```bash
+pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit   # agent-runner types
+./container/build.sh      # rebake the agent image (the work-item MCP tools are agent-side)
+```
+
 If `pnpm install` complains about `minimumReleaseAge` or `onlyBuiltDependencies`, see CLAUDE.md "Supply Chain Security (pnpm)" — those policies must NOT be bypassed without explicit human approval.
 
 ## Phase 2: Verify
@@ -215,6 +255,12 @@ pnpm exec vitest run src/container-stats.test.ts src/dashboard-tasks.test.ts src
 ```
 
 Expect: container-stats 20 tests, dashboard-tasks 9 tests, dashboard-mutators 37 tests — all passing.
+
+If Phase 0.5 installed the work-item core this run, also exercise migration 103 + the module logic against a fresh in-memory DB:
+
+```bash
+pnpm exec vitest run src/db/work-items.test.ts src/modules/work-items/
+```
 
 ### Restart and check the dashboard
 
@@ -258,6 +304,81 @@ pnpm run build
 
 The dashboard package's npm version is unchanged by the patch — `pnpm install` after removing the patch entry restores the unpatched module.
 
+Rolling back the Phase 0.5 work-item core is separate and rarely wanted (agent teams may hold live work items): remove the copied files (`src/db/work-items.ts`, `src/db/work-item-notes.ts`, `src/db/migrations/103-work-items.ts`, `src/modules/work-items/`, `container/agent-runner/src/mcp-tools/work-items.*`) and revert the 8 anchored inserts `wire.mjs` made (each is tagged with a recognizable guard string — grep for `work-items` / `work_items` in the 8 wired files). Migration 103's tables persist in `data/v2.db` unless dropped manually.
+
 ## Updating
 
-This skill is distributed via the `private-skills` remote (default `https://github.com/businesslifers/nanoclaw.git`) on branch `skill/dashboard-pro`. Re-running `/update-private-skills` will pull new commits when the patch is updated for newer dashboard releases or the watchdog is tuned.
+This skill is distributed via the `private-skills` remote (default `https://github.com/businesslifers/nanoclaw.git`) on branch `skill/dashboard-pro`. Re-running `/update-private-skills` will pull new commits when the patch is updated for newer dashboard releases or the watchdog is tuned. The former `skill/add-work-items` and `skill/update-dashboard-logo` branches are retired — their content lives here now (Phase 0.5 and Mode B respectively).
+
+## Mode B: update the logo on an existing install
+
+The Dashboard Pro logo and favicon are inlined as a base64 data URL inside `patches/@nanoco__nanoclaw-dashboard@0.3.0.patch`. To change them, the patch must be regenerated and re-applied — Mode A's preflight refuses to overwrite an existing patch, so this mode does the in-place update.
+
+### B0: Preflight
+
+```bash
+problems=()
+[ -f pnpm-workspace.yaml ] || problems+=("Not at the install root (no pnpm-workspace.yaml)")
+[ -f patches/@nanoco__nanoclaw-dashboard@0.3.0.patch ] \
+  || problems+=("Dashboard Pro patch missing — run the full install (Mode A) first")
+[ -f .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh ] \
+  || problems+=("Re-bake helper missing — run /update-private-skills to refresh this skill")
+[ -f .claude/skills/add-dashboard-pro/resources/dashboard-customizations.patch ] \
+  || problems+=("Source patch missing in resources — run /update-private-skills")
+if [ ${#problems[@]} -gt 0 ]; then
+  printf 'PRECONDITION FAILED:\n'; printf '  - %s\n' "${problems[@]}"
+  exit 1
+fi
+echo 'Preconditions OK.'
+```
+
+### B1: Choose a logo
+
+The helper resolves the logo source in this order:
+
+1. `DASHBOARD_LOGO_PATH` env var (explicit override)
+2. `dashboard-logo.{svg,png,webp,jpg,jpeg}` at the install root (auto-detected, first match wins)
+3. The default NanoClaw icon (used when neither is set — selecting this clears any prior custom logo)
+
+The sidebar slot is 80×80 px, so square assets render best. SVG is recommended (sharp at any size + small payload).
+
+Drop the new logo at the install root (or update the env var) before continuing. To revert to the default NanoClaw icon, delete or rename your `dashboard-logo.*` and unset `DASHBOARD_LOGO_PATH`.
+
+### B2: Re-bake and reapply
+
+```bash
+bash .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh
+
+pnpm install         # re-applies the regenerated patch into node_modules
+pnpm run build
+```
+
+`pnpm install` notices the patch file changed and re-applies it to the dashboard package. The host code is unchanged, so `pnpm run build` is fast — it's only there to keep the build artifact consistent.
+
+### B3: Restart and verify
+
+```bash
+# Linux (systemd) — restart this install's unit:
+for u in $(systemctl --user list-unit-files --no-legend 'nanoclaw-v2-*.service' | awk '{print $1}'); do
+  systemctl --user cat "$u" | grep -q "WorkingDirectory=$PWD" && systemctl --user restart "$u" && break
+done
+
+# macOS (launchd):
+# launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+Open the dashboard. The sidebar logo (top of the left nav, above "Dashboard Pro") and the browser favicon should now show the new image. The favicon is often aggressively cached by the browser — hard-reload (Cmd-Shift-R / Ctrl-Shift-R) if it looks unchanged.
+
+### B4: Reproducibility
+
+`patches/@nanoco__nanoclaw-dashboard@0.3.0.patch` is regenerated each run; commit it (and your `dashboard-logo.*` source file, if you keep one in-repo) so future installs from a clean clone produce the same dashboard.
+
+### Mode B rollback (revert to the default NanoClaw icon)
+
+```bash
+rm -f dashboard-logo.svg dashboard-logo.png dashboard-logo.webp dashboard-logo.jpg dashboard-logo.jpeg
+unset DASHBOARD_LOGO_PATH
+bash .claude/skills/add-dashboard-pro/resources/rebake-dashboard-logo.sh
+pnpm install && pnpm run build
+# then restart the service as in B3
+```
