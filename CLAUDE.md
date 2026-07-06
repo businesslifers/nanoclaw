@@ -118,7 +118,13 @@ Trunk does not ship any specific channel adapter or non-default agent provider. 
 - **`channels` branch** — Discord, Slack, Telegram, WhatsApp, Teams, Linear, GitHub, iMessage, Webex, Resend, Matrix, Google Chat, WhatsApp Cloud (+ helpers, tests, channel-specific setup steps). Installed via `/add-<channel>` skills.
 - **`providers` branch** — OpenCode (and any future non-default agent providers). Installed via `/add-opencode`.
 
-Each `/add-<name>` skill is idempotent: `git fetch origin <branch>` → copy module(s) into the standard paths → append a self-registration import to the relevant barrel → `pnpm install <pkg>@<pinned-version>` → build.
+Each `/add-<name>` skill is idempotent: `git fetch <remote> <branch>` → copy module(s) into the standard paths → append a self-registration import to the relevant barrel → `pnpm install <pkg>@<pinned-version>` → build.
+
+**This install's `origin` has neither branch** (it's a disaster-recovery mirror, not the framework repo). Confirmed sources here: `private/channels` for channels (canonical — carries local patches upstream/channels lags), `upstream/providers` for providers (`private` has no `providers` branch). Don't trust a skill's hardcoded `git fetch origin <branch>` at face value on this install — check which remote actually has the branch first.
+
+**Merging upstream (`/update-nanoclaw`) — two recurring hazards:**
+- Upstream occasionally proposes removing the `/workspace/global` mount in `src/container-runner.ts` as dead code. It isn't here — it backs the live global-wiki feature (`container/CLAUDE.md`, `src/group-init.ts` both reference `/workspace/global/wiki/`). Keep the local version if a merge conflicts here.
+- A clean `git merge` (no conflict markers) does not mean nothing broke: local-only files (patches invisible to upstream, e.g. the codex file-delivery consumer) can import a symbol/path upstream just deleted or moved. Grep for the old name across the tree after every merge, before trusting `pnpm run build` to be the only check — build will catch it, but only if you run it before committing.
 
 ## Self-Modification
 
