@@ -79,7 +79,7 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch |
 | `src/providers/` | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch) |
 | `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations |
-| `container/skills/` | Container skills mounted into every agent session (`agent-browser`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`) |
+| `container/skills/` | Container skills mounted into every agent session (`agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`, `wiki`, `writing-style`) |
 | `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills) — agent-runner source is a shared read-only mount, not copied per group |
 | `scripts/init-first-agent.ts` | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill) |
 | `migrate-v2.sh` + `setup/migrate-v2/` | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md). |
@@ -125,6 +125,7 @@ Each `/add-<name>` skill is idempotent: `git fetch <remote> <branch>` → copy m
 **Merging upstream (`/update-nanoclaw`) — two recurring hazards:**
 - Upstream occasionally proposes removing the `/workspace/global` mount in `src/container-runner.ts` as dead code. It isn't here — it backs the live global-wiki feature (`container/CLAUDE.md`, `src/group-init.ts` both reference `/workspace/global/wiki/`). Keep the local version if a merge conflicts here.
 - A clean `git merge` (no conflict markers) does not mean nothing broke: local-only files (patches invisible to upstream, e.g. the codex file-delivery consumer) can import a symbol/path upstream just deleted or moved. Grep for the old name across the tree after every merge, before trusting `pnpm run build` to be the only check — build will catch it, but only if you run it before committing.
+- Migration number collisions: upstream and local both assign sequential numbers to `src/db/migrations/*.ts`, and this fork has already renumbered some (local 016–018 = dashboard-audit/agent-group-hidden-dashboard/messaging-group-instance; skill-installed migrations can land at arbitrary numbers, e.g. `103-work-items.ts`). The runner dedupes by `name`, not `version` (`src/db/migrations/index.ts`), so a *textually clean* merge can still land two files exporting the same `migrationNNN` symbol — no conflict markers, but `tsc` fails on the duplicate identifier. Renumber the incoming migration to the next free number and append it to the `migrations` array in `index.ts` before building.
 
 ## Self-Modification
 
@@ -192,7 +193,7 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 - **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. a `scripts/` CLI or helper).
 - **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `agent-browser`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`).
+- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`, `wiki`, `writing-style`).
 
 | Skill | When to Use |
 |-------|-------------|
@@ -226,7 +227,7 @@ Run commands directly — don't tell the user to run them.
 
 ```bash
 # Host (Node + pnpm)
-pnpm run dev          # Host with hot reload
+pnpm run dev          # Run the host once (tsx, no file-watch/reload)
 pnpm run build        # Compile host TypeScript (src/)
 ./container/build.sh  # Rebuild agent container image (nanoclaw-agent:latest)
 pnpm test             # Host tests (vitest)
@@ -291,6 +292,8 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 | [docs/skills-model.md](docs/skills-model.md) | The skills model in full: recipes, tests, upgrades, migrations |
 | [docs/skill-guidelines.md](docs/skill-guidelines.md) | Authoritative checklist for writing a skill |
 | [docs/templates.md](docs/templates.md) | Agent templates: what they are, stamping via `ncl groups create --template` + the setup wizard, the OneCLI/MCP-credential model, supported providers, and how to contribute one |
+| [docs/onecli-upgrades.md](docs/onecli-upgrades.md) | Upgrading the pinned OneCLI gateway version — detect / upgrade / verify / rollback |
+| [docs/upgrade-recovery.md](docs/upgrade-recovery.md) | Recovering when the host refuses to boot after an unsupported upgrade path (the upgrade-state tripwire) |
 
 ## Container Build Cache
 
