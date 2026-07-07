@@ -27,6 +27,7 @@ Every wiki page should be linked here under its category with a one-line summary
 
 - [Analyst Spec](concepts/analyst-spec.md) — Analysis rules (critical/warning/positive thresholds), conversion classification, contact engagement logic, output JSON schema
 - [Collector Data Schema](concepts/collector-data-schema.md) — What collector.mjs produces: file locations, time periods, Google Ads + GA4 fields, status signal
+- [Local-pack conversion gap](concepts/local-pack-conversion-gap.md) — Why Local 3-Pack / Local Listing PMax campaigns show 0 tracked conversions on real spend: GBP actions sit outside the 5 tracked conversion actions; check GBP conversion mapping before calling them dead (Jul 2026)
 
 ### Topics
 *Threads spanning multiple sources — running investigations, recurring reports, account health themes.*
