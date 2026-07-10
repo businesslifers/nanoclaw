@@ -123,10 +123,11 @@ Each `/add-<name>` skill is idempotent: `git fetch <remote> <branch>` → copy m
 
 **This install's `origin` has neither branch** (it's a disaster-recovery mirror, not the framework repo). Confirmed sources here: `private/channels` for channels (canonical — carries local patches upstream/channels lags), `upstream/providers` for providers (`private` has no `providers` branch). Don't trust a skill's hardcoded `git fetch origin <branch>` at face value on this install — check which remote actually has the branch first.
 
-**Merging upstream (`/update-nanoclaw`) — two recurring hazards:**
+**Merging upstream (`/update-nanoclaw`) — three recurring hazards:**
 - Upstream occasionally proposes removing the `/workspace/global` mount in `src/container-runner.ts` as dead code. It isn't here — it backs the live global-wiki feature (`container/CLAUDE.md`, `src/group-init.ts` both reference `/workspace/global/wiki/`). Keep the local version if a merge conflicts here.
 - A clean `git merge` (no conflict markers) does not mean nothing broke: local-only files (patches invisible to upstream, e.g. the codex file-delivery consumer) can import a symbol/path upstream just deleted or moved. Grep for the old name across the tree after every merge, before trusting `pnpm run build` to be the only check — build will catch it, but only if you run it before committing.
 - Migration number collisions: upstream and local both assign sequential numbers to `src/db/migrations/*.ts`, and this fork has already renumbered some (local 016–018 = dashboard-audit/agent-group-hidden-dashboard/messaging-group-instance; skill-installed migrations can land at arbitrary numbers, e.g. `103-work-items.ts`). The runner dedupes by `name`, not `version` (`src/db/migrations/index.ts`), so a *textually clean* merge can still land two files exporting the same `migrationNNN` symbol — no conflict markers, but `tsc` fails on the duplicate identifier. Renumber the incoming migration to the next free number and append it to the `migrations` array in `index.ts` before building.
+- `.claude/scheduled_tasks.lock` is tracked but not gitignored, and holds a live `pid`/`sessionId`/`acquiredAt` that changes whenever the scheduler process (re)starts. `git status` reports it dirty most sessions even with zero real changes, which trips the clean-tree preflight that `/update-nanoclaw` and `/update-skills` both require. `git stash push -- .claude/scheduled_tasks.lock` before proceeding — don't commit the churn.
 
 ## Self-Modification
 
@@ -155,6 +156,8 @@ Key files: `src/db/container-configs.ts`, `src/container-config.ts`, `src/cli/di
 `ncl groups restart --id <group-id> [--rebuild] [--message <text>]`. Kills running containers; if `--message` is provided, writes an `on_wake` message and respawns via `onExit` callback. Without `--message`, containers come back on the next user message. From inside a container, `--id` is auto-filled and only the calling session is restarted.
 
 The `on_wake` column on `messages_in` ensures wake messages are only picked up by a fresh container's first poll iteration. This prevents the race where a dying container (still in its SIGTERM grace period) could steal the message. `killContainer` accepts an optional `onExit` callback that fires after the process exits, guaranteeing the old container is gone before the new one spawns.
+
+**Before any container build / service restart / `ncl groups restart`**, check for in-flight work: `docker stats --no-stream` for high CPU, and `SELECT count(*) FROM messages_in WHERE status='processing'` across `data/v2-sessions/*/*/inbound.db` (via `pnpm exec tsx scripts/q.ts <db> "<sql>"`). A SIGTERM mid-turn silently drops the response, and container logs don't survive `--rm` to diagnose it after the fact.
 
 Key files: `src/container-restart.ts`, `src/container-runner.ts` (`killContainer`), `container/agent-runner/src/db/messages-in.ts` (`getPendingMessages`).
 
