@@ -32,7 +32,7 @@ If you reach your time and aren't done — stop and message the project manager.
 ## ClickUp
 
 - **Formatting:** Always use `markdown_content` field (not `description`) when creating or updating ClickUp tasks. Markdown renders properly with headings (`##`), bold (`**`), bullets (`-`), and horizontal rules (`---`).
-- **Status:** Always ask the requester what status the task should be if not specified. Always send a separate PUT after task creation to force-set the status — ClickUp ignores the `status` field on POST and defaults to "planning".
+- **Status:** Always defaults to "to do" unless Raels explicitly says otherwise in the request. Do not ask each time. Always send a separate PUT after task creation to force-set the status — ClickUp ignores the `status` field on POST and defaults to "planning".
 - **Time estimate:** Always set the `time_estimate` field (in milliseconds) on every task. Use the *total* time across all phases/roles (the "Total" value from the Time Budget block, not the executor's portion). e.g. 1 hr = 3600000, 1.5 hrs = 5400000, 2 hrs = 7200000, 7 hrs = 25200000.
 - **API base:** `https://api.clickup.com/api/v2` — auth injected automatically
 - **Complex payloads:** Use Python `urllib.request` to avoid shell escaping issues with multi-line JSON

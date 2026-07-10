@@ -1,6 +1,6 @@
 # Client Profile: Queensland Capital (QLD Capital)
 
-> Last updated: 2 April 2026
+> Last updated: 10 July 2026
 > Populated by: Raels + Claude
 > Status: Active
 
@@ -127,7 +127,7 @@ If Claude encounters credentials during research, it should note where they were
 
 **Industry:** Property and development finance / Non-bank lending
 
-**Size:** SME. Part of the NMG (Northern Management Group) entity. Small team including Mark Adams (principal), Don Fleming (BDM), Jess Burman (PA), and Charlie Floyd.
+**Size:** SME. Part of the NMG (Northern Management Group) entity. Small team including Mark Adams (principal), Jess Burman (PA), and Charlie Floyd. Don Fleming (former BDM) left the business as of July 2026 — see Key Contacts and Working Notes.
 
 **Relationship summary:** Mettro has worked with QLD Capital for approximately two years, possibly longer. The relationship started when Raels did a LinkedIn reach-out campaign with B2B leads and connected with Mark. After an initial meeting, Mark agreed to a $10,000/month retainer. The work has expanded to cover the full digital marketing stack: website, Google Ads, email campaigns, LinkedIn outreach, reporting, branding, and strategic consulting. Raels holds the primary relationship. The working relationship is close and collaborative, but Mark drives everything. He might say Mettro is responsible for marketing, but in practice he directs the strategy and priorities.
 
@@ -158,7 +158,7 @@ If Claude encounters credentials during research, it should note where they were
 | Name | Role | Contact | Notes |
 |---|---|---|---|
 | Mark Adams | Manager / Principal | manager@qldcapital.com.au | All decisions go through Mark. He approves everything. Does not like jargon. Keep descriptions simple and in lay terms, not overly technical. Averse to new subscriptions — warm him up on anything that costs money. Communicates primarily in the regular marketing meetings. If you really need something outside of meetings, call him. He does not respond well to email for decision-making. |
-| Don Fleming | BDM | | Runs broker and accountant relationships. Handles LinkedIn outreach. Good person to push things through for preliminary approval before it reaches Mark. Practical, grounded feedback on messaging and workflows. |
+| Don Fleming | Former BDM (left July 2026) | | No longer with QLD Capital as of July 2026. Previously ran broker and accountant relationships and handled LinkedIn outreach. A new BDM has not yet come onboard — a broker announcement workflow is being built to cover the gap. Do not route approvals or outreach through Don anymore. |
 | Jess Burman | PA to Mark Adams | pa@nmgroup.com.au, 0430 398 662 | Works across QC and NMG. Important: the relationship with Jess has changed. Do not harass her or go to her for every little thing. |
 | Charlie Floyd | Operations | | Involved in compliance and operational tasks. Best not to involve Charlie in things she's not directly relevant to. |
 
@@ -174,7 +174,9 @@ If Claude encounters credentials during research, it should note where they were
 | Luisa | Copy / Content | Website copy, email content, Zoho template copy. |
 | Archie | Development | Email template tech setup, file linking, WPEngine/WordPress technical work. |
 
-**Communication preferences:** Mark communicates in the regular marketing meetings and by phone when needed. He does not use email for decision-making. Regular marketing meetings (roughly monthly) with Mark, Don, and sometimes Charlie. Mettro provides weekly reporting.
+**Communication preferences:** Mark communicates in the regular marketing meetings and by phone when needed. He does not use email for decision-making. Regular marketing meetings — as of Jul 2026, fortnightly — with Mark, Don, and sometimes Charlie. Mettro provides weekly reporting.
+
+**Meeting agenda:** Raels prepares a "Prepare Meeting Agenda for Mark" task each fortnight (top = what Mark wants reviewed, bottom = what Raels needs to review with him, plus carried-over items from last meeting). First instance: [86d3nb0kx](https://app.clickup.com/t/86d3nb0kx), due 23 Jul 2026, 0.5 hr budget. ClickUp's public API doesn't expose native recurrence, so Raels toggles "Repeat every 2 weeks" on the task itself in the ClickUp UI.
 
 **Approval process:** Mark is the final decision maker on everything. Nothing goes live without his sign-off. If you want preliminary feedback before going to Mark, push things through Don first and ask him to have a look.
 
@@ -329,6 +331,26 @@ All credentials are stored in Bitwarden. No tricky access issues.
 ---
 
 ## Project History
+
+### Don Fleming Departure Announcement -- In Progress
+
+**Dates:** July 2026
+**Scope:** Don Fleming (BDM) left QLD Capital after six-plus years. Build a Zoho workflow to announce the departure to brokers who have closed deals with Don, sent from lending@ and signed off as Mark Adams. Drip-fed across Jess's list (~1,000+ contacts) to avoid Zoho spam thresholds, with a 6-month wait step at the end so the workflow can be revisited once a new BDM comes onboard.
+**What was delivered:** Task scoped, priority urgent, due Monday 13 July 2026.
+**Outcome:** In progress.
+**Notes:** No new BDM in place yet as of July 2026. See Working Notes and Key Contacts.
+
+---
+
+### New BDM Introduction Email -- To Do
+
+**Dates:** July 2026
+**Scope:** A new BDM is replacing Don Fleming. Draft an intro email in the style of a sample Raels supplied from "Zolve" (another lender's BDM intro), with QLD Capital wording/products, sent first to existing customers (incl. everyone Don interacted with + campaign interactions), then drip-fed to the wider database.
+**What was delivered:** Task created ([86d3naddg](https://app.clickup.com/t/86d3naddg)), due 17 July 2026, assigned Raels + Tracey, 2 hr budget (not split per-person).
+**Outcome:** In progress. New BDM's name not yet confirmed -- placeholder in the draft. Rate/LVR/fee details to come from Raels via Mark. Sending address (BDM's own email vs lending@) still to be decided -- Raels weighing up domain warm-up needs. Send segment to be confirmed with Jess/Mark, distinct from the Don departure list.
+**Notes:** Once the new BDM's name is confirmed, update Key Contacts below.
+
+---
 
 ### Email System Overhaul -- Pending Approval
 
@@ -556,7 +578,7 @@ All credentials are stored in Bitwarden. No tricky access issues.
 
 Mark Adams runs QLD Capital as part of NMG (Northern Management Group). He's a dealmaker, not a marketer. He cares about results (new deals coming in) and doesn't care about the mechanics of how marketing works. He wants to know: is it working, what did it cost, and what do I need to do. Everything else is noise.
 
-Don Fleming is the BDM and the boots on the ground. He talks to brokers, accountants, and developers. His feedback on messaging and email workflows is practical. If Don says the wording is wrong, listen. Don is also the best person for preliminary approval on things before they go to Mark.
+Don Fleming left QLD Capital in July 2026 after six-plus years as BDM. He was the boots on the ground with brokers, accountants, and developers, and the go-to for preliminary approval before things went to Mark. There is no BDM in place yet. Until a new BDM comes onboard, route what would have gone to Don to Mark directly. A broker departure-announcement email and Zoho workflow are being built (July 2026) with a 6-month wait step so the workflow can be revisited once the new BDM starts.
 
 Jess Burman is PA to Mark Adams. She handles admin and access requests, but the working relationship has changed. Do not go to her for everything. Be respectful of her time and role boundaries.
 
