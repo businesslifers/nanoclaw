@@ -17,7 +17,7 @@ import { ensureSchema, openInboundDb } from './db/session-db.js';
 import { createUser } from './modules/permissions/db/users.js';
 import { grantRole } from './modules/permissions/db/user-roles.js';
 import { addMember } from './modules/permissions/db/agent-group-members.js';
-import { insertTask } from './modules/scheduling/db.js';
+import { insertTaskRow } from './modules/scheduling/db.js';
 import {
   MutatorAuthError,
   MutatorConflictError,
@@ -84,21 +84,16 @@ function seedSessionWithTasks(
   ensureSchema(dbPath, 'inbound');
   const inDb = openInboundDb(dbPath);
   for (const row of taskRows) {
-    insertTask(inDb, {
+    insertTaskRow(inDb, {
       id: row.id,
+      seriesId: row.seriesId ?? row.id,
       processAfter: row.processAfter ?? '2026-04-30T09:00:00Z',
       recurrence: row.recurrence ?? null,
-      platformId: null,
-      channelType: null,
-      threadId: null,
       content: JSON.stringify({ prompt: row.prompt ?? 'test prompt', script: row.script ?? null }),
     });
-    // insertTask creates with status='pending'; flip to whatever the test wants.
+    // insertTaskRow creates with status='pending'; flip to whatever the test wants.
     if (row.status && row.status !== 'pending') {
       inDb.prepare('UPDATE messages_in SET status = ? WHERE id = ?').run(row.status, row.id);
-    }
-    if (row.seriesId) {
-      inDb.prepare('UPDATE messages_in SET series_id = ? WHERE id = ?').run(row.seriesId, row.id);
     }
   }
   inDb.close();
@@ -274,7 +269,7 @@ describe('cancelTask', () => {
 
     const r = cancelTask({ taskId: 't-pending', sessionId: 's1' }, 'u-owner');
     expect(r.ok).toBe(true);
-    expect(r.task?.status).toBe('completed');
+    expect(r.task?.status).toBe('cancelled');
     expect(r.task?.recurrence).toBeNull();
 
     expect(nudgePusher).toHaveBeenCalledTimes(1);
@@ -285,7 +280,7 @@ describe('cancelTask', () => {
     expect(audit[0].target_type).toBe('task');
     expect(audit[0].target_id).toBe('s1:t-pending');
     expect(JSON.parse(audit[0].before_json!).status).toBe('pending');
-    expect(JSON.parse(audit[0].after_json!).status).toBe('completed');
+    expect(JSON.parse(audit[0].after_json!).status).toBe('cancelled');
   });
 
   it('cancels a paused task', () => {
@@ -294,7 +289,7 @@ describe('cancelTask', () => {
     seedSessionWithTasks('s1', 'ag-1', [{ id: 't-paused', status: 'paused' }]);
 
     const r = cancelTask({ taskId: 't-paused', sessionId: 's1' }, 'u-member');
-    expect(r.task?.status).toBe('completed');
+    expect(r.task?.status).toBe('cancelled');
   });
 
   it('allows scoped admin of the agent group', () => {
