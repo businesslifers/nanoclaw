@@ -22,9 +22,11 @@ import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
+  findSystemSession,
   findSessionByAgentGroup,
   findSessionForAgent,
   getSession,
+  taskThreadId,
   updateSession,
 } from './db/sessions.js';
 import {
@@ -117,6 +119,33 @@ export function resolveSession(
   createSession(session);
   initSessionFolder(agentGroupId, id);
   log.info('Session created', { id, agentGroupId, messagingGroupId, threadId: lookupThreadId, sessionMode });
+
+  return { session, created: true };
+}
+
+/** Find or create the per-agent-group session used for scheduled tasks. */
+/** Find or create the isolated session for one task series (thread `system:tasks:<seriesId>`). */
+export function resolveTaskSession(agentGroupId: string, seriesId: string): { session: Session; created: boolean } {
+  const threadId = taskThreadId(seriesId);
+  const existing = findSystemSession(agentGroupId, threadId);
+  if (existing) return { session: existing, created: false };
+
+  const id = generateId();
+  const session: Session = {
+    id,
+    agent_group_id: agentGroupId,
+    messaging_group_id: null,
+    thread_id: threadId,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'stopped',
+    last_active: null,
+    created_at: new Date().toISOString(),
+  };
+
+  createSession(session);
+  initSessionFolder(agentGroupId, id);
+  log.info('Task session created', { id, agentGroupId, seriesId });
 
   return { session, created: true };
 }
@@ -350,6 +379,16 @@ export function openInboundDb(agentGroupId: string, sessionId: string): Database
   migrateMessagesInTable(db);
   ensureWorkItemsCacheTable(db);
   return db;
+}
+
+/** Open a session's inbound DB, run `fn`, and always close it. */
+export function withInboundDb<T>(agentGroupId: string, sessionId: string, fn: (db: Database.Database) => T): T {
+  const db = openInboundDb(agentGroupId, sessionId);
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
 }
 
 /** Open the outbound DB for a session (host reads only). */
