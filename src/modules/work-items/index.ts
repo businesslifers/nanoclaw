@@ -20,6 +20,7 @@
  * lazily by session-manager's openInboundDb.
  */
 import { registerDeliveryAction } from '../../delivery.js';
+import { unguarded } from '../../guard/index.js';
 import {
   handleAddWorkItemNote,
   handleCompleteWorkItem,
@@ -27,7 +28,11 @@ import {
   handleUpdateWorkItem,
 } from './actions.js';
 
-registerDeliveryAction('create_work_item', handleCreateWorkItem);
-registerDeliveryAction('update_work_item', handleUpdateWorkItem);
-registerDeliveryAction('add_work_item_note', handleAddWorkItemNote);
-registerDeliveryAction('complete_work_item', handleCompleteWorkItem);
+const WORK_ITEM_UNGUARDED = unguarded(
+  'team-scoped work-item CRUD — handlers write only rows owned by or assigned to the calling session’s agent group, and cross-team assignment is gated by agent_destinations',
+);
+
+registerDeliveryAction('create_work_item', handleCreateWorkItem, WORK_ITEM_UNGUARDED);
+registerDeliveryAction('update_work_item', handleUpdateWorkItem, WORK_ITEM_UNGUARDED);
+registerDeliveryAction('add_work_item_note', handleAddWorkItemNote, WORK_ITEM_UNGUARDED);
+registerDeliveryAction('complete_work_item', handleCompleteWorkItem, WORK_ITEM_UNGUARDED);

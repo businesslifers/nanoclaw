@@ -15,14 +15,16 @@ safe to re-run; anything a parser can't apply falls back to the prose beside it.
 
 ## Apply
 
-> **Source of truth on this install:** copy from **`private/channels`**, not
-> `origin/channels` (the `origin` DR mirror has no `channels` branch) and not
-> `upstream/channels` directly — `private/channels` carries local patches
-> (e.g. Slack `setReaction` status-reaction support) that upstream lacks;
-> copying from upstream would silently delete them. Before copying, verify
-> private isn't lagging: `git merge-base --is-ancestor upstream/channels
-> private/channels` (if it fails, merge upstream/channels INTO
-> private/channels first — see CLAUDE.md).
+> **Source of truth on this install: `private/channels`.** `origin` (the DR
+> mirror) has no `channels` branch, and `upstream/channels` lacks local
+> patches (e.g. Slack `setReaction` status-reaction support) — copying from
+> it would silently delete them. `.env` pins `NANOCLAW_CHANNELS_REMOTE=private`
+> so the engine's `from-branch` resolution lands on `private`; an agent
+> applying by hand must likewise fetch and `git show` from `private/channels`.
+> Before copying, verify private isn't lagging:
+> `git merge-base --is-ancestor upstream/channels private/channels`
+> (if it fails, merge upstream/channels INTO private/channels first — see
+> CLAUDE.md).
 
 ### 1. Copy the adapter, registration test, and formatting skill
 
@@ -30,16 +32,11 @@ Fetch the `channels` branch and copy the Slack adapter, its registration test,
 and the formatting container skill into place (overwrite — the branch is
 canonical):
 
-```bash
-git fetch private channels
-git show private/channels:src/channels/slack.ts > src/channels/slack.ts
-git show private/channels:src/channels/slack-registration.test.ts > src/channels/slack-registration.test.ts
-mkdir -p container/skills/slack-formatting
-git show private/channels:container/skills/slack-formatting/SKILL.md > container/skills/slack-formatting/SKILL.md
+```nc:copy from-branch:channels
+src/channels/slack.ts
+src/channels/slack-registration.test.ts
+container/skills/slack-formatting/SKILL.md
 ```
-
-(Upstream expresses this step as an `nc:copy from-branch:channels` fence; on
-this install the explicit `private/channels` source above is authoritative.)
 
 The `slack-formatting` container skill is part of the channel payload: it
 reaches agents via `~/.claude/skills` (synced at spawn) and teaches Slack's
