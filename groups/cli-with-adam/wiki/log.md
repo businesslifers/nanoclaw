@@ -56,3 +56,7 @@ Fixed: collapsed three duplicate `[2026-05-03] lint` entries into one (carried o
 ## [2026-07-05] lint | 0 issues found, 0 fixed
 
 No changes. Wiki still scaffolded-only — no sources, no content pages. All cross-references clean.
+
+## [2026-07-12] lint | 0 issues found, 0 fixed
+
+No changes. Wiki still scaffolded-only — no sources, no content pages. Global wiki cross-reference resolves; read-only access confirmed.
