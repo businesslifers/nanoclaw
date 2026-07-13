@@ -8,12 +8,12 @@
  * Ported from v1 — see v1 source for commit history.
  */
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
@@ -288,7 +288,7 @@ interface SignalQuote {
   text?: string;
 }
 
-interface SignalMention {
+export interface SignalMention {
   start?: number;
   length?: number;
   uuid?: string;
@@ -349,6 +349,23 @@ function resolveMentions(text: string, mentions?: SignalMention[]): string {
   }
   result += text.slice(cursor);
   return result;
+}
+
+/**
+ * Platform mention signal for the router: DMs always engage (isMention=true);
+ * a group message counts as a mention only when the linked account itself is
+ * tagged. Returns undefined (not false) otherwise — the router treats
+ * undefined as "no platform signal" (see InboundMessage.isMention in
+ * adapter.ts). Matches both `number` and `uuid` against the configured
+ * account so either identifier shape works.
+ */
+export function computeSignalIsMention(
+  account: string,
+  isGroup: boolean,
+  mentions?: SignalMention[],
+): true | undefined {
+  if (!isGroup) return true;
+  return mentions?.some((m) => m.number === account || m.uuid === account) ? true : undefined;
 }
 
 /**
@@ -573,6 +590,9 @@ export function createSignalAdapter(config: {
             isFromMe: true,
             ...(syncSent.quote ? quoteToContent(syncSent.quote) : {}),
           },
+          // Note-to-self is a DM with ourselves: same DM→mention rule.
+          isMention: true,
+          isGroup: false,
           timestamp,
         };
         await setup.onInbound(platformId, null, msg);
@@ -670,6 +690,8 @@ export function createSignalAdapter(config: {
         ...(attachmentRefs.length > 0 ? { attachments: attachmentRefs } : {}),
         ...(dataMessage.quote ? quoteToContent(dataMessage.quote) : {}),
       },
+      isMention: computeSignalIsMention(config.account, isGroup, dataMessage.mentions),
+      isGroup,
       timestamp,
     };
     await setup.onInbound(platformId, null, msg);
@@ -744,6 +766,51 @@ export function createSignalAdapter(config: {
     log.info('Signal message sent', { platformId, length: text.length });
   }
 
+  /**
+   * Send one or more file attachments via signal-cli's `send` JSON-RPC, which
+   * accepts an `attachments` array of host filesystem paths. The OutboundFile
+   * Buffer is materialized to an OS temp file so signal-cli can read it, then
+   * removed in the finally block.
+   *
+   * Caption text, if any, is sent first via `sendText` (which handles chunking
+   * + textStyles) — keeps this function single-purpose and avoids a long
+   * caption colliding with signal-cli's per-message size limits.
+   */
+  async function sendAttachments(platformId: string, files: { filename: string; data: Buffer }[]): Promise<void> {
+    if (!connected || !tcp) return;
+    if (files.length === 0) return;
+
+    const tempPaths: string[] = [];
+    for (const file of files) {
+      const safeName = file.filename.replace(/[/\\\0]/g, '_');
+      const tempPath = join(tmpdir(), `signal-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`);
+      writeFileSync(tempPath, file.data);
+      tempPaths.push(tempPath);
+    }
+
+    try {
+      const params: Record<string, unknown> = { attachments: tempPaths };
+      if (config.account) params.account = config.account;
+      if (platformId.startsWith('group:')) {
+        params.groupId = platformId.slice('group:'.length);
+      } else {
+        params.recipient = [platformId];
+      }
+      await tcp.rpc('send', params);
+      log.info('Signal attachments sent', { platformId, count: files.length, filenames: files.map((f) => f.filename) });
+    } catch (err) {
+      log.error('Signal: attachment send failed', { platformId, count: files.length, err });
+    } finally {
+      for (const p of tempPaths) {
+        try {
+          unlinkSync(p);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    }
+  }
+
   async function waitForDaemon(): Promise<boolean> {
     const maxWait = 30_000;
     const pollInterval = 1000;
@@ -764,6 +831,7 @@ export function createSignalAdapter(config: {
     name: 'signal',
     channelType: 'signal',
     supportsThreads: false,
+    defaults: SIGNAL_DEFAULTS,
 
     async setup(cfg: ChannelSetup): Promise<void> {
       setup = cfg;
@@ -847,17 +915,6 @@ export function createSignalAdapter(config: {
     },
 
     async deliver(platformId: string, _threadId: string | null, message: OutboundMessage): Promise<string | undefined> {
-      if (message.files && message.files.length > 0) {
-        // Native adapter doesn't yet forward file uploads to signal-cli's
-        // `send --attachment`. Don't silently swallow — operators need to see
-        // that an attachment was requested but not sent.
-        log.warn('Signal: outbound files not supported, dropping', {
-          platformId,
-          count: message.files.length,
-          filenames: message.files.map((f) => f.filename),
-        });
-      }
-
       const content = message.content as Record<string, unknown> | string | undefined;
       let text: string | null = null;
       if (typeof content === 'string') {
@@ -865,9 +922,14 @@ export function createSignalAdapter(config: {
       } else if (content && typeof content === 'object' && typeof content.text === 'string') {
         text = content.text;
       }
-      if (!text) return undefined;
 
-      await sendText(platformId, text);
+      const files = message.files ?? [];
+
+      // Send accompanying text first so it lands above the attachment(s) in
+      // the recipient's chat. Both branches no-op cleanly if their input is
+      // empty, so any combination of (text, files) works.
+      if (text) await sendText(platformId, text);
+      if (files.length > 0) await sendAttachments(platformId, files);
       return undefined;
     },
 
@@ -894,6 +956,20 @@ export function createSignalAdapter(config: {
 
 const DEFAULT_TCP_HOST = '127.0.0.1';
 const DEFAULT_TCP_PORT = 7583;
+
+/**
+ * Linked personal account, so auto-create is 'strict'. The adapter emits
+ * top-level isGroup and isMention (DM→true; group→dataMessage.mentions
+ * matched against config.account via computeSignalIsMention), so platform
+ * mention wirings can fire. Group default is 'mention', never 'mention-sticky':
+ * Signal is non-threaded and sessions are never deleted, so sticky in the
+ * single shared session would mean engaged-forever.
+ */
+const SIGNAL_DEFAULTS: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'strict' },
+  group: { engageMode: 'mention', threads: false, unknownSenderPolicy: 'strict' },
+  mentions: 'platform',
+};
 
 registerChannelAdapter('signal', {
   factory: () => {
@@ -941,4 +1017,5 @@ registerChannelAdapter('signal', {
       signalDataDir,
     });
   },
+  defaults: SIGNAL_DEFAULTS,
 });

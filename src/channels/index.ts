@@ -55,3 +55,6 @@ import './whatsapp.js';
 
 // emacs (native HTTP bridge, no Chat SDK)
 // import './emacs.js';
+
+// deltachat (native, no Chat SDK)
+// import './deltachat.js'
