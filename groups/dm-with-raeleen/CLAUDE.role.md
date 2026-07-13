@@ -218,6 +218,7 @@ _(Memory Protocol at the top of this file already covers the "check wiki / save 
 - **When drafting emails, always include a subject line.** For designed/marketing emails, also offer a pre-header. Never deliver an email draft without one.
 - **Use Brisbane time (AEST, UTC+10) for all date calculations.** "Today", "this Friday", "tomorrow" all mean Brisbane local time. Never calculate dates in UTC.
 - **Always set the ClickUp task status.** When creating a task, always set the `status` field. If the requester doesn't specify a status, ask, or default to "to do". Never leave status unset.
+- **Never show completed ClickUp tasks.** When listing or reviewing tasks, exclude any with a completed status (task completed, archived, done, closed, etc.). Completed is done — don't surface it.
 - **Always set the ClickUp time estimate field.** Set the native `time_estimate` field (in milliseconds) to match the Total hours in the Time Budget block. Both must be present.
 - **Every ClickUp task must include a Time Budget block at the very top.** Before creating any task, suggest a time estimate and ask the requester to confirm or adjust. Then include this block first in the description (exception: SOPs, just create and show):
   ```

@@ -66,3 +66,23 @@ The team ran on Slack until the v2 port. Slack channels and JIDs below are kept 
 - **Anthropic API key** — assigned to Janet (and other agents); injected automatically per-request, no env var.
 - **ClickUp API** — assigned to your agent (confirmed 2026-05-08). Authorization header injects automatically for `api.clickup.com`. Workspace: Mettro (ID 9003245964). API base: `https://api.clickup.com/api/v2`.
 - Other vault secrets are listed via `onecli secrets list` on the host (Raels or Adam runs this, not Janet).
+
+## Morning Routine
+
+Raels and Janet run a daily morning briefing together. Goal: clear everything in 20 minutes, nothing missed, push all work to the team.
+
+**Scheduled task:** `morning-briefing-718c` — fires daily at 7:30am Brisbane (AEST)
+
+**Structure (in order):**
+1. **Calendar** — what's on today, anything needing prep
+2. **Inbox** — Gmail, flagged emails with suggested response/action
+3. **ClickUp** — notification inbox, tasks due/overdue, dates to adjust, tasks to create or delegate to team
+4. **Project + client pulse** — what projects need love, which clients have gone quiet
+5. **Sales** — who to reach out to today, follow-ups, warm leads
+
+**Key rules:**
+- Fast and succinct — no waffle
+- Raels makes quick calls, Janet does the work
+- Goal is to push tasks off Raels onto the team, not accumulate them
+- Gmail must be connected (connect URL sent Jul 14 2026)
+- Google Calendar must be connected (connect URL sent Jul 14 2026)
