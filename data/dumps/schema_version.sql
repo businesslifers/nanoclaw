@@ -24,4 +24,5 @@ INSERT INTO schema_version VALUES(16,'messaging-group-instance','2026-06-12T00:3
 INSERT INTO schema_version VALUES(17,'agent-message-policies','2026-06-19T08:29:00.833Z');
 INSERT INTO schema_version VALUES(18,'approvals-approver-user-id','2026-06-19T08:29:00.833Z');
 INSERT INTO schema_version VALUES(19,'work-items','2026-07-03T01:37:46.046Z');
+INSERT INTO schema_version VALUES(20,'wiring-threads-override','2026-07-13T01:22:53.367Z');
 COMMIT;

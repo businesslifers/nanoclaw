@@ -68,7 +68,13 @@ vi.mock('./user-dm.js', () => ({
 
 vi.mock('../../config.js', async () => {
   const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-channel-approval' };
+  return {
+    ...actual,
+    DATA_DIR: '/tmp/nanoclaw-test-channel-approval',
+    // The new-agent approve path calls initGroupFilesystem; without this
+    // override the test scaffolds groups/bravo into the real groups/ dir.
+    GROUPS_DIR: '/tmp/nanoclaw-test-channel-approval/groups',
+  };
 });
 
 const TEST_DIR = '/tmp/nanoclaw-test-channel-approval';
