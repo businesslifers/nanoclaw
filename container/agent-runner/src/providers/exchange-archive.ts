@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { TIMEZONE, formatLocalStamp } from '../timezone.js';
+
 /**
  * Per-thread conversation archive for providers with no on-disk transcript —
  * payload code, shipped with the provider that needs it. The provider's
@@ -62,7 +64,7 @@ export function archiveProviderExchange(options: ProviderExchangeArchiveOptions)
     '',
     '---',
     '',
-    `Archived: ${timestamp.toISOString()} · Status: ${options.status}`,
+    `Archived: ${formatLocalStamp(timestamp, TIMEZONE)} · Status: ${options.status}`,
     '',
     `**User**: ${truncate(options.prompt)}`,
     '',
@@ -86,7 +88,10 @@ function threadArchiveFilename(
   const dated = /^\d{4}-\d{2}-\d{2}-/;
   const existing = fs.readdirSync(dir).find((f) => dated.test(f) && f.replace(dated, '') === suffix);
   if (existing) return existing;
-  return `${timestamp.toISOString().split('T')[0]}-${suffix}`;
+  // Local calendar day — the agent navigates conversations/ by these
+  // date-sortable names, and evening sessions west of UTC would otherwise
+  // land under tomorrow's date.
+  return `${formatLocalStamp(timestamp, TIMEZONE).slice(0, 10)}-${suffix}`;
 }
 
 function sanitizeSlug(value: string): string {
