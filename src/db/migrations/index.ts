@@ -19,6 +19,7 @@ import { moduleApprovalsPendingApprovals } from './module-approvals-pending-appr
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { migration019 } from './019-agent-message-policies.js';
 import { migration020 } from './020-approvals-approver-user-id.js';
+import { migration021 } from './021-wiring-threads.js';
 import { migration103 } from './103-work-items.js';
 
 export interface Migration {
@@ -55,6 +56,7 @@ export const migrations: Migration[] = [
   migration018,
   migration019,
   migration020,
+  migration021,
   migration103,
 ];
 

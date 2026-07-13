@@ -1238,7 +1238,7 @@ async function askChannelChoice(): Promise<ChannelChoice> {
       options: [
         { value: 'telegram', label: 'Yes, connect Telegram', hint: 'recommended' },
         { value: 'discord', label: 'Yes, connect Discord' },
-        { value: 'whatsapp', label: 'Yes, connect WhatsApp' },
+        { value: 'whatsapp', label: 'Yes, connect WhatsApp', hint: 'best with a dedicated number' },
         {
           value: 'signal',
           label: 'Yes, connect Signal',

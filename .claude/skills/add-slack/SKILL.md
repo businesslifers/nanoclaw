@@ -23,6 +23,7 @@ Skip to **Credentials** if all of these are already in place:
 
 - `src/channels/slack.ts` exists
 - `src/channels/index.ts` contains `import './slack.js';`
+- `container/skills/slack-formatting/SKILL.md` exists
 - `@chat-adapter/slack@4.30.0` is listed in `package.json` dependencies
 
 Otherwise continue. Every step below is safe to re-run.
@@ -37,9 +38,16 @@ git fetch private channels
 
 ```bash
 git show private/channels:src/channels/slack.ts > src/channels/slack.ts
+mkdir -p container/skills/slack-formatting
+git show private/channels:container/skills/slack-formatting/SKILL.md > container/skills/slack-formatting/SKILL.md
 ```
 
 `private/channels` ships only `slack.ts` (no separate `slack-registration.test.ts`); registration is verified by the build + barrel import below.
+
+The `slack-formatting` container skill is part of the channel payload: it
+reaches agents via `~/.claude/skills` (synced at spawn) and teaches Slack's
+mrkdwn syntax. Trunk does not ship it — without this copy step agents send
+Slack messages with generic markdown that renders literally.
 
 ### 3. Append the self-registration import
 

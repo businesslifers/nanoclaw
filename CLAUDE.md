@@ -77,9 +77,10 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/container-restart.ts` | Kill + on-wake respawn for agent group containers |
 | `src/db/` | DB layer — agent_groups, messaging_groups, sessions, container_configs, user_roles, user_dms, pending_*, migrations |
 | `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch |
+| `src/channels/channel-defaults.ts` | Wiring-creation helpers over adapter-declared channel defaults (`resolveWiringDefaults`, `resolveThreadPolicy`, engage validation) |
 | `src/providers/` | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch) |
 | `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations |
-| `container/skills/` | Container skills mounted into every agent session (`agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`, `wiki`, `writing-style`) |
+| `container/skills/` | Container skills mounted into every agent session (`agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `vercel-cli`, `welcome`, `wiki`, `writing-style`; channel-specific skills like `slack-formatting` and `whatsapp-formatting` install with their channel) |
 | `groups/<folder>/` | Per-agent-group filesystem (CLAUDE.md, skills) — agent-runner source is a shared read-only mount, not copied per group |
 | `scripts/init-first-agent.ts` | Bootstrap the first DM-wired agent (used by `/init-first-agent` skill) |
 | `migrate-v2.sh` + `setup/migrate-v2/` | v1→v2 migration. Standalone script: `bash migrate-v2.sh`. Seeds DB, copies groups/sessions, installs channels, builds container, offers service switchover, then hands off to `/migrate-from-v1` skill for owner setup and CLAUDE.md cleanup. See [docs/migration-dev.md](docs/migration-dev.md). |
@@ -128,6 +129,8 @@ Each `/add-<name>` skill is idempotent: `git fetch <remote> <branch>` → copy m
 - A clean `git merge` (no conflict markers) does not mean nothing broke: local-only files (patches invisible to upstream, e.g. the codex file-delivery consumer) can import a symbol/path upstream just deleted or moved. Grep for the old name across the tree after every merge, before trusting `pnpm run build` to be the only check — build will catch it, but only if you run it before committing.
 - Migration number collisions: upstream and local both assign sequential numbers to `src/db/migrations/*.ts`, and this fork has already renumbered some (local 016–018 = dashboard-audit/agent-group-hidden-dashboard/messaging-group-instance; skill-installed migrations can land at arbitrary numbers, e.g. `103-work-items.ts`). The runner dedupes by `name`, not `version` (`src/db/migrations/index.ts`), so a *textually clean* merge can still land two files exporting the same `migrationNNN` symbol — no conflict markers, but `tsc` fails on the duplicate identifier. Renumber the incoming migration to the next free number and append it to the `migrations` array in `index.ts` before building.
 - `.claude/scheduled_tasks.lock` is tracked but not gitignored, and holds a live `pid`/`sessionId`/`acquiredAt` that changes whenever the scheduler process (re)starts. `git status` reports it dirty most sessions even with zero real changes, which trips the clean-tree preflight that `/update-nanoclaw` and `/update-skills` both require. `git stash push -- .claude/scheduled_tasks.lock` before proceeding — don't commit the churn.
+
+**Channel defaults.** Each adapter declares its wiring-time defaults (`ChannelDefaults`: per DM/group context — engage mode/pattern, thread policy, unknown-sender policy — plus mention signaling). Exactly two levels: the adapter declaration, and the per-wiring override chosen at creation — no per-instance DB config table. Undeclared (stale) adapters resolve through a behavior-faithful fallback, so a trunk update alone changes nothing. See [docs/api-details.md](docs/api-details.md#channel-defaults) and `src/channels/channel-defaults.ts`.
 
 ## Self-Modification
 
@@ -197,7 +200,7 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 - **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. a `scripts/` CLI or helper).
 - **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
-- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `slack-formatting`, `vercel-cli`, `welcome`, `whatsapp-formatting`, `wiki`, `writing-style`).
+- **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `agent-browser`, `figma`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `vercel-cli`, `welcome`, `wiki`, `writing-style`; channel-specific skills like `slack-formatting` and `whatsapp-formatting` are copied in by their `/add-<channel>` skill).
 
 | Skill | When to Use |
 |-------|-------------|
@@ -265,6 +268,13 @@ Check these first when something goes wrong:
 | Session DBs | `data/v2-sessions/<agent-group>/<session>/` — `inbound.db` (`messages_in`: did the message reach the container?), `outbound.db` (`messages_out`: did the agent produce a response?) |
 
 Note: container logs are lost after the container exits (`--rm` flag). If the agent silently failed inside the container, there's no persistent log to inspect.
+
+## Timestamps
+
+Two rules, no exceptions:
+
+- **Storage**: every timestamp written from JS is `new Date().toISOString()` (ISO-8601 UTC with `Z`). Never `datetime('now')` — its naive `YYYY-MM-DD HH:MM:SS` shape is misparsed as local time by `new Date()` and breaks string comparisons against ISO values. In pure-SQL contexts (skill snippets) use `strftime('%Y-%m-%dT%H:%M:%fZ','now')`. SQL-side *comparisons* wrap both sides in `datetime()`.
+- **Display**: anything shown to an agent or a user renders in the install timezone — `formatLocalTime` (prose) or `formatLocalStamp` (log lines) from `src/timezone.ts` / `container/agent-runner/src/timezone.ts`. `--json` output, DB values, and operator logs stay ISO.
 
 ## Supply Chain Security (pnpm)
 
