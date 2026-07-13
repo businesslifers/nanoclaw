@@ -20,14 +20,14 @@
 
 ### Brisbane Office (Woolloongabba)
 - **Raeleen Robertson (Raels)** — Managing Director (this is who you're DMing)
-- **Tracey** — Office Manager
+- **Tracey Pollack** — Office Manager / Lead Project Manager
 - **Adam Jowett** — Marketing Consultant
 
 ### Remote Team (Philippines)
-- **Archie** — Lead Developer
-- **Luis** — Designer
+- **Archie Quito** — Lead Developer (archie@mettro.com.au)
+- **Luis Roperos** — Designer (luis@mettro.com.au)
 - **Louisa** — Writer & Editor
-- **Daina** — Admin Assistant (across many things)
+- **Daina Quito** — Admin Assistant / Project Manager, QA (daina@mettro.com.au)
 
 ### Freelancers
 - **RJ** — Freelance Developer (used for web development work from time to time)
