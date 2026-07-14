@@ -3,9 +3,19 @@
  * actor-suppression and agent-initiated status-change rules. Pure decision
  * function, no DB.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { decideWakeTargets, affectedTeams } from './wake.js';
+vi.mock('../../db/sessions.js', () => ({ findSessionByAgentGroup: vi.fn(() => undefined) }));
+vi.mock('./projection.js', () => ({ refreshWorkItemsProjection: vi.fn() }));
+vi.mock('../approvals/primitive.js', () => ({ notifyAgent: vi.fn() }));
+
+import {
+  decideWakeTargets,
+  affectedTeams,
+  refreshAndWake,
+  setWorkItemsPusherNudge,
+  nudgeWorkItemsPusher,
+} from './wake.js';
 
 const A = 'ag-a';
 const B = 'ag-b';
@@ -87,5 +97,28 @@ describe('affectedTeams (projection refresh set)', () => {
 
   it('owner-only item refreshes just the owner', () => {
     expect(affectedTeams({ mutation: 'create', item: item(A, null) })).toEqual([A]);
+  });
+});
+
+describe('pusher nudge hook', () => {
+  afterEach(() => setWorkItemsPusherNudge(null));
+
+  it('is a no-op when no dashboard has registered a hook (headless install)', () => {
+    expect(() => nudgeWorkItemsPusher()).not.toThrow();
+  });
+
+  it('refreshAndWake fires the registered hook — single choke point for both mutation sources', () => {
+    const hook = vi.fn();
+    setWorkItemsPusherNudge(hook);
+    refreshAndWake({ mutation: 'note', item: item(A, null) }, '');
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
+  it('unregistering the hook silences it again', () => {
+    const hook = vi.fn();
+    setWorkItemsPusherNudge(hook);
+    setWorkItemsPusherNudge(null);
+    refreshAndWake({ mutation: 'note', item: item(A, null) }, '');
+    expect(hook).not.toHaveBeenCalled();
   });
 });

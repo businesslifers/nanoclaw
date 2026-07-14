@@ -14,8 +14,10 @@
  *     assignee, for the same reason.
  *
  * Every mutator: DB write → audit row (target_type 'work_item') →
- * projection refresh + wake matrix (identical to the agent-side handlers) →
- * nudgePusher so the UI refreshes within ~1s.
+ * projection refresh + wake matrix via refreshAndWake (identical to the
+ * agent-side handlers). refreshAndWake itself nudges the dashboard pusher —
+ * see the registered hook in modules/work-items/wake.ts — so the UI
+ * refreshes within ~1s without a duplicate call here.
  */
 import { getAgentGroup } from './db/agent-groups.js';
 import { getUser } from './modules/permissions/db/users.js';
@@ -37,7 +39,6 @@ import { addWorkItemNote as addWorkItemNoteDb } from './db/work-item-notes.js';
 import { canAccessAgentGroup } from './modules/permissions/access.js';
 import { refreshAndWake, type WorkItemMutationKind } from './modules/work-items/wake.js';
 import { MutatorAuthError, MutatorNotFoundError, MutatorValidationError } from './dashboard-mutators.js';
-import { nudgePusher } from './dashboard-pusher.js';
 
 const TITLE_MAX = 300;
 
@@ -241,7 +242,6 @@ export function createWorkItem(args: CreateWorkItemArgs, actorUserId: string): W
     { mutation: 'create', item },
     buildDashboardWakeMessage('created and assigned to you', item, actorUserId),
   );
-  nudgePusher();
   return { ok: true, item };
 }
 
@@ -325,7 +325,6 @@ export function updateWorkItem(args: UpdateWorkItemArgs, actorUserId: string): W
     { mutation, item: after, previousAssigneeAgentGroupId: before.assignee_agent_group_id },
     buildDashboardWakeMessage(what, after, actorUserId),
   );
-  nudgePusher();
   return { ok: true, item: after };
 }
 
@@ -368,7 +367,6 @@ export function reassignWorkItem(args: ReassignWorkItemArgs, actorUserId: string
     },
     buildDashboardWakeMessage('reassigned', after, actorUserId),
   );
-  nudgePusher();
   return { ok: true, item: after };
 }
 
@@ -402,7 +400,6 @@ export function cancelWorkItem(args: { id: string; note?: string | null }, actor
     { mutation: 'cancel', item: after, previousAssigneeAgentGroupId: before.assignee_agent_group_id },
     buildDashboardWakeMessage('cancelled', after, actorUserId),
   );
-  nudgePusher();
   return { ok: true, item: after };
 }
 
@@ -427,6 +424,5 @@ export function addWorkItemNote(args: { id: string; note: string }, actorUserId:
 
   // Notes wake nobody, but projections refresh so agents see the narrative.
   refreshAndWake({ mutation: 'note', item }, '');
-  nudgePusher();
   return { ok: true, item: getWorkItem(item.id) as WorkItem };
 }

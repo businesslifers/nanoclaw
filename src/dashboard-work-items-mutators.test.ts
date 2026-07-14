@@ -14,13 +14,11 @@ import { addMember } from './modules/permissions/db/agent-group-members.js';
 import { createWorkItem as createWorkItemDb, generateWorkItemId, getWorkItem } from './db/work-items.js';
 import { MutatorAuthError, MutatorValidationError, MutatorNotFoundError } from './dashboard-mutators.js';
 
-vi.mock('./dashboard-pusher.js', () => ({ nudgePusher: vi.fn() }));
 vi.mock('./modules/work-items/wake.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./modules/work-items/wake.js')>();
   return { ...actual, refreshAndWake: vi.fn() };
 });
 
-import { nudgePusher } from './dashboard-pusher.js';
 import { refreshAndWake } from './modules/work-items/wake.js';
 import {
   addWorkItemNote,
@@ -44,7 +42,6 @@ function now() {
 beforeEach(() => {
   const db = initTestDb();
   runMigrations(db);
-  vi.mocked(nudgePusher).mockClear();
   vi.mocked(refreshAndWake).mockClear();
 
   for (const id of [TEAM_A, TEAM_B]) {
@@ -91,7 +88,6 @@ describe('reassignWorkItem target-team ACL', () => {
       expect.objectContaining({ mutation: 'reassign', previousAssigneeAgentGroupId: null }),
       expect.any(String),
     );
-    expect(nudgePusher).toHaveBeenCalled();
   });
 
   it('rejects actors with no relation to the item at all', () => {

@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   const dashboardPort = parseInt(process.env.DASHBOARD_PORT || dashboardEnv.DASHBOARD_PORT || '3100', 10);
   if (dashboardSecret) {
     const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
-    const { startDashboardPusher, getActivityForRange, getTokenSummaryForRange } =
+    const { startDashboardPusher, nudgePusher, getActivityForRange, getTokenSummaryForRange } =
       await import('./dashboard-pusher.js');
     const { buildDashboardMutatorContext } = await import('./dashboard-mutators.js');
     const { canAccessAgentGroup } = await import('./modules/permissions/access.js');
@@ -191,6 +191,12 @@ async function main(): Promise<void> {
       },
     });
     startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });
+    // Agent-driven work-item mutations go through modules/work-items (dashboard-
+    // independent, can't import dashboard-pusher.ts). Register the nudge hook so
+    // those mutations reach the live dashboard in ~1s instead of the next 60s
+    // periodic snapshot.
+    const { setWorkItemsPusherNudge } = await import('./modules/work-items/wake.js');
+    setWorkItemsPusherNudge(nudgePusher);
   } else {
     log.info('Dashboard disabled (no DASHBOARD_SECRET)');
   }

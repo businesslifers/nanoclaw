@@ -44,7 +44,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { isoWeek, todayInTz } from './period.js';
 import { refreshWorkItemsProjection } from './projection.js';
-import { refreshAndWake } from './wake.js';
+import { nudgeWorkItemsPusher, refreshAndWake } from './wake.js';
 
 /**
  * System echo back to the requesting agent. `wake=false` writes a trigger-0
@@ -369,6 +369,7 @@ export async function handleCompleteWorkItem(content: Record<string, unknown>, s
       note: `cadence completed for ${period}${note ? ` — ${note}` : ''}`,
     });
     refreshWorkItemsProjection(before.owner_agent_group_id);
+    nudgeWorkItemsPusher();
     echoToAgent(session, `complete_work_item ${itemId}: cadence stamped for ${period}.`, false);
     log.info('Cadence work item stamped', { id: itemId, period, by: session.agent_group_id });
     return;
