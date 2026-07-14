@@ -1,28 +1,10 @@
 # Remove rtk
 
-Idempotent — safe to run even if some steps were never applied. Run Steps 1–3 once per agent group that had rtk wired (`ncl groups list`).
+Idempotent — safe to run even if some steps were never applied. rtk on this fork is the agent image's baked binary plus a per-group `PreToolUse` hook (see SKILL.md). Disabling it for a group is just removing the hook; fully uninstalling also strips the binary from the image.
 
-## 1. Remove the mount from the container config
+## 1. Remove the PreToolUse hook from settings.json (per group)
 
-Read the current mounts, drop the entry whose `containerPath` is `/usr/local/bin/rtk`, and write the rest back.
-
-```bash
-pnpm exec tsx scripts/q.ts data/v2.db \
-  "SELECT additional_mounts FROM container_configs WHERE agent_group_id = '<group-id>'"
-```
-
-Write the filtered array (omit any entry with `"containerPath":"/usr/local/bin/rtk"`):
-
-```bash
-pnpm exec tsx scripts/q.ts data/v2.db \
-  "UPDATE container_configs SET additional_mounts = '<filtered-json>' WHERE agent_group_id = '<group-id>'"
-```
-
-If no rtk entry is present, leave the array as-is.
-
-## 2. Remove the PreToolUse hook from settings.json
-
-Delete the rtk Bash hook entry (not comment it out). This leaves any other `PreToolUse` entries intact and is safe to re-run:
+Run once per group that had rtk wired (`ncl groups list`). Deletes the rtk Bash hook, leaving any other `PreToolUse` entries intact:
 
 ```bash
 SETTINGS="data/v2-sessions/<group-id>/.claude-shared/settings.json"
@@ -32,15 +14,39 @@ jq '.hooks.PreToolUse = ((.hooks.PreToolUse // [])
   "$SETTINGS" > /tmp/rtk-settings.json && mv /tmp/rtk-settings.json "$SETTINGS"
 ```
 
-## 3. Restart the container
+## 2. Strip any legacy rtk mount (cleanup from the old skill version)
+
+Older installs of this skill wrote a (rejected, non-functional) rtk entry into `additional_mounts`. Remove it from every group in one pass:
+
+```bash
+pnpm exec tsx scripts/fix-rtk-mounts.ts --apply   # drops any {"containerPath":"/usr/local/bin/rtk"} entry
+```
+
+(If `scripts/fix-rtk-mounts.ts` isn't present, query each group's `additional_mounts` and write back the array with the rtk entry removed, or use the host-only, operator-enforced verb for a single group instead — rejected from inside a container:)
+
+```bash
+ncl groups config remove-mount --id <group-id> \
+  --host ~/.local/bin/rtk \
+  --container /usr/local/bin/rtk
+```
+
+## 3. Restart affected groups
 
 ```bash
 ncl groups restart --id <group-id>
 ```
 
-## 4. Remove the host binary (optional)
+## 4. Remove the binary from the image (optional — full uninstall)
 
-Once no group mounts rtk anymore, remove the binary:
+If no group uses rtk anymore, drop it from `container/Dockerfile`: delete the `ARG RTK_VERSION` line and the rtk `RUN` block (after the `gh` install), then rebuild:
+
+```bash
+./container/build.sh
+```
+
+## 5. Remove the host binary (optional)
+
+Only if rtk was also installed on the host and you don't use it there:
 
 ```bash
 rm -f ~/.local/bin/rtk
