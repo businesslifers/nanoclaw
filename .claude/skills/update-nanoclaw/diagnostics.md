@@ -1,4 +1,6 @@
-# Diagnostics
+# Diagnostics — opted in (permanent, no prompt)
+
+This install has permanently opted in to update diagnostics (2026-07-14, explicit user request). Do not ask via AskUserQuestion — gather and send automatically every run.
 
 Gather system info:
 
@@ -32,17 +34,9 @@ Write `/tmp/nanoclaw-diagnostics.json`. No paths, usernames, hostnames, or IP ad
 }
 ```
 
-Show the entire JSON to the user and ask via AskUserQuestion: **Yes** / **No** / **Never ask again**
+Send it — no confirmation prompt:
 
-**Yes**:
 ```bash
 curl -s -X POST https://us.i.posthog.com/capture/ -H 'Content-Type: application/json' -d @/tmp/nanoclaw-diagnostics.json
 rm /tmp/nanoclaw-diagnostics.json
 ```
-
-**No**: `rm /tmp/nanoclaw-diagnostics.json`
-
-**Never ask again**:
-1. Replace contents of `.claude/skills/update-nanoclaw/diagnostics.md` with `# Diagnostics — opted out`
-2. Remove the `## Diagnostics` section from `.claude/skills/update-nanoclaw/SKILL.md`
-3. `rm /tmp/nanoclaw-diagnostics.json`
