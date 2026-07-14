@@ -46,7 +46,9 @@ MODEL=$(printf '%s' "$INPUT" | jq -r '.model.display_name // .model.id // "?"')
 MODEL_ID=$(printf '%s' "$INPUT" | jq -r '.model.id // ""')
 case "$MODEL_ID" in
   *1m*|*\[1m\]*) MAX=1000000 ;;
-  *fable*) MAX=1000000 ;;
+  *fable*|*mythos*) MAX=1000000 ;;
+  *sonnet-5*|*sonnet-4-6*) MAX=1000000 ;;
+  *opus-4-6*|*opus-4-7*|*opus-4-8*) MAX=1000000 ;;
   *opus*|*sonnet*|*haiku*) MAX=200000 ;;
   *) MAX=200000 ;;
 esac
