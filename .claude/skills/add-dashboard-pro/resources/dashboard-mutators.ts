@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { appendAudit } from './db/dashboard-audit.js';
 import { getAgentGroup, updateAgentGroup } from './db/agent-groups.js';
+import { ensureContainerConfig, getContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
 import { getDb } from './db/connection.js';
 import { getSession, getSessionsByAgentGroup } from './db/sessions.js';
 import { killContainer } from './container-runner.js';
@@ -80,6 +81,26 @@ function validateModel(raw: unknown): string | null {
   return trimmed;
 }
 
+const EFFORT_MAX = 40;
+
+/**
+ * Effort strings are provider vocab (claude: low…max, codex: none…xhigh) but
+ * stored opaquely like model — presets are a convenience, not a gate. Only
+ * normalization: lowercase, since every provider's vocab is lowercase.
+ * `undefined` means "field absent — leave effort untouched"; null / empty
+ * clears back to the provider default.
+ */
+function validateEffort(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== 'string') throw new MutatorValidationError('effort must be a string or null');
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > EFFORT_MAX) throw new MutatorValidationError(`effort exceeds ${EFFORT_MAX} chars`);
+  if (CONTROL_CHAR_RE.test(trimmed)) throw new MutatorValidationError('effort contains control characters');
+  return trimmed;
+}
+
 export interface RenameAgentGroupArgs {
   id: string;
   name: string;
@@ -94,6 +115,12 @@ export interface UpdateAgentGroupModelArgs {
   id: string;
   /** New model override; null (or empty string) clears it. */
   model: string | null;
+  /**
+   * New effort level; null (or empty string) clears it back to the provider
+   * default. Omit the field entirely to leave effort untouched (older
+   * callers that only know about model keep working).
+   */
+  effort?: string | null;
   /** Also kill the group's running/idle containers so the next message respawns with the new model. */
   restart?: boolean;
 }
@@ -107,7 +134,7 @@ export interface MutatorContext {
     updateAgentGroupModel(
       args: UpdateAgentGroupModelArgs,
       actorUserId: string,
-    ): { id: string; model: string | null; killed: number };
+    ): { id: string; model: string | null; effort: string | null; killed: number };
     cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
@@ -226,11 +253,12 @@ export function setAgentGroupHidden(
 export function updateAgentGroupModel(
   args: UpdateAgentGroupModelArgs,
   actorUserId: string,
-): { id: string; model: string | null; killed: number } {
+): { id: string; model: string | null; effort: string | null; killed: number } {
   if (!args || typeof args.id !== 'string' || args.id.length === 0) {
     throw new MutatorValidationError('id is required');
   }
   const newModel = validateModel(args.model);
+  const newEffort = validateEffort(args.effort);
   const restart = args.restart === true;
 
   const before = getAgentGroup(args.id);
@@ -241,31 +269,56 @@ export function updateAgentGroupModel(
   }
 
   const beforeModel = before.model ?? null;
-  const changed = newModel !== beforeModel;
+  const modelChanged = newModel !== beforeModel;
 
-  if (changed) {
+  // Effort has no resolution ladder — it lives only in container_configs
+  // (materialized into container.json at spawn), unlike model which writes
+  // agent_groups.model. `undefined` = field absent = leave untouched.
+  const beforeEffort = getContainerConfig(args.id)?.effort ?? null;
+  const effortChanged = newEffort !== undefined && newEffort !== beforeEffort;
+
+  if (modelChanged || effortChanged) {
     const db = getDb();
     db.transaction(() => {
-      updateAgentGroup(args.id, { model: newModel });
-      appendAudit(
-        {
-          actor_user_id: actorUserId,
-          action: 'agent_group.set_model',
-          target_type: 'agent_group',
-          target_id: args.id,
-          before: { model: beforeModel },
-          after: { model: newModel },
-        },
-        db,
-      );
+      if (modelChanged) {
+        updateAgentGroup(args.id, { model: newModel });
+        appendAudit(
+          {
+            actor_user_id: actorUserId,
+            action: 'agent_group.set_model',
+            target_type: 'agent_group',
+            target_id: args.id,
+            before: { model: beforeModel },
+            after: { model: newModel },
+          },
+          db,
+        );
+      }
+      if (effortChanged) {
+        // Rows are backfilled at startup, but guard the never-seeded case.
+        ensureContainerConfig(args.id, before.agent_provider);
+        updateContainerConfigScalars(args.id, { effort: newEffort ?? null });
+        appendAudit(
+          {
+            actor_user_id: actorUserId,
+            action: 'agent_group.set_effort',
+            target_type: 'agent_group',
+            target_id: args.id,
+            before: { effort: beforeEffort },
+            after: { effort: newEffort ?? null },
+          },
+          db,
+        );
+      }
     })();
   }
 
   // update_agent precedent: kill running/idle containers with no respawn —
-  // the next routed message spawns fresh with the new AGENT_MODEL. Kills run
+  // the next routed message spawns fresh with the new AGENT_MODEL env and a
+  // freshly materialized container.json (which carries effort). Kills run
   // after the transaction commits so a fresh container can never read the
-  // old model. The model is baked into container env at spawn only, so
-  // without restart the change waits for the next natural spawn.
+  // old values. Both are read at spawn only, so without restart the change
+  // waits for the next natural spawn.
   let killed = 0;
   if (restart) {
     for (const sess of getSessionsByAgentGroup(args.id)) {
@@ -276,8 +329,13 @@ export function updateAgentGroupModel(
     }
   }
 
-  if (changed || killed > 0) nudgePusher();
-  return { id: args.id, model: newModel, killed };
+  if (modelChanged || effortChanged || killed > 0) nudgePusher();
+  return {
+    id: args.id,
+    model: newModel,
+    effort: newEffort === undefined ? beforeEffort : newEffort,
+    killed,
+  };
 }
 
 /** The mutator bundle the host hands to the dashboard server. */

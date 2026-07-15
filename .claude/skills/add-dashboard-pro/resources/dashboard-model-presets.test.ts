@@ -5,6 +5,7 @@ vi.mock('child_process', () => ({ execFile: vi.fn() }));
 import { execFile } from 'child_process';
 import {
   findCodexBinary,
+  getEffortPresets,
   getModelPresets,
   parseCodexModelCatalog,
   resetModelPresetCacheForTest,
@@ -108,5 +109,21 @@ describe('findCodexBinary', () => {
   it('returns a path or null without throwing', () => {
     const result = findCodexBinary();
     expect(result === null || typeof result === 'string').toBe(true);
+  });
+});
+
+describe('getEffortPresets', () => {
+  it('claude gets the agent-sdk EffortLevel vocab; null provider defaults to claude', () => {
+    expect(getEffortPresets('claude')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(getEffortPresets(null)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(getEffortPresets('CLAUDE')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('codex gets the model_reasoning_effort vocab', () => {
+    expect(getEffortPresets('codex')).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+  });
+
+  it('unknown providers get an empty list (default only)', () => {
+    expect(getEffortPresets('opencode')).toEqual([]);
   });
 });

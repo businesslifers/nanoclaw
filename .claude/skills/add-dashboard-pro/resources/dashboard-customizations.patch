@@ -235,7 +235,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..0bf93b4181da392548982bed12ab69fc
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +296,160 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +296,164 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -271,8 +271,12 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..0bf93b4181da392548982bed12ab69fc
 +            return json(res, { error: 'Mutator updateAgentGroupModel not configured' }, 503);
 +        }
 +        const model = body && typeof body.model === 'string' ? body.model : null;
++        // effort: absent field = leave untouched; null/'' = clear to provider default.
++        const effort = body && Object.prototype.hasOwnProperty.call(body, 'effort')
++            ? (typeof body.effort === 'string' ? body.effort : null)
++            : undefined;
 +        try {
-+            const after = fn({ id, model, restart: !!(body && body.restart) }, actorUserId);
++            const after = fn({ id, model, effort, restart: !!(body && body.restart) }, actorUserId);
 +            return json(res, { ok: true, after });
 +        }
 +        catch (err) {
@@ -4543,7 +4547,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,994 @@ export function agentGroupsPage() {
+@@ -16,112 +15,1024 @@ export function agentGroupsPage() {
        }
      })();
  
@@ -4841,9 +4845,13 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +
 +      var modelCell = '<span class="ag-name-edit" data-model-wrap="' + esc(g.id) + '">' +
 +        badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span>' +
++        '<span class="ag-effort-name" style="color:var(--ag-text-dim);font-size:12px">' +
++          (g.effort ? ' · ' + esc(g.effort) : '') + '</span>' +
 +        ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
 +          '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
 +          '" data-model-presets="' + esc((g.model_presets || []).join(',')) +
++          '" data-effort-current="' + esc(g.effort || '') +
++          '" data-effort-presets="' + esc((g.effort_presets || []).join(',')) +
 +          '" title="Change model" aria-label="Change model">&#x270E;</button>' +
 +        '</span>';
 +
@@ -5184,9 +5192,13 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +              '<div class="ad-detail-row"><dt class="ad-detail-label">Model</dt>' +
 +                '<dd class="ad-detail-value"><span class="ag-name-edit" data-model-wrap="' + esc(g.id) + '">' +
 +                  '<span class="ag-model-name">' + esc(model) + '</span>' +
++                  '<span class="ag-effort-name" style="color:var(--ag-text-dim);font-size:12px">' +
++                    (g.effort ? ' · ' + esc(g.effort) : '') + '</span>' +
 +                  ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
 +                    '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
 +                    '" data-model-presets="' + esc((g.model_presets || []).join(',')) +
++                    '" data-effort-current="' + esc(g.effort || '') +
++                    '" data-effort-presets="' + esc((g.effort_presets || []).join(',')) +
 +                    '" title="Change model" aria-label="Change model">&#x270E;</button>' +
 +                '</span></dd></div>' +
 +              detailRow('Created', g.created_at) +
@@ -5396,6 +5408,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +      claude: ['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]'],
 +      codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.5']
 +    };
++    // Effort vocab per provider (agent-sdk EffortLevel / codex model_reasoning_effort).
++    // Static fallback only — the snapshot supplies per-group lists via data-effort-presets.
++    var EFFORT_PRESETS = {
++      claude: ['low', 'medium', 'high', 'xhigh', 'max'],
++      codex: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
++    };
 +
 +    document.addEventListener('click', function(ev) {
 +      var btn = ev.target.closest && ev.target.closest('[data-model-id]');
@@ -5414,6 +5432,10 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +      var presets = btn.dataset.modelPresets
 +        ? btn.dataset.modelPresets.split(',').filter(Boolean)
 +        : (MODEL_PRESETS[provider] || []);
++      var effortCurrent = btn.dataset.effortCurrent || '';
++      var effortPresets = btn.dataset.effortPresets
++        ? btn.dataset.effortPresets.split(',').filter(Boolean)
++        : (EFFORT_PRESETS[provider] || []);
 +
 +      // Stash the original nodes so cancel/exit restores them verbatim.
 +      var saved = Array.prototype.slice.call(wrap.childNodes);
@@ -5426,11 +5448,16 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +        opts += '<option value="' + esc(presets[i]) + '"' + (presets[i] === current ? ' selected' : '') + '>' + esc(presets[i]) + '</option>';
 +      }
 +      opts += '<option value="__custom__"' + (isCustom ? ' selected' : '') + '>custom…</option>';
++      var effortOpts = '<option value=""' + (effortCurrent === '' ? ' selected' : '') + '>default effort</option>';
++      for (var ei = 0; ei < effortPresets.length; ei++) {
++        effortOpts += '<option value="' + esc(effortPresets[ei]) + '"' + (effortPresets[ei] === effortCurrent ? ' selected' : '') + '>' + esc(effortPresets[ei]) + '</option>';
++      }
 +
 +      wrap.insertAdjacentHTML('beforeend',
 +        '<form class="ag-name-edit-form" data-model-form="' + esc(id) + '">' +
 +          '<select class="ag-select" data-model-select>' + opts + '</select>' +
 +          '<input class="ag-name-edit-input" type="text" maxlength="120" placeholder="model name" value="' + esc(isCustom ? current : '') + '"' + (isCustom ? '' : ' style="display:none"') + '>' +
++          '<select class="ag-select" data-effort-select title="Reasoning effort">' + effortOpts + '</select>' +
 +          '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;cursor:pointer">' +
 +            '<input type="checkbox" data-model-restart> restart now</label>' +
 +          '<button class="ag-name-edit-save" type="submit" title="Save">&#x2713;</button>' +
@@ -5440,6 +5467,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +
 +      var form = wrap.querySelector('form');
 +      var select = wrap.querySelector('[data-model-select]');
++      var effortSel = wrap.querySelector('[data-effort-select]');
 +      var input = wrap.querySelector('.ag-name-edit-input');
 +      var restartBox = wrap.querySelector('[data-model-restart]');
 +      var status = wrap.querySelector('[data-model-status]');
@@ -5473,18 +5501,19 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +          chosen = select.value; // '' = default (clear the override)
 +        }
 +        var restart = !!(restartBox && restartBox.checked);
-+        if (chosen === current && !restart) { exit(); return; }
++        var effortChosen = effortSel ? effortSel.value : '';
++        if (chosen === current && effortChosen === effortCurrent && !restart) { exit(); return; }
 +        if (restart && !confirm('Restart running containers for this team now? In-flight work is interrupted; they respawn on the next message.')) return;
 +        status.textContent = 'Saving…';
 +        status.style.color = '#94a3b8';
 +        try {
-+          var result = await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id) + '/model', { model: chosen === '' ? null : chosen, restart: restart });
++          var result = await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id) + '/model', { model: chosen === '' ? null : chosen, effort: effortChosen === '' ? null : effortChosen, restart: restart });
 +          var killed = (result && result.after && result.after.killed) || 0;
 +          status.textContent = 'Saved' + (killed > 0 ? ' — ' + killed + ' container' + (killed === 1 ? '' : 's') + ' stopped' : '');
 +          status.style.color = '#34d399';
 +          setTimeout(function() {
 +            exit();
-+            applyModelDisplay(id, provider, chosen);
++            applyModelDisplay(id, provider, chosen, effortChosen);
 +          }, killed > 0 ? 900 : 350);
 +        }
 +        catch (err) {
@@ -5497,13 +5526,18 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +    // Update every rendered copy of this group's model in place — list row,
 +    // card, detail Identity row, detail hero — no full reload. The pusher's
 +    // next snapshot re-renders with the authoritative effective value.
-+    function applyModelDisplay(id, provider, chosen) {
++    function applyModelDisplay(id, provider, chosen, effortChosen) {
 +      var qid = id.replace(/"/g, '\\\\"');
 +      var label = chosen === '' ? 'default' : chosen;
 +      var names = document.querySelectorAll('[data-model-wrap="' + qid + '"] .ag-model-name');
 +      for (var i = 0; i < names.length; i++) names[i].textContent = label;
 +      var btns = document.querySelectorAll('[data-model-id="' + qid + '"]');
-+      for (var j = 0; j < btns.length; j++) btns[j].dataset.modelCurrent = chosen;
++      for (var j = 0; j < btns.length; j++) {
++        btns[j].dataset.modelCurrent = chosen;
++        btns[j].dataset.effortCurrent = effortChosen || '';
++      }
++      var effs = document.querySelectorAll('[data-model-wrap="' + qid + '"] .ag-effort-name');
++      for (var e2 = 0; e2 < effs.length; e2++) effs[e2].textContent = effortChosen ? ' · ' + effortChosen : '';
 +      var rows = document.querySelectorAll('[data-id="' + qid + '"]');
 +      for (var k = 0; k < rows.length; k++) {
 +        if (rows[k].getAttribute('data-model')) rows[k].setAttribute('data-model', provider + ':' + label);

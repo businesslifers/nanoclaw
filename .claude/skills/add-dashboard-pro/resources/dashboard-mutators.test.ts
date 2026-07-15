@@ -10,6 +10,7 @@ vi.mock('./config.js', async (importOriginal) => {
 });
 
 import { closeDb, createAgentGroup, getAgentGroup, initTestDb } from './db/index.js';
+import { getContainerConfig } from './db/container-configs.js';
 import { runMigrations } from './db/migrations/index.js';
 import { getRecentAudit } from './db/dashboard-audit.js';
 import { createSession } from './db/sessions.js';
@@ -241,7 +242,7 @@ describe('updateAgentGroupModel', () => {
     seedUserWithRole('u-owner', 'owner', null);
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'u-owner');
-    expect(result).toEqual({ id: 'ag-1', model: 'opus', killed: 0 });
+    expect(result).toEqual({ id: 'ag-1', model: 'opus', effort: null, killed: 0 });
     expect(getAgentGroup('ag-1')!.model).toBe('opus');
     expect(nudgePusher).toHaveBeenCalledTimes(1);
     expect(killContainer).not.toHaveBeenCalled();
@@ -323,7 +324,7 @@ describe('updateAgentGroupModel', () => {
     seedAgentGroup('ag-1', 'Team');
     seedUserWithRole('u-owner', 'owner', null);
     const result = updateAgentGroupModel({ id: 'ag-1', model: null }, 'u-owner');
-    expect(result).toEqual({ id: 'ag-1', model: null, killed: 0 });
+    expect(result).toEqual({ id: 'ag-1', model: null, effort: null, killed: 0 });
     expect(getRecentAudit(10)).toHaveLength(0);
     expect(nudgePusher).not.toHaveBeenCalled();
   });
@@ -349,10 +350,95 @@ describe('updateAgentGroupModel', () => {
     seedBareSession('s-run', 'ag-1', 'running');
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: null, restart: true }, 'u-owner');
-    expect(result).toEqual({ id: 'ag-1', model: null, killed: 1 });
+    expect(result).toEqual({ id: 'ag-1', model: null, effort: null, killed: 1 });
     expect(killContainer).toHaveBeenCalledTimes(1);
     expect(getRecentAudit(10)).toHaveLength(0);
     expect(nudgePusher).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets effort into container_configs with its own audit row', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'medium' }, 'u-owner');
+    expect(result).toEqual({ id: 'ag-1', model: null, effort: 'medium', killed: 0 });
+    expect(getContainerConfig('ag-1')!.effort).toBe('medium');
+    expect(nudgePusher).toHaveBeenCalledTimes(1);
+
+    const audit = getRecentAudit(10);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].action).toBe('agent_group.set_effort');
+    expect(JSON.parse(audit[0].before_json!)).toEqual({ effort: null });
+    expect(JSON.parse(audit[0].after_json!)).toEqual({ effort: 'medium' });
+  });
+
+  it('changes model and effort together in one call — two audit rows', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: 'opus', effort: 'xhigh' }, 'u-owner');
+    expect(result).toEqual({ id: 'ag-1', model: 'opus', effort: 'xhigh', killed: 0 });
+    expect(getAgentGroup('ag-1')!.model).toBe('opus');
+    expect(getContainerConfig('ag-1')!.effort).toBe('xhigh');
+
+    const actions = getRecentAudit(10).map((a) => a.action);
+    expect(actions.sort()).toEqual(['agent_group.set_effort', 'agent_group.set_model']);
+    expect(nudgePusher).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears effort with null / blank, lowercases and trims input', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    updateAgentGroupModel({ id: 'ag-1', model: null, effort: '  HIGH ' }, 'u-owner');
+    expect(getContainerConfig('ag-1')!.effort).toBe('high');
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null, effort: null }, 'u-owner');
+    expect(result.effort).toBeNull();
+    expect(getContainerConfig('ag-1')!.effort).toBeNull();
+
+    updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'low' }, 'u-owner');
+    expect(updateAgentGroupModel({ id: 'ag-1', model: null, effort: '   ' }, 'u-owner').effort).toBeNull();
+    expect(getContainerConfig('ag-1')!.effort).toBeNull();
+  });
+
+  it('absent effort field leaves the stored effort untouched', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'max' }, 'u-owner');
+    vi.mocked(nudgePusher).mockClear();
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: 'sonnet' }, 'u-owner');
+    expect(result.effort).toBe('max');
+    expect(getContainerConfig('ag-1')!.effort).toBe('max');
+    // Only the model audit row was added.
+    const actions = getRecentAudit(10).map((a) => a.action);
+    expect(actions.filter((a) => a === 'agent_group.set_effort')).toHaveLength(1);
+  });
+
+  it('unchanged effort writes no audit and no nudge', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'high' }, 'u-owner');
+    vi.mocked(nudgePusher).mockClear();
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'high' }, 'u-owner');
+    expect(result.effort).toBe('high');
+    expect(getRecentAudit(10)).toHaveLength(1); // just the original set
+    expect(nudgePusher).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-string non-null effort and over-long/control-char effort', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: null, effort: 42 as never }, 'u-owner')).toThrow(
+      MutatorValidationError,
+    );
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'x'.repeat(41) }, 'u-owner')).toThrow(
+      MutatorValidationError,
+    );
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'hi\x01gh' }, 'u-owner')).toThrow(
+      MutatorValidationError,
+    );
   });
 });
 

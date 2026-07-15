@@ -27,6 +27,13 @@ import { log } from './log.js';
 
 const CLAUDE_PRESETS = ['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]'];
 const CODEX_FALLBACK = ['gpt-5.4', 'gpt-5.4-mini'];
+
+// Effort vocab is per-provider and stable (an SDK/CLI enum, not a server-side
+// catalog), so static lists don't go stale the way codex model slugs do.
+// claude: agent-sdk EffortLevel (default 'high' when unset); codex: the
+// model_reasoning_effort values codex-app-server accepts.
+const CLAUDE_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_EFFORT_PRESETS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 const CODEX_TTL_MS = 60 * 60 * 1000;
 const CODEX_TIMEOUT_MS = 20_000;
 
@@ -120,6 +127,18 @@ export function getModelPresets(provider: string | null | undefined): string[] {
     if (!codexCache || Date.now() - codexCache.fetchedAt > CODEX_TTL_MS) refreshCodexModels();
     return codexCache?.list ?? CODEX_FALLBACK;
   }
+  return [];
+}
+
+/**
+ * Preset effort levels for a provider's dropdown. Like model presets these
+ * are a convenience, not a gate — the mutator stores any short string.
+ * Unknown providers get an empty list ("default" only).
+ */
+export function getEffortPresets(provider: string | null | undefined): string[] {
+  const p = (provider ?? 'claude').toLowerCase();
+  if (p === 'claude') return CLAUDE_EFFORT_PRESETS;
+  if (p === 'codex') return CODEX_EFFORT_PRESETS;
   return [];
 }
 

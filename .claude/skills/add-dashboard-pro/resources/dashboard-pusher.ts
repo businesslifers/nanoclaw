@@ -100,7 +100,7 @@ import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { collectWorkItems } from './dashboard-work-items.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
-import { getModelPresets } from './dashboard-model-presets.js';
+import { getEffortPresets, getModelPresets } from './dashboard-model-presets.js';
 
 // One watchdog per host process — keeps a 5-sample (≈5min) CPU history per
 // session and surfaces "pinned" sessions through health.reasons. Restarting
@@ -512,9 +512,13 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       folder: g.folder,
       agent_provider: effectiveProvider(g.id),
       model: effectiveModel(g.id),
+      // Effort lives only in container_configs (no agent_groups ladder like
+      // model), so the effective value is just the config row's.
+      effort: containerConfigById.get(g.id)?.effort ?? null,
       // Preset options for the dashboard's model-edit dropdown; codex list
       // is refreshed live from `codex debug models` (cached, non-blocking).
       model_presets: getModelPresets(effectiveProvider(g.id)),
+      effort_presets: getEffortPresets(effectiveProvider(g.id)),
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
