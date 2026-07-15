@@ -4543,7 +4543,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,987 @@ export function agentGroupsPage() {
+@@ -16,112 +15,994 @@ export function agentGroupsPage() {
        }
      })();
  
@@ -4843,6 +4843,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +        badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span>' +
 +        ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
 +          '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
++          '" data-model-presets="' + esc((g.model_presets || []).join(',')) +
 +          '" title="Change model" aria-label="Change model">&#x270E;</button>' +
 +        '</span>';
 +
@@ -5185,6 +5186,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +                  '<span class="ag-model-name">' + esc(model) + '</span>' +
 +                  ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
 +                    '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
++                    '" data-model-presets="' + esc((g.model_presets || []).join(',')) +
 +                    '" title="Change model" aria-label="Change model">&#x270E;</button>' +
 +                '</span></dd></div>' +
 +              detailRow('Created', g.created_at) +
@@ -5387,9 +5389,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +    // Preset model names offered per provider; anything else goes through
 +    // the "custom…" option's free-text input. Model strings are opaque to
 +    // the host (no allowlist), so presets are a convenience, not a gate.
++    // The snapshot supplies per-group presets (data-model-presets — codex
++    // is refreshed live from "codex debug models" host-side); this static
++    // table is only the fallback for snapshots that predate that field.
 +    var MODEL_PRESETS = {
-+      claude: ['opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]'],
-+      codex: ['gpt-5.4', 'gpt-5.4-mini']
++      claude: ['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]'],
++      codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.5']
 +    };
 +
 +    document.addEventListener('click', function(ev) {
@@ -5406,7 +5411,9 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +      var id = btn.dataset.modelId;
 +      var current = btn.dataset.modelCurrent || '';
 +      var provider = btn.dataset.modelProvider || 'claude';
-+      var presets = MODEL_PRESETS[provider] || [];
++      var presets = btn.dataset.modelPresets
++        ? btn.dataset.modelPresets.split(',').filter(Boolean)
++        : (MODEL_PRESETS[provider] || []);
 +
 +      // Stash the original nodes so cancel/exit restores them verbatim.
 +      var saved = Array.prototype.slice.call(wrap.childNodes);

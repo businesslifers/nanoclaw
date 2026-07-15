@@ -100,6 +100,7 @@ import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { collectWorkItems } from './dashboard-work-items.js';
 import { getDb } from './db/connection.js';
 import { log } from './log.js';
+import { getModelPresets } from './dashboard-model-presets.js';
 
 // One watchdog per host process — keeps a 5-sample (≈5min) CPU history per
 // session and surfaces "pinned" sessions through health.reasons. Restarting
@@ -511,6 +512,9 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
       folder: g.folder,
       agent_provider: effectiveProvider(g.id),
       model: effectiveModel(g.id),
+      // Preset options for the dashboard's model-edit dropdown; codex list
+      // is refreshed live from `codex debug models` (cached, non-blocking).
+      model_presets: getModelPresets(effectiveProvider(g.id)),
       parentId,
       parentName,
       subAgentCount: subAgentCount.get(g.id) ?? 0,
@@ -636,7 +640,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
       // Claude Code transcript (.claude-shared/projects/*.jsonl)
       const claudeEntries = scanJsonlTokens(path.join(sessionsDir, agDir));
       allEntries.push(...claudeEntries.map((e) => ({ ...e, agentGroupId: agDir })));
-      // Codex app-server trace log (per-group .codex-shared/logs_2.sqlite)
+      // Codex app-server logs (logs_2.sqlite per session)
       const codexEntries = scanCodexTokens(path.join(sessionsDir, agDir));
       allEntries.push(...codexEntries.map((e) => ({ ...e, agentGroupId: agDir })));
     }
@@ -808,63 +812,36 @@ function scanJsonlTokens(agentDir: string): TokenEntry[] {
 }
 
 /**
- * Pull Codex per-turn token usage from a group's app-server trace log.
+ * Pull Codex per-turn token usage from each session's app-server logs.
  *
- * Codex writes a `logs_2.sqlite` feedback-trace DB under its CODEX_HOME. The
- * current /add-codex layout mounts CODEX_HOME from a per-GROUP `.codex-shared`
- * dir, so the DB is per group. (The old hand-backported provider used a
- * per-SESSION `<sess>/codex/` CODEX_HOME, so this used to scan
- * `<sess>/codex/logs_2.sqlite` — a path the new layout never creates, which
- * left the Codex token panel silently empty.) We locate the DB anywhere under
- * `.codex-shared` (codex's exact subpath has drifted across versions) and
- * degrade to no entries if it's absent or its schema differs.
- *
- * Each `response.completed` body carries a JSON usage block like:
+ * Codex stores structured trace data in `<session>/codex/logs_2.sqlite`;
+ * every `response.completed` SSE event carries a JSON usage block like:
  *   "usage":{"input_tokens":N,"input_tokens_details":{"cached_tokens":C},"output_tokens":M,...}
- * Model name appears as `model=<name>` in the same body. We pair the two into
- * an entry shaped like the Claude-side bag so both feed the same totals.
+ * Model name is earlier in the same log body as `model=<name>` in the
+ * tracing spans. We pair the two to synthesise an entry shaped like the
+ * Claude-side bag so both feed the same totals.
  *
  * Cache semantics differ: Claude reports cache read + creation separately,
  * Codex reports cached_tokens (reads only). We bucket them as cacheReadTokens
  * and leave cacheCreationTokens=0 for Codex.
- *
- * NOTE: unverified against a live codex@0.138 run (needs vault auth + a real
- * turn — no `.codex-shared` exists until then). If the panel stays empty once
- * a codex group runs, the fallback is to capture usage from the provider's
- * app-server `turn/completed` stream and persist it ourselves rather than
- * scraping codex's internal DB.
  */
-function findCodexTraceDbs(root: string, maxDepth = 3): string[] {
-  const found: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    let ents: fs.Dirent[];
-    try {
-      ents = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of ents) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && e.name === 'logs_2.sqlite') found.push(full);
-      else if (e.isDirectory() && depth > 0) walk(full, depth - 1);
-    }
-  };
-  walk(root, maxDepth);
-  return found;
-}
-
 function scanCodexTokens(agentDir: string): TokenEntry[] {
   const entries: TokenEntry[] = [];
-  const dbPaths = findCodexTraceDbs(path.join(agentDir, '.codex-shared'));
-  if (dbPaths.length === 0) return entries;
-
+  let sessNames: string[];
+  try {
+    sessNames = fs.readdirSync(agentDir).filter((d) => d.startsWith('sess-'));
+  } catch {
+    return entries;
+  }
   const usageRe = /"usage":\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
   // Best-effort ISO timestamp scrape from the log body — matches the standard
   // 2025-01-02T03:04:05(.000)Z shape that Codex's tracing layer emits. If we
   // can't find one, the entry gets `timestamp: ''` and is treated as
   // "always include" by the range filter (matches the pre-range behavior).
   const tsRe = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/;
-  for (const dbPath of dbPaths) {
+  for (const sess of sessNames) {
+    const dbPath = path.join(agentDir, sess, 'codex', 'logs_2.sqlite');
+    if (!fs.existsSync(dbPath)) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true });
@@ -901,7 +878,7 @@ function scanCodexTokens(agentDir: string): TokenEntry[] {
         });
       }
     } catch {
-      /* missing `logs` table / different schema / locked DB — skip */
+      /* skip session */
     } finally {
       db?.close();
     }
