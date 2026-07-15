@@ -15,7 +15,8 @@ import { CronExpressionParser } from 'cron-parser';
 import { appendAudit } from './db/dashboard-audit.js';
 import { getAgentGroup, updateAgentGroup } from './db/agent-groups.js';
 import { getDb } from './db/connection.js';
-import { getSession } from './db/sessions.js';
+import { getSession, getSessionsByAgentGroup } from './db/sessions.js';
+import { killContainer } from './container-runner.js';
 import { hasAdminPrivilege } from './modules/permissions/db/user-roles.js';
 import { getOwners } from './modules/permissions/db/user-roles.js';
 import { canAccessAgentGroup } from './modules/permissions/access.js';
@@ -62,6 +63,23 @@ function validateName(raw: unknown): string {
   return trimmed;
 }
 
+const MODEL_MAX = 120;
+
+/**
+ * Model strings are opaque overrides (SDK conventions like `sonnet[1m]`
+ * pass through untouched) — we only trim and reject junk. `null` /
+ * empty means "clear the override" (fall back down the resolver ladder).
+ */
+function validateModel(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new MutatorValidationError('model must be a string or null');
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > MODEL_MAX) throw new MutatorValidationError(`model exceeds ${MODEL_MAX} chars`);
+  if (CONTROL_CHAR_RE.test(trimmed)) throw new MutatorValidationError('model contains control characters');
+  return trimmed;
+}
+
 export interface RenameAgentGroupArgs {
   id: string;
   name: string;
@@ -72,12 +90,24 @@ export interface SetAgentGroupHiddenArgs {
   hidden: boolean;
 }
 
+export interface UpdateAgentGroupModelArgs {
+  id: string;
+  /** New model override; null (or empty string) clears it. */
+  model: string | null;
+  /** Also kill the group's running/idle containers so the next message respawns with the new model. */
+  restart?: boolean;
+}
+
 export interface MutatorContext {
   /** Resolves an inbound HTTP request to a NanoClaw user_id, or undefined if no actor can be inferred. */
   resolveActor(req: IncomingMessage): string | undefined;
   mutators: {
     renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string): { id: string; name: string };
     setAgentGroupHidden(args: SetAgentGroupHiddenArgs, actorUserId: string): { id: string; hidden: boolean };
+    updateAgentGroupModel(
+      args: UpdateAgentGroupModelArgs,
+      actorUserId: string,
+    ): { id: string; model: string | null; killed: number };
     cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
     resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult;
@@ -193,6 +223,63 @@ export function setAgentGroupHidden(
   return { id: args.id, hidden: args.hidden };
 }
 
+export function updateAgentGroupModel(
+  args: UpdateAgentGroupModelArgs,
+  actorUserId: string,
+): { id: string; model: string | null; killed: number } {
+  if (!args || typeof args.id !== 'string' || args.id.length === 0) {
+    throw new MutatorValidationError('id is required');
+  }
+  const newModel = validateModel(args.model);
+  const restart = args.restart === true;
+
+  const before = getAgentGroup(args.id);
+  if (!before) throw new MutatorNotFoundError('agent group not found');
+
+  if (!hasAdminPrivilege(actorUserId, args.id)) {
+    throw new MutatorAuthError('actor lacks admin privilege over this agent group');
+  }
+
+  const beforeModel = before.model ?? null;
+  const changed = newModel !== beforeModel;
+
+  if (changed) {
+    const db = getDb();
+    db.transaction(() => {
+      updateAgentGroup(args.id, { model: newModel });
+      appendAudit(
+        {
+          actor_user_id: actorUserId,
+          action: 'agent_group.set_model',
+          target_type: 'agent_group',
+          target_id: args.id,
+          before: { model: beforeModel },
+          after: { model: newModel },
+        },
+        db,
+      );
+    })();
+  }
+
+  // update_agent precedent: kill running/idle containers with no respawn —
+  // the next routed message spawns fresh with the new AGENT_MODEL. Kills run
+  // after the transaction commits so a fresh container can never read the
+  // old model. The model is baked into container env at spawn only, so
+  // without restart the change waits for the next natural spawn.
+  let killed = 0;
+  if (restart) {
+    for (const sess of getSessionsByAgentGroup(args.id)) {
+      if (sess.container_status === 'running' || sess.container_status === 'idle') {
+        killContainer(sess.id, `dashboard model change by ${actorUserId}`);
+        killed++;
+      }
+    }
+  }
+
+  if (changed || killed > 0) nudgePusher();
+  return { id: args.id, model: newModel, killed };
+}
+
 /** The mutator bundle the host hands to the dashboard server. */
 export function buildDashboardMutatorContext(): MutatorContext {
   return {
@@ -200,6 +287,7 @@ export function buildDashboardMutatorContext(): MutatorContext {
     mutators: {
       renameAgentGroup,
       setAgentGroupHidden,
+      updateAgentGroupModel,
       cancelTask,
       pauseTask,
       resumeTask,

@@ -235,7 +235,7 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..0bf93b4181da392548982bed12ab69fc
          if (path === '/') {
              res.writeHead(302, { Location: '/dashboard' });
              res.end();
-@@ -139,3 +296,144 @@ export async function dispatch(method, path, params, res) {
+@@ -139,3 +296,160 @@ export async function dispatch(method, path, params, res) {
      res.writeHead(404, { 'Content-Type': 'application/json' });
      res.end(JSON.stringify({ error: 'Not found' }));
  }
@@ -257,6 +257,22 @@ index 326434d184af3d5496de61b07c79bca0ceff7e7f..0bf93b4181da392548982bed12ab69fc
 +        }
 +        try {
 +            const after = fn({ id, hidden: !!(body && body.hidden) }, actorUserId);
++            return json(res, { ok: true, after });
++        }
++        catch (err) {
++            const status = typeof err?.status === 'number' ? err.status : 500;
++            return json(res, { error: err?.message || 'Internal Server Error' }, status);
++        }
++    }
++    if (method === 'PATCH' && /^\/api\/agent-groups\/[^/]+\/model$/.test(path)) {
++        const id = decodeURIComponent(path.split('/')[3]);
++        const fn = mutators && mutators.updateAgentGroupModel;
++        if (typeof fn !== 'function') {
++            return json(res, { error: 'Mutator updateAgentGroupModel not configured' }, 503);
++        }
++        const model = body && typeof body.model === 'string' ? body.model : null;
++        try {
++            const after = fn({ id, model, restart: !!(body && body.restart) }, actorUserId);
 +            return json(res, { ok: true, after });
 +        }
 +        catch (err) {
@@ -4527,7 +4543,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
      <script>
      (async () => {
        const params = new URLSearchParams(location.search);
-@@ -16,112 +15,854 @@ export function agentGroupsPage() {
+@@ -16,112 +15,987 @@ export function agentGroupsPage() {
        }
      })();
  
@@ -4823,7 +4839,12 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +        ? '<span class="ag-arrow">↳</span>' + renderEditableAgentName(g, 'ag-name-sub') + wikiIconHtml(g) + ' ' + leadBadge
 +        : renderEditableAgentName(g, 'ag-name') + wikiIconHtml(g) + ' ' + leadBadge;
 +
-+      var modelCell = badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span>';
++      var modelCell = '<span class="ag-name-edit" data-model-wrap="' + esc(g.id) + '">' +
++        badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span>' +
++        ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
++          '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
++          '" title="Change model" aria-label="Change model">&#x270E;</button>' +
++        '</span>';
 +
 +      var runningPill = g.runningSessions > 0
 +        ? '<span class="ag-pill ag-pill-running">' + g.runningSessions + '</span>'
@@ -5159,7 +5180,13 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +              detailRow('ID', g.id) +
 +              detailRow('Folder', g.folder) +
 +              detailRow('Provider', provider) +
-+              detailRow('Model', model) +
++              '<div class="ad-detail-row"><dt class="ad-detail-label">Model</dt>' +
++                '<dd class="ad-detail-value"><span class="ag-name-edit" data-model-wrap="' + esc(g.id) + '">' +
++                  '<span class="ag-model-name">' + esc(model) + '</span>' +
++                  ' <button class="ag-name-edit-btn" type="button" data-model-id="' + esc(g.id) +
++                    '" data-model-current="' + esc(g.model || '') + '" data-model-provider="' + esc(provider) +
++                    '" title="Change model" aria-label="Change model">&#x270E;</button>' +
++                '</span></dd></div>' +
 +              detailRow('Created', g.created_at) +
 +              (g.subAgentCount ? detailRow('Sub-agents', String(g.subAgentCount)) : '') +
 +            '</dl>' +
@@ -5354,6 +5381,128 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +          '" data-hide-name="' + esc(g.name) + '" data-hide-current="' + (isHidden ? '1' : '0') +
 +          '" title="' + esc(hideTitle) + '" aria-label="' + esc(hideTitle) + '">' + hideIcon + '</button>' +
 +        '</span>';
++    }
++
++    // ── Model editing ──────────────────────────────────────────────────
++    // Preset model names offered per provider; anything else goes through
++    // the "custom…" option's free-text input. Model strings are opaque to
++    // the host (no allowlist), so presets are a convenience, not a gate.
++    var MODEL_PRESETS = {
++      claude: ['opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]'],
++      codex: ['gpt-5.4', 'gpt-5.4-mini']
++    };
++
++    document.addEventListener('click', function(ev) {
++      var btn = ev.target.closest && ev.target.closest('[data-model-id]');
++      if (!btn) return;
++      ev.preventDefault();
++      activateModelEdit(btn);
++    });
++
++    function activateModelEdit(btn) {
++      var wrap = btn.closest('[data-model-wrap]');
++      if (!wrap || wrap.dataset.editing === '1') return;
++      wrap.dataset.editing = '1';
++      var id = btn.dataset.modelId;
++      var current = btn.dataset.modelCurrent || '';
++      var provider = btn.dataset.modelProvider || 'claude';
++      var presets = MODEL_PRESETS[provider] || [];
++
++      // Stash the original nodes so cancel/exit restores them verbatim.
++      var saved = Array.prototype.slice.call(wrap.childNodes);
++      while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
++
++      var isPreset = current !== '' && presets.indexOf(current) !== -1;
++      var isCustom = current !== '' && !isPreset;
++      var opts = '<option value=""' + (current === '' ? ' selected' : '') + '>default</option>';
++      for (var i = 0; i < presets.length; i++) {
++        opts += '<option value="' + esc(presets[i]) + '"' + (presets[i] === current ? ' selected' : '') + '>' + esc(presets[i]) + '</option>';
++      }
++      opts += '<option value="__custom__"' + (isCustom ? ' selected' : '') + '>custom…</option>';
++
++      wrap.insertAdjacentHTML('beforeend',
++        '<form class="ag-name-edit-form" data-model-form="' + esc(id) + '">' +
++          '<select class="ag-select" data-model-select>' + opts + '</select>' +
++          '<input class="ag-name-edit-input" type="text" maxlength="120" placeholder="model name" value="' + esc(isCustom ? current : '') + '"' + (isCustom ? '' : ' style="display:none"') + '>' +
++          '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;cursor:pointer">' +
++            '<input type="checkbox" data-model-restart> restart now</label>' +
++          '<button class="ag-name-edit-save" type="submit" title="Save">&#x2713;</button>' +
++          '<button class="ag-name-edit-cancel" type="button" title="Cancel">&#x2715;</button>' +
++          '<span class="ag-name-edit-status" data-model-status></span>' +
++        '</form>');
++
++      var form = wrap.querySelector('form');
++      var select = wrap.querySelector('[data-model-select]');
++      var input = wrap.querySelector('.ag-name-edit-input');
++      var restartBox = wrap.querySelector('[data-model-restart]');
++      var status = wrap.querySelector('[data-model-status]');
++      var cancel = wrap.querySelector('.ag-name-edit-cancel');
++      select.focus();
++
++      select.addEventListener('change', function() {
++        var custom = select.value === '__custom__';
++        input.style.display = custom ? '' : 'none';
++        if (custom) input.focus();
++      });
++
++      function exit() {
++        wrap.dataset.editing = '';
++        while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
++        for (var n = 0; n < saved.length; n++) wrap.appendChild(saved[n]);
++      }
++
++      cancel.addEventListener('click', function() { exit(); });
++      form.addEventListener('keydown', function(ev) {
++        if (ev.key === 'Escape') { ev.preventDefault(); exit(); }
++      });
++
++      form.addEventListener('submit', async function(ev) {
++        ev.preventDefault();
++        var chosen;
++        if (select.value === '__custom__') {
++          chosen = (input.value || '').trim();
++          if (!chosen) { status.textContent = 'Model name required'; status.style.color = '#f87171'; return; }
++        } else {
++          chosen = select.value; // '' = default (clear the override)
++        }
++        var restart = !!(restartBox && restartBox.checked);
++        if (chosen === current && !restart) { exit(); return; }
++        if (restart && !confirm('Restart running containers for this team now? In-flight work is interrupted; they respawn on the next message.')) return;
++        status.textContent = 'Saving…';
++        status.style.color = '#94a3b8';
++        try {
++          var result = await mutate('PATCH', '/api/agent-groups/' + encodeURIComponent(id) + '/model', { model: chosen === '' ? null : chosen, restart: restart });
++          var killed = (result && result.after && result.after.killed) || 0;
++          status.textContent = 'Saved' + (killed > 0 ? ' — ' + killed + ' container' + (killed === 1 ? '' : 's') + ' stopped' : '');
++          status.style.color = '#34d399';
++          setTimeout(function() {
++            exit();
++            applyModelDisplay(id, provider, chosen);
++          }, killed > 0 ? 900 : 350);
++        }
++        catch (err) {
++          status.textContent = err && err.message ? err.message : 'Error';
++          status.style.color = '#f87171';
++        }
++      });
++    }
++
++    // Update every rendered copy of this group's model in place — list row,
++    // card, detail Identity row, detail hero — no full reload. The pusher's
++    // next snapshot re-renders with the authoritative effective value.
++    function applyModelDisplay(id, provider, chosen) {
++      var qid = id.replace(/"/g, '\\\\"');
++      var label = chosen === '' ? 'default' : chosen;
++      var names = document.querySelectorAll('[data-model-wrap="' + qid + '"] .ag-model-name');
++      for (var i = 0; i < names.length; i++) names[i].textContent = label;
++      var btns = document.querySelectorAll('[data-model-id="' + qid + '"]');
++      for (var j = 0; j < btns.length; j++) btns[j].dataset.modelCurrent = chosen;
++      var rows = document.querySelectorAll('[data-id="' + qid + '"]');
++      for (var k = 0; k < rows.length; k++) {
++        if (rows[k].getAttribute('data-model')) rows[k].setAttribute('data-model', provider + ':' + label);
++      }
++      var hero = document.querySelectorAll('.ad-hero-sub .ag-model-name');
++      for (var m = 0; m < hero.length; m++) hero[m].textContent = label;
 +    }
 +
 +    document.addEventListener('click', function(ev) {

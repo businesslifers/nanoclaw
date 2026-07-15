@@ -28,12 +28,15 @@ import {
   resumeTask,
   renameAgentGroup,
   resolveDashboardActor,
+  updateAgentGroupModel,
   updateTask,
 } from './dashboard-mutators.js';
 
 vi.mock('./dashboard-pusher.js', () => ({ nudgePusher: vi.fn() }));
+vi.mock('./container-runner.js', () => ({ killContainer: vi.fn() }));
 
 import { nudgePusher } from './dashboard-pusher.js';
+import { killContainer } from './container-runner.js';
 
 function now() {
   return new Date().toISOString();
@@ -109,6 +112,7 @@ beforeEach(() => {
   runMigrations(initTestDb()); // idempotent — table already there from initTestDb but migrations need to run on it
   // initTestDb returns a fresh DB; rerun to ensure migrations applied.
   vi.mocked(nudgePusher).mockClear();
+  vi.mocked(killContainer).mockClear();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
@@ -211,6 +215,144 @@ describe('renameAgentGroup', () => {
     const result = renameAgentGroup({ id: 'ag-1', name: '  Trimmed  ' }, 'u-owner');
     expect(result.name).toBe('Trimmed');
     expect(getAgentGroup('ag-1')!.name).toBe('Trimmed');
+  });
+});
+
+describe('updateAgentGroupModel', () => {
+  // Self-contained seeding (deliberately NOT reusing seedSessionWithTasks —
+  // that helper diverges between the installed and skill-resource copies of
+  // this test file; this block must stay identical in both).
+  function seedBareSession(id: string, agentGroupId: string, containerStatus: 'running' | 'idle' | 'stopped') {
+    createSession({
+      id,
+      agent_group_id: agentGroupId,
+      messaging_group_id: null,
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: containerStatus,
+      last_active: now(),
+      created_at: now(),
+    } as never);
+  }
+
+  it('sets a model override when actor is owner', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'u-owner');
+    expect(result).toEqual({ id: 'ag-1', model: 'opus', killed: 0 });
+    expect(getAgentGroup('ag-1')!.model).toBe('opus');
+    expect(nudgePusher).toHaveBeenCalledTimes(1);
+    expect(killContainer).not.toHaveBeenCalled();
+
+    const audit = getRecentAudit(10);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].action).toBe('agent_group.set_model');
+    expect(audit[0].actor_user_id).toBe('u-owner');
+    expect(audit[0].target_id).toBe('ag-1');
+    expect(JSON.parse(audit[0].before_json!)).toEqual({ model: null });
+    expect(JSON.parse(audit[0].after_json!)).toEqual({ model: 'opus' });
+  });
+
+  it('clears the override with model: null', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    updateAgentGroupModel({ id: 'ag-1', model: 'haiku' }, 'u-owner');
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null }, 'u-owner');
+    expect(result.model).toBeNull();
+    expect(getAgentGroup('ag-1')!.model).toBeNull();
+
+    const audit = getRecentAudit(10);
+    expect(audit).toHaveLength(2);
+    expect(JSON.parse(audit[0].before_json!)).toEqual({ model: 'haiku' });
+    expect(JSON.parse(audit[0].after_json!)).toEqual({ model: null });
+  });
+
+  it('trims whitespace and treats empty/blank string as clear', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+
+    expect(updateAgentGroupModel({ id: 'ag-1', model: '  sonnet[1m]  ' }, 'u-owner').model).toBe('sonnet[1m]');
+    expect(getAgentGroup('ag-1')!.model).toBe('sonnet[1m]');
+
+    expect(updateAgentGroupModel({ id: 'ag-1', model: '   ' }, 'u-owner').model).toBeNull();
+    expect(getAgentGroup('ag-1')!.model).toBeNull();
+  });
+
+  it('rejects non-string non-null model', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 42 as never }, 'u-owner')).toThrow(MutatorValidationError);
+  });
+
+  it('rejects model longer than 120 chars or with control chars', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'x'.repeat(121) }, 'u-owner')).toThrow(
+      MutatorValidationError,
+    );
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'badmodel' }, 'u-owner')).toThrow(MutatorValidationError);
+  });
+
+  it('allows scoped admin of this group and global admin', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-sa', 'admin', 'ag-1');
+    seedUserWithRole('u-ga', 'admin', null);
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'haiku' }, 'u-sa')).not.toThrow();
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'u-ga')).not.toThrow();
+  });
+
+  it('rejects unknown actor and scoped admin of a DIFFERENT group', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedAgentGroup('ag-2', 'Other');
+    seedUserWithRole('u-sa-other', 'admin', 'ag-2');
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'nobody')).toThrow(MutatorAuthError);
+    expect(() => updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'u-sa-other')).toThrow(MutatorAuthError);
+  });
+
+  it('throws MutatorNotFoundError for unknown agent group id', () => {
+    seedUserWithRole('u-owner', 'owner', null);
+    expect(() => updateAgentGroupModel({ id: 'no-such-group', model: 'opus' }, 'u-owner')).toThrow(
+      MutatorNotFoundError,
+    );
+  });
+
+  it('no-op (unchanged model, no restart) writes no audit and no nudge', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null }, 'u-owner');
+    expect(result).toEqual({ id: 'ag-1', model: null, killed: 0 });
+    expect(getRecentAudit(10)).toHaveLength(0);
+    expect(nudgePusher).not.toHaveBeenCalled();
+  });
+
+  it('restart kills only running/idle containers of the group', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    seedBareSession('s-run', 'ag-1', 'running');
+    seedBareSession('s-idle', 'ag-1', 'idle');
+    seedBareSession('s-stop', 'ag-1', 'stopped');
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: 'haiku', restart: true }, 'u-owner');
+    expect(result.killed).toBe(2);
+    expect(killContainer).toHaveBeenCalledTimes(2);
+    const killedIds = vi.mocked(killContainer).mock.calls.map((c) => c[0]);
+    expect(killedIds.sort()).toEqual(['s-idle', 's-run']);
+    expect(nudgePusher).toHaveBeenCalledTimes(1);
+  });
+
+  it('restart with unchanged model still kills, but writes no audit', () => {
+    seedAgentGroup('ag-1', 'Team');
+    seedUserWithRole('u-owner', 'owner', null);
+    seedBareSession('s-run', 'ag-1', 'running');
+
+    const result = updateAgentGroupModel({ id: 'ag-1', model: null, restart: true }, 'u-owner');
+    expect(result).toEqual({ id: 'ag-1', model: null, killed: 1 });
+    expect(killContainer).toHaveBeenCalledTimes(1);
+    expect(getRecentAudit(10)).toHaveLength(0);
+    expect(nudgePusher).toHaveBeenCalledTimes(1);
   });
 });
 
