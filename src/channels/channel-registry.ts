@@ -116,6 +116,11 @@ export function getChannelContainerConfig(name: string): ChannelRegistration['co
   return registry.get(name)?.containerConfig;
 }
 
+/** Get a channel's registration (factory + container config) by its registry name. */
+export function getChannelRegistration(name: string): ChannelRegistration | undefined {
+  return registry.get(name);
+}
+
 /**
  * Instantiate and set up all registered channel adapters.
  * Skips adapters that return null (missing credentials).

@@ -36,8 +36,15 @@ registerChannelAdapter('whatsapp-cloud', {
       appSecret: env.WHATSAPP_APP_SECRET,
       verifyToken: env.WHATSAPP_VERIFY_TOKEN,
     });
+    // `@chat-adapter/whatsapp` hardcodes name = 'whatsapp', which the bridge
+    // uses as channelType. Without a distinct instance the registry would key
+    // this bridge under 'whatsapp' and collide with the native Baileys adapter
+    // (src/channels/whatsapp.ts, also channelType 'whatsapp') — last-write-wins
+    // silently kills one channel. The instance key keeps them apart while
+    // channelType stays 'whatsapp' (the semantic platform key). See #2911.
     return createChatSdkBridge({
       adapter: whatsappAdapter,
+      instance: 'whatsapp-cloud',
       concurrency: 'concurrent',
       supportsThreads: false,
       defaults: WHATSAPP_CLOUD_DEFAULTS,
