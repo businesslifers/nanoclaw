@@ -758,7 +758,7 @@ diff --git a/dist/ui/layout.js b/dist/ui/layout.js
 index 36b957573fba3d5046e9b50f844aefb9fde486e8..f8284c8f0fcdd1d2e9635640cf87e65145b433c4 100644
 --- a/dist/ui/layout.js
 +++ b/dist/ui/layout.js
-@@ -2,172 +2,3538 @@
+@@ -2,172 +2,3544 @@
   * Shared HTML layout for dashboard pages.
   * Dark theme, nav sidebar, api() helper for authenticated fetch calls.
   */
@@ -1760,7 +1760,7 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..f8284c8f0fcdd1d2e9635640cf87e651
 +    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(232, 121, 249, 0.18);
 +    transform: translateY(-1px);
 +  }
-+  .agent-groups-v2 .ag-card-head { display: flex; align-items: flex-start; gap: 10px; position: relative; }
++  .agent-groups-v2 .ag-card-head { display: flex; align-items: flex-start; gap: 10px; }
 +  .agent-groups-v2 .ag-card-avatar {
 +    flex: 0 0 auto;
 +    width: 38px;
@@ -1789,9 +1789,15 @@ index 36b957573fba3d5046e9b50f844aefb9fde486e8..f8284c8f0fcdd1d2e9635640cf87e651
 +  .agent-groups-v2 .ag-card-tag-row .ag-tag { margin-left: 0; }
 +  .agent-groups-v2 .ag-card-model { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
 +  .agent-groups-v2 .ag-card-model .ag-model-name { margin-left: 2px; }
-+  .agent-groups-v2 .ag-card-menu-btn {
++  /* Button-sized relative wrapper so the ⋮ popover (top:100%) drops right
++     under the button, mirroring the list-view .ag-actions <td>. Anchoring to
++     .ag-card-head instead drops it below the full avatar-height head row. */
++  .agent-groups-v2 .ag-card-menu-wrap {
 +    flex: 0 0 auto;
 +    margin-left: auto;
++    position: relative;
++  }
++  .agent-groups-v2 .ag-card-menu-btn {
 +    margin-top: -4px;
 +    margin-right: -4px;
 +  }
@@ -4981,7 +4987,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +                '<span class="ag-card-model">' + badge(provider, providerColor) + ' <span class="ag-model-name">' + esc(model) + '</span></span>' +
 +              '</div>' +
 +            '</div>' +
-+            '<button class="ag-menu-btn ag-card-menu-btn" data-ag-menu="' + esc(g.id) + '" title="Actions" aria-label="Card actions">⋮</button>' +
++            '<span class="ag-card-menu-wrap"><button class="ag-menu-btn ag-card-menu-btn" data-ag-menu="' + esc(g.id) + '" title="Actions" aria-label="Card actions">⋮</button></span>' +
 +          '</div>' +
 +          '<div class="ag-card-stats">' +
 +            '<div class="ag-card-stat">' +
