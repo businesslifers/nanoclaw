@@ -322,7 +322,7 @@ export function buildMounts(
   // Session folder at /workspace (contains inbound.db, outbound.db, outbox/, .claude/)
   mounts.push({ hostPath: sessDir, containerPath: '/workspace', readonly: false });
 
-  // Agent group folder at /workspace/agent (RW for working files + CLAUDE.local.md)
+  // Agent group folder at /workspace/agent (RW for working files + shared memory)
   mounts.push({ hostPath: groupDir, containerPath: '/workspace/agent', readonly: false });
 
   // container.json — nested RO mount on top of RW group dir so the agent
@@ -334,8 +334,8 @@ export function buildMounts(
 
   // Composer-managed CLAUDE.md artifacts — nested RO mounts. These are
   // regenerated from the shared base + fragments on every spawn; any
-  // agent-side writes would be clobbered, so enforce read-only. Only
-  // CLAUDE.local.md (per-group memory) remains RW via the group-dir mount.
+  // agent-side writes would be clobbered, so enforce read-only. The shared
+  // memory tree and standing-instructions source remain RW via the group mount.
   // `.claude-shared.md` is a symlink whose target (`/app/CLAUDE.md`) is
   // already RO-mounted, so writes through it fail regardless — no need for
   // a nested mount there.

@@ -14,4 +14,8 @@ describe('CodexProvider', () => {
   it('accepts supported reasoning effort values', () => {
     expect(new CodexProvider({ effort: 'xhigh' })).toBeInstanceOf(CodexProvider);
   });
+
+  it('requires the shared memory hook before starting a query', () => {
+    expect(() => new CodexProvider({}).query({ prompt: 'hello', cwd: '/workspace/agent' })).toThrow(/not registered/);
+  });
 });

@@ -14,6 +14,14 @@ function log(msg: string): void {
 
 const INIT_TIMEOUT_MS = 30_000;
 
+export const CODEX_APP_SERVER_ARGS = ['--dangerously-bypass-hook-trust', 'app-server', '--listen', 'stdio://'] as const;
+
+export interface CodexMemorySessionHook {
+  readonly command: string;
+  readonly legacyCommands: readonly string[];
+  readonly sources: readonly string[];
+}
+
 export const STALE_THREAD_RE = /thread\s+not\s+found|unknown\s+thread|thread[_\s]id|no such thread/i;
 
 let nextRequestId = 1;
@@ -116,7 +124,9 @@ export interface TurnParams {
 }
 
 export function spawnCodexAppServer(): AppServer {
-  const args = ['app-server', '--listen', 'stdio://'];
+  // NanoClaw generates the hook config and has no interactive user available
+  // to approve hook trust inside the container.
+  const args = [...CODEX_APP_SERVER_ARGS];
   log(`Spawning: codex ${args.join(' ')}`);
 
   const proc = spawn('codex', args, {
@@ -261,7 +271,7 @@ export async function startOrResumeCodexThread(
   threadId: string | undefined,
   params: ThreadParams,
 ): Promise<string> {
-  const baseParams = {
+  const commonParams = {
     model: params.model,
     cwd: params.cwd,
     approvalPolicy: CODEX_APPROVAL_POLICY,
@@ -269,14 +279,13 @@ export async function startOrResumeCodexThread(
     baseInstructions: params.baseInstructions,
     developerInstructions: params.developerInstructions,
     personality: 'friendly',
-    sessionStartSource: 'startup',
     persistExtendedHistory: false,
   };
 
   if (threadId) {
     const resp = await sendCodexRequest(server, 'thread/resume', {
       threadId,
-      ...baseParams,
+      ...commonParams,
       excludeTurns: true,
     });
     if (!resp.error) return threadId;
@@ -287,7 +296,8 @@ export async function startOrResumeCodexThread(
   }
 
   const resp = await sendCodexRequest(server, 'thread/start', {
-    ...baseParams,
+    ...commonParams,
+    sessionStartSource: 'startup',
     experimentalRawEvents: false,
   });
   if (resp.error) throw new Error(`thread/start failed: ${resp.error.message}`);
@@ -372,11 +382,13 @@ export function attachCodexAutoApproval(server: AppServer): void {
 
 export function writeCodexConfigToml(
   servers: Record<string, CodexMcpServer>,
+  memorySessionHook: CodexMemorySessionHook,
   opts: { model?: string; effort?: string } = {},
 ): void {
   const codexConfigDir = path.join(process.env.HOME || '/home/node', '.codex');
   fs.mkdirSync(codexConfigDir, { recursive: true });
   const configTomlPath = path.join(codexConfigDir, 'config.toml');
+  const hooksJsonPath = path.join(codexConfigDir, 'hooks.json');
 
   // Instance-level defaults the app-server reads on startup; threads/turns inherit them.
   const lines: string[] = [
@@ -386,6 +398,16 @@ export function writeCodexConfigToml(
   ];
   if (opts.model) lines.push(`model = ${tomlBasicString(opts.model)}`);
   if (opts.effort) lines.push(`model_reasoning_effort = ${tomlBasicString(opts.effort)}`);
+  lines.push('');
+
+  // NanoClaw owns persistent memory across providers. Keep Codex's native
+  // memory disabled even if its defaults or a user-level config change.
+  lines.push('[features]');
+  lines.push('memories = false');
+  lines.push('');
+  lines.push('[memories]');
+  lines.push('use_memories = false');
+  lines.push('generate_memories = false');
   lines.push('');
 
   for (const [name, config] of Object.entries(servers)) {
@@ -404,6 +426,64 @@ export function writeCodexConfigToml(
   }
 
   fs.writeFileSync(configTomlPath, lines.join('\n'));
+  const hooksConfig = readHooksConfig(hooksJsonPath);
+  const hooks = objectProperty(hooksConfig, 'hooks');
+  const sessionStart = arrayProperty(hooks, 'SessionStart');
+
+  const memoryCommands = new Set([memorySessionHook.command, ...memorySessionHook.legacyCommands]);
+  const nextSessionStart = sessionStart
+    .map((entry) => removeNanoClawMemoryHooks(entry, memoryCommands))
+    .filter((entry) => entry !== undefined);
+  nextSessionStart.push({
+    matcher: memorySessionHook.sources.join('|'),
+    hooks: [{ type: 'command', command: memorySessionHook.command, timeout: 10 }],
+  });
+  hooks.SessionStart = nextSessionStart;
+  fs.writeFileSync(hooksJsonPath, JSON.stringify(hooksConfig, null, 2) + '\n');
+}
+
+function readHooksConfig(filePath: string): Record<string, unknown> {
+  if (!fs.existsSync(filePath)) return {};
+  const parsed: unknown = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  if (!isRecord(parsed)) {
+    throw new Error(`${filePath} must contain a JSON object`);
+  }
+  return parsed;
+}
+
+function objectProperty(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = parent[key];
+  if (value === undefined) {
+    const created: Record<string, unknown> = {};
+    parent[key] = created;
+    return created;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`Codex hooks config property '${key}' must be an object`);
+  }
+  return value;
+}
+
+function arrayProperty(parent: Record<string, unknown>, key: string): unknown[] {
+  const value = parent[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Codex hooks config property '${key}' must be an array`);
+  }
+  return value;
+}
+
+function removeNanoClawMemoryHooks(value: unknown, commands: ReadonlySet<string>): unknown {
+  if (!isRecord(value) || !Array.isArray(value.hooks)) return value;
+  const remaining = value.hooks.filter((hook) => {
+    if (!isRecord(hook)) return true;
+    return typeof hook.command !== 'string' || !commands.has(hook.command);
+  });
+  return remaining.length > 0 ? { ...value, hooks: remaining } : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function buildCodexProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

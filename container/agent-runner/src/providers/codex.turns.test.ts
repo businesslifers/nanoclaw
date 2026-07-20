@@ -7,10 +7,22 @@ import { CodexProvider, type CodexRuntimeDeps } from './codex.js';
 import type { AppServer, JsonRpcNotification, TurnParams } from './codex-app-server.js';
 import type { ProviderEvent } from './types.js';
 
+const MEMORY_SESSION_HOOK = {
+  command: 'bun /app/src/memory/hook.ts',
+  legacyCommands: ['bun /app/src/memory-hook.ts'],
+  sources: ['startup', 'clear', 'compact'],
+} as const;
+
+function createCodexProvider(...args: ConstructorParameters<typeof CodexProvider>): CodexProvider {
+  const provider = new CodexProvider(...args);
+  provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
+  return provider;
+}
+
 describe('CodexProvider active turns', () => {
   it('steers follow-ups into the active turn and yields liveness activity', async () => {
     const fake = createFakeCodexRuntime();
-    const provider = new CodexProvider({}, fake.runtime);
+    const provider = createCodexProvider({}, fake.runtime);
     const query = provider.query({ prompt: 'first prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 
@@ -34,7 +46,7 @@ describe('CodexProvider active turns', () => {
 
   it('queues follow-ups for the next turn when steering is rejected', async () => {
     const fake = createFakeCodexRuntime({ rejectSteer: true });
-    const provider = new CodexProvider({}, fake.runtime);
+    const provider = createCodexProvider({}, fake.runtime);
     const query = provider.query({ prompt: 'first prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 
@@ -62,7 +74,7 @@ describe('CodexProvider active turns', () => {
 
   it('queues a follow-up that races turn completion into a new turn, never steering the finished turn', async () => {
     const fake = createFakeCodexRuntime();
-    const provider = new CodexProvider({}, fake.runtime);
+    const provider = createCodexProvider({}, fake.runtime);
     const query = provider.query({ prompt: 'first prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 
@@ -93,7 +105,7 @@ describe('CodexProvider active turns', () => {
 
   it('interrupts the active turn and closes the stream on abort', async () => {
     const fake = createFakeCodexRuntime();
-    const provider = new CodexProvider({}, fake.runtime);
+    const provider = createCodexProvider({}, fake.runtime);
     const query = provider.query({ prompt: 'first prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 
@@ -111,7 +123,7 @@ describe('CodexProvider active turns', () => {
 
   it('threads the configured model and effort into the turn', async () => {
     const fake = createFakeCodexRuntime();
-    const provider = new CodexProvider({ model: 'gpt-5.5', effort: 'high' }, fake.runtime);
+    const provider = createCodexProvider({ model: 'gpt-5.5', effort: 'high' }, fake.runtime);
     const query = provider.query({ prompt: 'first prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 
@@ -134,7 +146,7 @@ describe('CodexProvider active turns', () => {
     process.env.CODEX_HOME = codexHome;
     try {
       const fake = createFakeCodexRuntime();
-      const provider = new CodexProvider({}, fake.runtime);
+      const provider = createCodexProvider({}, fake.runtime);
       const query = provider.query({ prompt: 'make an image', cwd: '/workspace/agent' });
       const events: ProviderEvent[] = [];
       const collect = collectEvents(query.events, events);
@@ -163,7 +175,7 @@ describe('CodexProvider active turns', () => {
 
   it('ends the turn immediately with the real cause when the app-server dies mid-turn', async () => {
     const fake = createFakeCodexRuntime();
-    const provider = new CodexProvider({}, fake.runtime);
+    const provider = createCodexProvider({}, fake.runtime);
     const query = provider.query({ prompt: 'prompt', cwd: '/workspace/agent' });
     const events: ProviderEvent[] = [];
 

@@ -5,11 +5,19 @@ import path from 'path';
 
 import {
   type AppServer,
+  CODEX_APP_SERVER_ARGS,
   attachCodexAutoApproval,
   buildCodexProcessEnv,
+  startOrResumeCodexThread,
   tomlBasicString,
   writeCodexConfigToml,
 } from './codex-app-server.js';
+
+const MEMORY_SESSION_HOOK = {
+  command: 'bun /app/src/memory/hook.ts',
+  legacyCommands: ['bun /app/src/memory-hook.ts'],
+  sources: ['startup', 'clear', 'compact'],
+} as const;
 
 let tmpHome: string | null = null;
 const originalHome = process.env.HOME;
@@ -43,6 +51,7 @@ describe('Codex config TOML', () => {
           env: { FOO: 'bar' },
         },
       },
+      MEMORY_SESSION_HOOK,
       { model: 'gpt-5', effort: 'medium' },
     );
 
@@ -52,6 +61,8 @@ describe('Codex config TOML', () => {
     expect(content).toContain('project_doc_max_bytes = 32768');
     expect(content).toContain('model = "gpt-5"');
     expect(content).toContain('model_reasoning_effort = "medium"');
+    expect(content).toContain('[features]\nmemories = false');
+    expect(content).toContain('[memories]\nuse_memories = false\ngenerate_memories = false');
     expect(content).not.toContain('[sandbox_workspace_write]');
     expect(content).not.toContain('writable_roots =');
     expect(content).toContain('[mcp_servers.nanoclaw]');
@@ -59,6 +70,82 @@ describe('Codex config TOML', () => {
     expect(content).toContain('args = ["run", "/app/src/mcp-tools/index.ts"]');
     expect(content).toContain('[mcp_servers.nanoclaw.env]');
     expect(content).toContain('FOO = "bar"');
+
+    const hooks = JSON.parse(fs.readFileSync(path.join(tmpHome, '.codex', 'hooks.json'), 'utf-8'));
+    expect(hooks.hooks.SessionStart).toEqual([
+      {
+        matcher: 'startup|clear|compact',
+        hooks: [{ type: 'command', command: 'bun /app/src/memory/hook.ts', timeout: 10 }],
+      },
+    ]);
+    expect(CODEX_APP_SERVER_ARGS).toContain('--dangerously-bypass-hook-trust');
+  });
+
+  it('preserves unrelated hooks and refreshes only the NanoClaw memory entry', () => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+    process.env.HOME = tmpHome;
+    const hooksPath = path.join(tmpHome, '.codex', 'hooks.json');
+    fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
+    fs.writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          Stop: [{ hooks: [{ type: 'command', command: 'custom-stop' }] }],
+          SessionStart: [
+            { matcher: 'resume', hooks: [{ type: 'command', command: 'custom-resume' }] },
+            {
+              matcher: '.*',
+              hooks: [
+                { type: 'command', command: 'bun /app/src/memory-hook.ts' },
+                { type: 'command', command: 'custom-start' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    writeCodexConfigToml({}, MEMORY_SESSION_HOOK);
+    writeCodexConfigToml({}, MEMORY_SESSION_HOOK);
+
+    const config = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
+    expect(config.version).toBe(1);
+    expect(config.hooks.Stop).toHaveLength(1);
+    expect(config.hooks.SessionStart).toContainEqual({
+      matcher: '.*',
+      hooks: [{ type: 'command', command: 'custom-start' }],
+    });
+    expect(
+      config.hooks.SessionStart.filter((entry: { hooks?: Array<{ command?: string }> }) =>
+        entry.hooks?.some((hook) => hook.command === 'bun /app/src/memory/hook.ts'),
+      ),
+    ).toEqual([
+      {
+        matcher: 'startup|clear|compact',
+        hooks: [{ type: 'command', command: 'bun /app/src/memory/hook.ts', timeout: 10 }],
+      },
+    ]);
+  });
+});
+
+describe('Codex thread SessionStart source', () => {
+  it('sets startup only for a new thread', async () => {
+    const { server, requests } = autoRespondingServer();
+
+    await startOrResumeCodexThread(server, undefined, { cwd: '/workspace/agent' });
+
+    expect(requests[0].method).toBe('thread/start');
+    expect(requests[0].params.sessionStartSource).toBe('startup');
+  });
+
+  it('does not send startup when resuming', async () => {
+    const { server, requests } = autoRespondingServer();
+
+    await startOrResumeCodexThread(server, 'thread-existing', { cwd: '/workspace/agent' });
+
+    expect(requests[0].method).toBe('thread/resume');
+    expect(requests[0].params.sessionStartSource).toBeUndefined();
   });
 });
 
@@ -89,7 +176,11 @@ describe('Codex auto-approval', () => {
     const { server, writes } = fakeServer();
     attachCodexAutoApproval(server);
 
-    server.serverRequestHandlers[0]({ id: 2, method: 'item/fileChange/requestApproval', params: { grantRoot: '/etc' } });
+    server.serverRequestHandlers[0]({
+      id: 2,
+      method: 'item/fileChange/requestApproval',
+      params: { grantRoot: '/etc' },
+    });
     server.serverRequestHandlers[0]({
       id: 3,
       method: 'item/commandExecution/requestApproval',
@@ -109,7 +200,11 @@ describe('Codex auto-approval', () => {
       method: 'applyPatchApproval',
       params: { fileChanges: { '/etc/passwd': {} } },
     });
-    server.serverRequestHandlers[0]({ id: 5, method: 'execCommandApproval', params: { command: 'rm -rf /', cwd: '/' } });
+    server.serverRequestHandlers[0]({
+      id: 5,
+      method: 'execCommandApproval',
+      params: { command: 'rm -rf /', cwd: '/' },
+    });
 
     expect(JSON.parse(writes[0]).result).toEqual({ decision: 'approved' });
     expect(JSON.parse(writes[1]).result).toEqual({ decision: 'approved' });
@@ -159,4 +254,30 @@ function fakeServer(): { server: AppServer; writes: string[] } {
     serverRequestHandlers: [],
   } as unknown as AppServer;
   return { server, writes };
+}
+
+function autoRespondingServer(): {
+  server: AppServer;
+  requests: Array<{ id: number; method: string; params: Record<string, unknown> }>;
+} {
+  const requests: Array<{ id: number; method: string; params: Record<string, unknown> }> = [];
+  let server: AppServer;
+  server = {
+    process: {
+      stdin: {
+        write: (line: string) => {
+          const request = JSON.parse(line) as { id: number; method: string; params: Record<string, unknown> };
+          requests.push(request);
+          const threadId = (request.params.threadId as string | undefined) ?? 'thread-new';
+          server.pending.get(request.id)?.resolve({ id: request.id, result: { thread: { id: threadId } } });
+        },
+      },
+    },
+    readline: { close: () => {} },
+    pending: new Map(),
+    notificationHandlers: [],
+    exitHandlers: [],
+    serverRequestHandlers: [],
+  } as unknown as AppServer;
+  return { server, requests };
 }

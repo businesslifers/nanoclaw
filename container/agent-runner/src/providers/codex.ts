@@ -14,6 +14,7 @@ import type {
 import { archiveProviderExchange } from './exchange-archive.js';
 import {
   type AppServer,
+  type CodexMemorySessionHook,
   type CodexReasoningEffort,
   type JsonRpcNotification,
   STALE_THREAD_RE,
@@ -74,9 +75,6 @@ function normalizeEffort(effort: string | undefined): CodexReasoningEffort | und
 
 export class CodexProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
-  // Codex has no native NanoClaw memory — opt in to the runner's persistent
-  // memory/ scaffold (see memory-scaffold.ts).
-  readonly usesMemoryScaffold = true;
   // The app-server keeps history server-side; there is no on-disk transcript,
   // so the provider persists each exchange itself into `conversations/`
   // (see exchange-archive.ts). The poll-loop reports exchanges through this
@@ -95,6 +93,7 @@ export class CodexProvider implements AgentProvider {
   private readonly model?: string;
   private readonly effort?: CodexReasoningEffort;
   private readonly runtime: CodexRuntimeDeps;
+  private memorySessionHook?: CodexMemorySessionHook;
 
   constructor(options: ProviderOptions = {}, runtime: CodexRuntimeDeps = defaultCodexRuntimeDeps) {
     this.mcpServers = options.mcpServers ?? {};
@@ -103,12 +102,18 @@ export class CodexProvider implements AgentProvider {
     this.effort = normalizeEffort(options.effort);
   }
 
+  registerMemorySessionHook(hook: CodexMemorySessionHook): void {
+    this.memorySessionHook = hook;
+  }
+
   isSessionInvalid(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
     return STALE_THREAD_RE.test(msg);
   }
 
   query(input: QueryInput): AgentQuery {
+    if (!this.memorySessionHook) throw new Error('Codex memory session hook was not registered');
+    const memorySessionHook = this.memorySessionHook;
     const pending: string[] = [input.prompt];
     let waiting: (() => void) | null = null;
     let ended = false;
@@ -138,7 +143,10 @@ export class CodexProvider implements AgentProvider {
     const self = this;
 
     async function* gen(): AsyncGenerator<ProviderEvent> {
-      self.runtime.writeCodexConfigToml(self.mcpServers, { model: self.model, effort: self.effort });
+      self.runtime.writeCodexConfigToml(self.mcpServers, memorySessionHook, {
+        model: self.model,
+        effort: self.effort,
+      });
       const server = self.runtime.spawnCodexAppServer();
       activeServer = server;
       self.runtime.attachCodexAutoApproval(server);
