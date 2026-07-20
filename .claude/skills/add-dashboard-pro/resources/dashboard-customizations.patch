@@ -9714,10 +9714,10 @@ index 0000000000000000000000000000000000000000..69e3f977505a7130066b917c9d753cb3
 +}
 diff --git a/dist/ui/pages/work-items.js b/dist/ui/pages/work-items.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a7190bf984b
+index 0000000000000000000000000000000000000000..71b8c8a46920bfe77568412fdec2c13ea41f7d66
 --- /dev/null
 +++ b/dist/ui/pages/work-items.js
-@@ -0,0 +1,1028 @@
+@@ -0,0 +1,1048 @@
 +/**
 + * Work Items page — one canonical store, three switchable views:
 + *   Kanban   — columns = the fixed status enum, click-to-move (touch-first)
@@ -9833,6 +9833,11 @@ index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a71
 +    .wi-v2 .wi-card-top { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
 +    .wi-v2 .wi-card-title { font-size: 12.5px; color: #f1f5f9; font-weight: 600; line-height: 1.35; word-break: break-word; }
 +    .wi-v2 .wi-card-detail { font-size: 11px; color: #94a3b8; line-height: 1.4; word-break: break-word; }
++    .wi-v2 .wi-detail-toggle {
++      background: transparent; border: 0; color: #64748b; cursor: pointer; font-size: 9px;
++      padding: 0 3px; margin-left: 2px; font-family: inherit; vertical-align: middle; line-height: 1;
++    }
++    .wi-v2 .wi-detail-toggle:hover { color: #2dd4bf; }
 +    .wi-v2 .wi-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 +    .wi-v2 .wi-move-btn {
 +      background: transparent; border: 1px solid #1e293b; color: #64748b; border-radius: 5px; font-size: 10px;
@@ -9974,7 +9979,8 @@ index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a71
 +        search: '',
 +        team: localStorage.getItem('wi.team') || '',
 +        kinds: {},
-+        showClosed: localStorage.getItem('wi.showClosed') !== '0',
++        showClosed: localStorage.getItem('wi.showClosed') === '1', // default off; terminal hidden until toggled
++        expanded: {},   // Kanban card id -> true when its description is expanded (collapsed by default)
 +        calOffset: 0,   // weeks relative to current week block
 +        drawer: null    // { mode: 'create'|'edit', id?, saving? }
 +      };
@@ -10181,8 +10187,13 @@ index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a71
 +      function cardHtml(item) {
 +        var bits = ['<div class="wi-card" draggable="true" data-id="' + esc(item.id) + '">'];
 +        bits.push('<div class="wi-card-top">' + kindBadge(item) + '<button type="button" class="wi-move-btn" data-move="' + esc(item.id) + '">move &#9662;</button></div>');
-+        bits.push('<div class="wi-card-title">' + esc(item.title) + '</div>');
-+        if (item.statusDetail) bits.push('<div class="wi-card-detail">' + esc(item.statusDetail) + '</div>');
++        var hasDetail = !!item.statusDetail;
++        var open = hasDetail && !!state.expanded[item.id];
++        bits.push('<div class="wi-card-title">' + esc(item.title) +
++          (hasDetail ? ' <button type="button" class="wi-detail-toggle" data-detail="' + esc(item.id) +
++            '" aria-expanded="' + (open ? 'true' : 'false') + '" title="Toggle description">' +
++            (open ? '&#9652;' : '&#9662;') + '</button>' : '') + '</div>');
++        if (hasDetail) bits.push('<div class="wi-card-detail"' + (open ? '' : ' hidden') + '>' + esc(item.statusDetail) + '</div>');
 +        if (item.parentTitle) bits.push('<div class="wi-parent-crumb">&#8627; <span class="wi-crumb-link" data-open="' + esc(item.parentId) + '">' + esc(item.parentTitle) + '</span></div>');
 +        var foot = [whoHtml(item)];
 +        var right = [];
@@ -10295,7 +10306,7 @@ index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a71
 +      function bindView(mount) {
 +        Array.prototype.forEach.call(mount.querySelectorAll('[data-id]'), function (el) {
 +          el.addEventListener('click', function (ev) {
-+            if (ev.target.closest('.wi-move-btn') || ev.target.closest('.wi-crumb-link')) return;
++            if (ev.target.closest('.wi-move-btn') || ev.target.closest('.wi-crumb-link') || ev.target.closest('.wi-detail-toggle')) return;
 +            openDrawer({ mode: 'edit', id: el.getAttribute('data-id') });
 +          });
 +        });
@@ -10310,6 +10321,15 @@ index 0000000000000000000000000000000000000000..b804b383557b1aedc83fede21e405a71
 +          btn.addEventListener('click', function (ev) {
 +            ev.stopPropagation();
 +            showMoveMenu(btn, btn.getAttribute('data-move'));
++          });
++        });
++        // per-card description toggle: collapsed by default to keep the board compact
++        Array.prototype.forEach.call(mount.querySelectorAll('.wi-detail-toggle'), function (btn) {
++          btn.addEventListener('click', function (ev) {
++            ev.stopPropagation();
++            var id = btn.getAttribute('data-detail');
++            state.expanded[id] = !state.expanded[id];
++            renderView();
 +          });
 +        });
 +        // native drag layered on top as a desktop nicety — same moveItem() path.

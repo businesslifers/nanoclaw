@@ -15,7 +15,7 @@ import { getAllUsers } from './modules/permissions/db/users.js';
 import { log } from './log.js';
 
 /** Terminal (done/cancelled) items older than this drop out of the snapshot. */
-const SNAPSHOT_TERMINAL_WINDOW_DAYS = 60;
+const SNAPSHOT_TERMINAL_WINDOW_DAYS = 21;
 /** Notes carried per item in the snapshot (newest last). */
 const SNAPSHOT_NOTES_PER_ITEM = 30;
 
