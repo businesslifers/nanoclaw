@@ -9805,7 +9805,7 @@ index 0000000000000000000000000000000000000000..71b8c8a46920bfe77568412fdec2c13e
 +    .wi-v2 .wi-empty { color: #64748b; font-size: 12.5px; padding: 32px; text-align: center; }
 +
 +    /* ── Kanban ── */
-+    .wi-v2 .wi-board { display: grid; grid-template-columns: repeat(5, minmax(230px, 1fr)); gap: 12px; align-items: start; overflow-x: auto; }
++    .wi-v2 .wi-board { display: grid; grid-template-columns: repeat(var(--wi-cols, 5), minmax(230px, 1fr)); gap: 12px; align-items: start; overflow-x: auto; }
 +    .wi-v2 .wi-col { background: #0b1222; border: 1px solid #17203a; border-radius: 10px; min-height: 120px; display: flex; flex-direction: column; }
 +    .wi-v2 .wi-col.drag-over { border-color: rgba(45, 212, 191, 0.5); background: rgba(45, 212, 191, 0.04); }
 +    .wi-v2 .wi-col-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #17203a; }
@@ -9948,7 +9948,7 @@ index 0000000000000000000000000000000000000000..71b8c8a46920bfe77568412fdec2c13e
 +    .wi-v2 .wi-kv .k { color: #64748b; }
 +    .wi-v2 .wi-kv .v { color: #cbd5e1; word-break: break-all; }
 +    .wi-v2 .wi-kv .v a { color: #67e8f9; }
-+    @media (max-width: 1100px) { .wi-v2 .wi-board { grid-template-columns: repeat(5, 230px); } }
++    @media (max-width: 1100px) { .wi-v2 .wi-board { grid-template-columns: repeat(var(--wi-cols, 5), 230px); } }
 +    </style>
 +    <script>
 +    (function () {
@@ -10206,7 +10206,7 @@ index 0000000000000000000000000000000000000000..71b8c8a46920bfe77568412fdec2c13e
 +
 +      function kanbanHtml(items) {
 +        var cols = STATUSES.filter(function (s) { return state.showClosed || !isTerminal(s.key); });
-+        return '<div class="wi-board">' + cols.map(function (s) {
++        return '<div class="wi-board" style="--wi-cols:' + cols.length + '">' + cols.map(function (s) {
 +          var colItems = items.filter(function (i) { return i.status === s.key; });
 +          colItems.sort(function (a, b) { return (dayKey(a.dueAt) || '9999') < (dayKey(b.dueAt) || '9999') ? -1 : 1; });
 +          return '<div class="wi-col" data-status="' + s.key + '">' +
