@@ -20,10 +20,14 @@ import { listWikis } from './wiki/discovery.js';
 // API billing; useful for capacity planning and spotting runaway usage.
 //
 // Values below are published public rates (per 1M tokens):
-//   - Anthropic Claude 4.x (claude.ai subscription OR API):
-//       opus   — in 15,   out 75,   cache-read 1.5,   cache-write 18.75
+//   - Anthropic Claude (claude.ai subscription OR API):
+//       opus   — in 5,    out 25,   cache-read 0.5,   cache-write 6.25
+//       fable  — in 10,   out 50,   cache-read 1,     cache-write 12.5
 //       sonnet — in 3,    out 15,   cache-read 0.3,   cache-write 3.75
 //       haiku  — in 1,    out 5,    cache-read 0.1,   cache-write 1.25
+//     The opus rate halved at Opus 4.5: 4.5 through 5 all bill at 5/25, while
+//     Opus 4.1 and older stayed at 15/75 — hence the separate 'opus-legacy'
+//     entry, which only historical aggregates can still hit.
 //   - Claude Sonnet 5 (`claude-sonnet-5`): introductory pricing through
 //     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
 //     the standard sonnet rate above after that date; update the 'sonnet-5'
@@ -34,7 +38,9 @@ import { listWikis } from './wiki/discovery.js';
 //     OpenAI doesn't charge a separate cache-creation rate; caching is
 //     automatic and just discounts reads, so cacheWrite mirrors input.
 const PRICING = {
-  opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  opus: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  'opus-legacy': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  fable: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
@@ -44,7 +50,10 @@ const PRICING = {
 
 function modelFamily(model: string): keyof typeof PRICING | null {
   const m = (model || '').toLowerCase();
-  if (m.includes('opus')) return 'opus';
+  if (m.includes('fable') || m.includes('mythos')) return 'fable';
+  // Opus 4.5 onward (incl. the bare `opus` alias, which the SDK resolves to a
+  // 4.8+ id) bills at 5/25; Opus 4.1, 4.0 and Opus 3 billed at 15/75.
+  if (m.includes('opus')) return /opus-(3|4-0|4-1)|claude-3-opus|opus-4-2025|opus-4$/.test(m) ? 'opus-legacy' : 'opus';
   if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
@@ -71,7 +80,7 @@ interface TokenBag {
  * per-request context from these aggregated bags. Close enough for an
  * at-a-glance figure.
  */
-function computeCostUsd(model: string, tokens: TokenBag): number {
+export function computeCostUsd(model: string, tokens: TokenBag): number {
   const family = modelFamily(model);
   if (!family) return 0;
   const p = PRICING[family];
