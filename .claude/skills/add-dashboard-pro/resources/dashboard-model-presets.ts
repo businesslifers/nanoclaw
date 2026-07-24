@@ -4,12 +4,13 @@
  * Claude presets are two groups. The bare aliases (opus/sonnet/haiku/fable,
  * plus the [1m] variants) are agent-sdk aliases resolved at container spawn
  * by the baked SDK's alias table, so they float to whatever that table says
- * — but only as far as the *image's* SDK: on claude-agent-sdk 0.3.197 `opus`
- * still resolves to claude-opus-4-8, so an alias lags a model generation
- * until the image is rebuilt on a newer SDK. The `claude-*` entries are
- * explicit ids for the current generation, which the host passes through
- * opaquely — that's the only way to pin a model the baked alias table
- * doesn't reach yet (Opus 5). Refresh this list on each model release.
+ * — but only as far as the *image's* SDK: an alias lags a model generation
+ * until the image is rebuilt on an SDK that knows the new id (claude-opus-5
+ * first ships in 0.3.219; on the 0.3.197 image that preceded it `opus` still
+ * resolved to claude-opus-4-8). The `claude-*` entries are explicit ids for
+ * the current generation, which the host passes through opaquely — use them
+ * to pin a model rather than float with the alias, or to reach one the baked
+ * table doesn't know yet. Refresh this list on each model release.
  * Codex slugs are concrete model ids whose
  * availability is server-side and changes without any CLI update (gpt-5.5
  * appeared only in the live catalog, not the bundled one), so the codex
