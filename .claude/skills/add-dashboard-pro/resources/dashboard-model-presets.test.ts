@@ -93,7 +93,7 @@ describe('getModelPresets', () => {
     // First call: cache empty → fallback served, refresh kicked off (if a
     // codex bin is resolvable on this machine; otherwise fallback is stamped).
     const first = getModelPresets('codex');
-    expect(first).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
+    expect(first).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
 
     if (captured) {
       captured(null, LIVE_CATALOG, '');
@@ -112,7 +112,14 @@ describe('getModelPresets', () => {
     if (!captured) return; // no codex bin on this machine — fallback path already covered above
 
     captured(new Error('boom'), '', '');
-    expect(getModelPresets('codex')).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
+    expect(getModelPresets('codex')).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ]);
   });
 });
 

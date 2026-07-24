@@ -44,7 +44,11 @@ const CLAUDE_PRESETS = [
   'claude-fable-5',
   'claude-haiku-4-5',
 ];
-const CODEX_FALLBACK = ['gpt-5.4', 'gpt-5.4-mini'];
+// Mirrors the list-visible slice of `codex debug models` as of 2026-07-24,
+// in catalog-priority order. Only ever served when the codex bin can't be
+// found or the call fails — a successful refresh replaces it wholesale, so
+// this going stale degrades the dropdown, never the stored value.
+const CODEX_FALLBACK = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
 
 // Effort vocab is per-provider and stable (an SDK/CLI enum, not a server-side
 // catalog), so static lists don't go stale the way codex model slugs do.

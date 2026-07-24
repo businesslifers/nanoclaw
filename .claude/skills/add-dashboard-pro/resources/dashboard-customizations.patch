@@ -5415,7 +5415,7 @@ index 0c33db833aafdcf9d7292c670bad41fbf8bcc1d7..4e91521c526dfe1b0e8014d6a747a074
 +    // table is only the fallback for snapshots that predate that field.
 +    var MODEL_PRESETS = {
 +      claude: ['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-haiku-4-5'],
-+      codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.5']
++      codex: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']
 +    };
 +    // Effort vocab per provider (agent-sdk EffortLevel / codex model_reasoning_effort).
 +    // Static fallback only — the snapshot supplies per-group lists via data-effort-presets.
