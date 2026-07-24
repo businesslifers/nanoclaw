@@ -61,8 +61,19 @@ describe('parseCodexModelCatalog', () => {
 });
 
 describe('getModelPresets', () => {
-  it('claude presets are the floating SDK aliases incl. fable and [1m] variants', () => {
-    expect(getModelPresets('claude')).toEqual(['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]']);
+  it('claude presets are the floating SDK aliases plus explicit current-generation ids', () => {
+    expect(getModelPresets('claude')).toEqual([
+      'opus',
+      'sonnet',
+      'haiku',
+      'fable',
+      'opus[1m]',
+      'sonnet[1m]',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-fable-5',
+      'claude-haiku-4-5',
+    ]);
     expect(getModelPresets(null)).toEqual(getModelPresets('claude'));
     expect(getModelPresets('CLAUDE')).toEqual(getModelPresets('claude'));
   });

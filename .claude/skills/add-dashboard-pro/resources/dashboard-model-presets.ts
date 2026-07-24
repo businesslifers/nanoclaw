@@ -1,9 +1,16 @@
 /**
  * Provider-aware model preset lists for the dashboard's model-edit dropdown.
  *
- * Claude presets are agent-sdk aliases — they float to the newest model per
- * family at container spawn (sonnet → claude-sonnet-5 etc.), so a static
- * alias list never goes stale. Codex slugs are concrete model ids whose
+ * Claude presets are two groups. The bare aliases (opus/sonnet/haiku/fable,
+ * plus the [1m] variants) are agent-sdk aliases resolved at container spawn
+ * by the baked SDK's alias table, so they float to whatever that table says
+ * — but only as far as the *image's* SDK: on claude-agent-sdk 0.3.197 `opus`
+ * still resolves to claude-opus-4-8, so an alias lags a model generation
+ * until the image is rebuilt on a newer SDK. The `claude-*` entries are
+ * explicit ids for the current generation, which the host passes through
+ * opaquely — that's the only way to pin a model the baked alias table
+ * doesn't reach yet (Opus 5). Refresh this list on each model release.
+ * Codex slugs are concrete model ids whose
  * availability is server-side and changes without any CLI update (gpt-5.5
  * appeared only in the live catalog, not the bundled one), so the codex
  * list is refreshed from `codex debug models` — the same catalog the codex
@@ -25,7 +32,18 @@ import path from 'path';
 
 import { log } from './log.js';
 
-const CLAUDE_PRESETS = ['opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'sonnet[1m]'];
+const CLAUDE_PRESETS = [
+  'opus',
+  'sonnet',
+  'haiku',
+  'fable',
+  'opus[1m]',
+  'sonnet[1m]',
+  'claude-opus-5',
+  'claude-sonnet-5',
+  'claude-fable-5',
+  'claude-haiku-4-5',
+];
 const CODEX_FALLBACK = ['gpt-5.4', 'gpt-5.4-mini'];
 
 // Effort vocab is per-provider and stable (an SDK/CLI enum, not a server-side
