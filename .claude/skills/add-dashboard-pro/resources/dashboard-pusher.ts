@@ -32,11 +32,21 @@ import { listWikis } from './wiki/discovery.js';
 //     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
 //     the standard sonnet rate above after that date; update the 'sonnet-5'
 //     entry then (platform.claude.com/docs/en/about-claude/pricing#claude-sonnet-5-introductory-pricing).
-//   - OpenAI gpt-5 family (ChatGPT Plus subscription OR API):
-//       gpt-5.4      — in 1.25, out 10,   cache-read 0.125, cache-write 1.25
-//       gpt-5.4-mini — in 0.25, out 2,    cache-read 0.025, cache-write 0.25
+//   - OpenAI gpt-5 family (ChatGPT Plus subscription OR API), from
+//     developers.openai.com/api/docs/pricing:
+//       gpt-5.6-sol   — in 5,    out 30,   cache-read 0.5
+//       gpt-5.6-terra — in 2.5,  out 15,   cache-read 0.25
+//       gpt-5.6-luna  — in 1,    out 6,    cache-read 0.1
+//       gpt-5.5       — in 5,    out 30,   cache-read 0.5
+//       gpt-5.4       — in 2.5,  out 15,   cache-read 0.25
+//       gpt-5.4-mini  — in 0.75, out 4.5,  cache-read 0.075
+//       gpt-5.4-nano  — in 0.2,  out 1.25, cache-read 0.02
+//       gpt-5.3-codex — in 1.75, out 14,   cache-read 0.175
 //     OpenAI doesn't charge a separate cache-creation rate; caching is
 //     automatic and just discounts reads, so cacheWrite mirrors input.
+//     Long-context surcharges (2x input / 1.5x output above 272K on the
+//     gpt-5.5+ tiers) aren't modelled, same as Anthropic's — the aggregated
+//     bags can't be split back into per-request context sizes.
 const PRICING = {
   opus: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   'opus-legacy': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
@@ -44,8 +54,14 @@ const PRICING = {
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  'gpt-5.4': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
-  'gpt-5.4-mini': { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0.25 },
+  'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
+  'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
+  'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
+  'gpt-5.5': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
+  'gpt-5.4': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
+  'gpt-5.4-mini': { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0.75 },
+  'gpt-5.4-nano': { input: 0.2, output: 1.25, cacheRead: 0.02, cacheWrite: 0.2 },
+  'gpt-5.3-codex': { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
 } as const;
 
 function modelFamily(model: string): keyof typeof PRICING | null {
@@ -57,7 +73,15 @@ function modelFamily(model: string): keyof typeof PRICING | null {
   if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
+  if (m.includes('gpt-5.6-sol')) return 'gpt-5.6-sol';
+  if (m.includes('gpt-5.6-terra')) return 'gpt-5.6-terra';
+  if (m.includes('gpt-5.6-luna')) return 'gpt-5.6-luna';
+  if (m.includes('gpt-5.5')) return 'gpt-5.5';
+  if (m.includes('5.3-codex')) return 'gpt-5.3-codex';
+  if (m.includes('gpt-5.4-nano') || m.includes('gpt-5-nano')) return 'gpt-5.4-nano';
   if (m.includes('gpt-5.4-mini') || m.includes('gpt-5-mini') || m.includes('gpt-5.4mini')) return 'gpt-5.4-mini';
+  // Anything else in the gpt-5 line falls back to the mid tier rather than
+  // costing as 0 — a new slug is more likely to be near gpt-5.4 than free.
   if (m.includes('gpt-5.4') || m.includes('gpt-5')) return 'gpt-5.4';
   return null;
 }
