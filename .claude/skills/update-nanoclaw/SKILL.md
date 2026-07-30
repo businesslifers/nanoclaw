@@ -211,8 +211,20 @@ Check which areas changed to determine what to validate:
 - Check: `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit`
 - If this fails because bun types are missing (`Cannot find type definition file for 'bun'`), skip with a note — type errors will surface at container runtime instead
 
-**Container image rebuild** (only if any `container/` files are in CHANGED_FILES):
-- `./container/build.sh`
+**Container image** (only if any `container/` files are in CHANGED_FILES, or the `agent-image` pin moved):
+
+Which command depends on where this install gets its image — check `.env` for `NANOCLAW_HARDENED_IMAGE=true`.
+
+- **Builds locally** (the default; flag absent or not `true`): `./container/build.sh`
+- **Pulls a pinned image** (flag is `true`): `./container/build.sh pull`. Never the bare form — it exits `3` on a pinned install rather than silently replacing the pulled bytes with a local build.
+
+**On a fork with a customized `container/Dockerfile`, confirm the flag is absent before doing anything else** — `grep -c NANOCLAW_HARDENED_IMAGE .env` returning `0` is the expected state and means the local-build path stays. It matters because these installs bake their own tooling (rtk, codegraph, impeccable, the `ncl` wrapper) that no published image carries, so a `pull` would silently replace the image with one missing all of it. Where the flag is absent, `./container/build.sh` bare is the only correct command, and the `agent-image` pin in `versions.json` is inert — a pin move owes nothing. Do not set the flag to adopt the pinned path without first checking what the Dockerfile adds.
+
+A pinned install needs `pull` in either of two cases, so run it if either holds:
+- `git diff <backup-tag-from-step-1>..HEAD -- versions.json` shows the `agent-image` value changed. A new image was published; nothing re-pulls on its own.
+- Any `container/` file changed, `container/agent-runner/bun.lock` included.
+
+If `pull` refuses with a lockfile mismatch, that is the guard working, not a bug: the update moved `container/agent-runner/bun.lock` and no image has been published for the new lockfile yet. `/app/src` is bind-mounted from this checkout at spawn, so pairing the old image with the new source dies as a missing module inside a `--rm` container whose logs are discarded. Tell the user and offer the two real options — wait for a published image matching this checkout, or switch this install to local builds with `./container/build.sh build`.
 
 If build fails:
 - Show the error.
@@ -243,12 +255,15 @@ If one or more `[BREAKING]` lines are found:
 - Display a warning header to the user: "This update includes breaking changes that may require action:"
 - For each breaking change, display the full description.
 - Collect all skill names referenced in the breaking change entries (the `/<skill-name>` part).
+- Initialize an unresolved-migrations list with every referenced skill. Remove a
+  skill only after it completes successfully.
 - Use AskUserQuestion to ask the user which migration skills they want to run now. Options:
-  - One option per referenced skill (e.g., "Run /add-whatsapp to re-add WhatsApp channel")
+  - One recommended option per referenced skill (e.g., "Run /add-whatsapp (Recommended)")
   - "Skip — I'll handle these manually"
 - Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.
 - For each skill the user selects, invoke it using the Skill tool.
-- After all selected skills complete (or if user chose Skip), proceed to Step 7.
+- Keep every skipped, failed, or incomplete skill in the unresolved list, then
+  proceed to Step 7.
 
 # Step 7: Skill updates (part of updating NanoClaw)
 
@@ -332,7 +347,21 @@ Show:
 - Upstream HEAD: `git rev-parse --short upstream/$UPSTREAM_BRANCH`
 - Conflicts resolved (list files, if any)
 - Breaking changes applied (list skills run, if any)
+- Unresolved breaking migrations (list skipped, failed, or incomplete skills)
 - Remaining local diff vs upstream: `git diff --name-only upstream/$UPSTREAM_BRANCH..HEAD`
+
+If unresolved migrations remain, explain plainly that the code update succeeded
+but affected features may ignore old state until those migrations run. Use
+AskUserQuestion before showing restart commands:
+
+- **Run unresolved migrations (Recommended):** invoke each unresolved skill,
+  removing it from the list only after successful completion.
+- **Restart anyway:** continue only with explicit confirmation and repeat the
+  unresolved skill names in the final warning.
+
+If a retried migration remains unresolved, ask again. Do not show restart
+commands until the unresolved list is empty or the user explicitly chooses
+Restart anyway.
 
 Tell the user:
 - To rollback: `git reset --hard <backup-tag-from-step-1>`
