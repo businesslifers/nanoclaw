@@ -733,9 +733,9 @@ Symptom: the agent's `ls /workspace/agent/credentials/` correctly shows the live
 #### Step 1: Restart the container (always)
 
 ```bash
-docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.ID}}' | xargs -r docker stop
+docker ps --filter "label=nanoclaw-group-folder=$V2_FOLDER" --format '{{.ID}}' | xargs -r docker stop
 # lanes too:
-docker ps --filter "name=nanoclaw-v2-$V2_FOLDER-" --format '{{.ID}}' | xargs -r docker stop
+docker ps --filter "label=nanoclaw-group-folder=$V2_FOLDER" --format '{{.ID}}' | xargs -r docker stop
 ```
 
 The next inbound message spawns a new container and reloads the role spec. `.mjs` and other scripts re-read on each `node ...` invocation, so they don't need a session restart — only role specs and persistent prompts do.
@@ -1022,7 +1022,7 @@ for (const m of out.prepare('SELECT seq, kind, substr(content,1,200) AS content_
 
 Real columns in current trunk: `messages_in.{seq,kind,status,content,timestamp,...}` and `messages_out.{seq,kind,content,timestamp,...}` — `content` is JSON-stringified (`{"text":"..."}`). Don't try `body` or `processing_ack` as columns; they don't exist on these tables (`processing_ack` is a sibling table on `inbound.db`, not a column).
 
-Reading: an inbound row with no matching outbound after ~10s usually means the container crashed silently. `docker ps --filter name=nanoclaw-v2-$V2_FOLDER` and `docker logs <name>` while the container's still up.
+Reading: an inbound row with no matching outbound after ~10s usually means the container crashed silently. `docker ps --filter label=nanoclaw-group-folder=$V2_FOLDER` and `docker logs <name>` while the container's still up.
 
 ### 10b. Credential mount
 
@@ -1032,7 +1032,7 @@ Ask the agent: "list the files under /workspace/extra/" — confirm it sees the 
 
 Sub-agent path: ask the parent to use a sub-agent ("have <name> do <task>") and confirm agent-runner logs show a Task-tool call with `subagent_type=<name>`.
 
-Lane path: ask the parent to delegate ("send a brief to <name>: <task>") and confirm a NEW container spawns for the lane (separate `nanoclaw-v2-<lane>-...` in `docker ps` / `container ls`), then a reply comes back to the parent.
+Lane path: ask the parent to delegate ("send a brief to <name>: <task>") and confirm a NEW container spawns for the lane (a separate container whose `nanoclaw-group-folder` label is the lane's folder — runtime names are key-derived `ncl-…`, so filter by label, not by name), then a reply comes back to the parent.
 
 ### 10d. Wiki access
 
@@ -1052,7 +1052,7 @@ TEST_SCRIPTS=$(find "groups/$V2_FOLDER" -maxdepth 1 -type f -name '*.mjs' \
   | xargs grep -l -iE 'test|check|probe' 2>/dev/null)
 
 # A live container — spawn one via the 10a smoke message if none is up
-CONTAINER=$(docker ps --filter "name=nanoclaw-v2-$V2_FOLDER" --format '{{.Names}}' | head -1)
+CONTAINER=$(docker ps --filter "label=nanoclaw-group-folder=$V2_FOLDER" --format '{{.Names}}' | head -1)
 
 for s in $TEST_SCRIPTS; do
   fname=$(basename "$s")
