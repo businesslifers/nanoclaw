@@ -131,7 +131,7 @@ done
 ## Phase 5: Restart running containers
 
 ```bash
-docker ps --format "{{.ID}} {{.Names}}" | grep nanoclaw-v2 | awk '{print $1}' | xargs -r docker stop
+docker ps --filter label=nanoclaw-session --format '{{.ID}}' | xargs -r docker stop
 ```
 
 Cold containers will pick the skill up on next wake. Containers that don't restart cleanly (rare) can be killed with `docker kill` and respawned by the next inbound message.
