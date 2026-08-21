@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-import { getDb } from './connection.js';
+import { getRawDb } from './sqlite-legacy.js';
 
 export interface DashboardAuditRow {
   id: number;
@@ -22,7 +22,7 @@ export interface AppendAuditInput {
   after: unknown;
 }
 
-export function appendAudit(input: AppendAuditInput, db: Database.Database = getDb()): DashboardAuditRow {
+export function appendAudit(input: AppendAuditInput, db: Database.Database = getRawDb()): DashboardAuditRow {
   const ts = new Date().toISOString();
   const before_json = input.before === undefined ? null : JSON.stringify(input.before);
   const after_json = input.after === undefined ? null : JSON.stringify(input.after);
@@ -46,5 +46,5 @@ export function appendAudit(input: AppendAuditInput, db: Database.Database = get
 }
 
 export function getRecentAudit(limit = 200): DashboardAuditRow[] {
-  return getDb().prepare('SELECT * FROM dashboard_audit ORDER BY id DESC LIMIT ?').all(limit) as DashboardAuditRow[];
+  return getRawDb().prepare('SELECT * FROM dashboard_audit ORDER BY id DESC LIMIT ?').all(limit) as DashboardAuditRow[];
 }

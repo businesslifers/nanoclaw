@@ -113,17 +113,17 @@ export function affectedTeams(input: WakeDecisionInput): string[] {
  * spawn-hook projection refresh covers it: a team receiving its first work
  * item now has ≥1 row, so the has-items guard no longer skips it).
  */
-export function refreshAndWake(input: WakeDecisionInput, message: string): void {
+export async function refreshAndWake(input: WakeDecisionInput, message: string): Promise<void> {
   nudgeWorkItemsPusher();
   for (const team of affectedTeams(input)) {
-    refreshWorkItemsProjection(team);
+    await refreshWorkItemsProjection(team);
   }
   for (const team of decideWakeTargets(input)) {
-    const session = findSessionByAgentGroup(team);
+    const session = await findSessionByAgentGroup(team);
     if (!session) {
       log.debug('work-items wake skipped — no active session', { team });
       continue;
     }
-    notifyAgent(session, message);
+    await notifyAgent(session, message);
   }
 }

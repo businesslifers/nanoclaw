@@ -13,22 +13,36 @@ import Database from 'better-sqlite3';
 import { CronExpressionParser } from 'cron-parser';
 
 import { appendAudit } from './db/dashboard-audit.js';
-import { getAgentGroup, updateAgentGroup } from './db/agent-groups.js';
-import { ensureContainerConfig, getContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
-import { getDb } from './db/connection.js';
-import { getSession, getSessionsByAgentGroup } from './db/sessions.js';
+
+
+
+
 import { killContainer } from './container-runner.js';
-import { hasAdminPrivilege } from './modules/permissions/db/user-roles.js';
-import { getOwners } from './modules/permissions/db/user-roles.js';
-import { canAccessAgentGroup } from './modules/permissions/access.js';
+
+import { canAccessAgentGroupSync } from './dashboard-access-sync.js';
+// The dashboard package's mutator + permissions contracts are synchronous
+// (dist/types.d.ts), so every central read here goes through the legacy
+// SQLite handle rather than the async DbDriver. See src/db/sqlite-legacy.ts.
+import {
+  ensureContainerConfigSync as ensureContainerConfig,
+  getAgentGroupSync as getAgentGroup,
+  getContainerConfigSync as getContainerConfig,
+  getOwnersSync as getOwners,
+  getRawDb,
+  getSessionSync as getSession,
+  getSessionsByAgentGroupSync as getSessionsByAgentGroup,
+  hasAdminPrivilegeSync as hasAdminPrivilege,
+  updateAgentGroupSync as updateAgentGroup,
+  updateContainerConfigScalarsSync as updateContainerConfigScalars,
+} from './db/sqlite-legacy.js';
 import {
   cancelTask as cancelTaskPrim,
   pauseTask as pauseTaskPrim,
   resumeTask as resumeTaskPrim,
   updateTask as updateTaskPrim,
   type TaskUpdate,
-} from './modules/scheduling/db.js';
-import { inboundDbPath } from './session-manager.js';
+} from './mailbox/sqlite/tasks.js';
+import { inboundDbPath } from './mailbox/sqlite/paths.js';
 import { nudgePusher } from './dashboard-pusher.js';
 import {
   addWorkItemNote,
@@ -182,12 +196,12 @@ export function renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string
     return { id: before.id, name: before.name };
   }
 
-  const collision = getDb()
+  const collision = getRawDb()
     .prepare('SELECT id FROM agent_groups WHERE name = ? AND id != ? LIMIT 1')
     .get(newName, args.id) as { id: string } | undefined;
   if (collision) throw new MutatorConflictError('another agent group already uses this name');
 
-  const db = getDb();
+  const db = getRawDb();
   db.transaction(() => {
     updateAgentGroup(args.id, { name: newName });
     appendAudit(
@@ -230,7 +244,7 @@ export function setAgentGroupHidden(
     return { id: before.id, hidden: beforeHidden };
   }
 
-  const db = getDb();
+  const db = getRawDb();
   db.transaction(() => {
     updateAgentGroup(args.id, { hidden_in_dashboard: args.hidden ? 1 : 0 });
     appendAudit(
@@ -278,7 +292,7 @@ export function updateAgentGroupModel(
   const effortChanged = newEffort !== undefined && newEffort !== beforeEffort;
 
   if (modelChanged || effortChanged) {
-    const db = getDb();
+    const db = getRawDb();
     db.transaction(() => {
       if (modelChanged) {
         updateAgentGroup(args.id, { model: newModel });
@@ -412,7 +426,7 @@ function readTaskRow(db: Database.Database, taskId: string): TaskRowSummary | un
 }
 
 function authorizeTaskAccess(actorUserId: string, agentGroupId: string): void {
-  const decision = canAccessAgentGroup(actorUserId, agentGroupId);
+  const decision = canAccessAgentGroupSync(actorUserId, agentGroupId);
   if (!decision.allowed) {
     throw new MutatorAuthError(`actor cannot access agent group ${agentGroupId}: ${decision.reason}`);
   }

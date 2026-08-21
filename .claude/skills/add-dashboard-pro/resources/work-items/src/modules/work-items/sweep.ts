@@ -30,6 +30,7 @@
  */
 import { TIMEZONE } from '../../config.js';
 import { getDb, hasTable } from '../../db/connection.js';
+import { getRawDb } from '../../db/sqlite-legacy.js';
 import { findSessionByAgentGroup } from '../../db/sessions.js';
 import type { WorkItem } from '../../db/work-items.js';
 import { log } from '../../log.js';
@@ -188,8 +189,8 @@ export function decideSweepActions(
 
 /** Applies a sweep tick: stamp dedup state FIRST, then refresh + wake. */
 export async function sweepWorkItems(): Promise<void> {
-  const db = getDb();
-  if (!hasTable(db, 'work_items')) return;
+  if (!(await hasTable(getDb(), 'work_items'))) return;
+  const db = getRawDb();
 
   const items = db
     .prepare(
@@ -223,14 +224,14 @@ export async function sweepWorkItems(): Promise<void> {
   applyStamps();
 
   for (const [team, lines] of decision.wakes) {
-    refreshWorkItemsProjection(team);
-    const session = findSessionByAgentGroup(team);
+    await refreshWorkItemsProjection(team);
+    const session = await findSessionByAgentGroup(team);
     if (!session) {
       log.warn('work-items sweep: no active session to wake', { team, lines: lines.length });
       continue;
     }
     const message = `[work-items sweep] ${lines.length} item${lines.length === 1 ? '' : 's'} need${lines.length === 1 ? 's' : ''} attention:\n${lines.join('\n')}`;
-    notifyAgent(session, message);
+    await notifyAgent(session, message);
     log.info('work-items sweep wake', { team, items: lines.length });
   }
 }

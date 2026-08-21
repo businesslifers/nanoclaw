@@ -10,7 +10,7 @@
  */
 import type Database from 'better-sqlite3';
 
-import { getDb } from './connection.js';
+import { getRawDb } from './sqlite-legacy.js';
 
 export type WorkItemStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
 export type WorkItemKind = 'task' | 'delegation' | 'deliverable' | 'content_slot' | 'cadence';
@@ -118,7 +118,7 @@ export function generateWorkItemId(): string {
   return `wi-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createWorkItem(item: NewWorkItem, db: Database.Database = getDb()): WorkItem {
+export function createWorkItem(item: NewWorkItem, db: Database.Database = getRawDb()): WorkItem {
   const now = new Date().toISOString();
   const status = item.status ?? 'open';
   db.prepare(
@@ -163,7 +163,7 @@ export function createWorkItem(item: NewWorkItem, db: Database.Database = getDb(
   return getWorkItem(item.id, db) as WorkItem;
 }
 
-export function getWorkItem(id: string, db: Database.Database = getDb()): WorkItem | undefined {
+export function getWorkItem(id: string, db: Database.Database = getRawDb()): WorkItem | undefined {
   return db.prepare('SELECT * FROM work_items WHERE id = ?').get(id) as WorkItem | undefined;
 }
 
@@ -172,7 +172,7 @@ export function getWorkItem(id: string, db: Database.Database = getDb()): WorkIt
  * transitions: entering 'done' sets it, leaving 'done' (reopen) clears it.
  * Returns the number of touched rows (0 = no such item).
  */
-export function updateWorkItem(id: string, updates: WorkItemUpdate, db: Database.Database = getDb()): number {
+export function updateWorkItem(id: string, updates: WorkItemUpdate, db: Database.Database = getRawDb()): number {
   const before = getWorkItem(id, db);
   if (!before) return 0;
 
@@ -203,16 +203,16 @@ export function updateWorkItem(id: string, updates: WorkItemUpdate, db: Database
 }
 
 /** Bump updated_at only — keeps actively-narrated items inside the bounded projection window. */
-export function touchWorkItem(id: string, db: Database.Database = getDb()): void {
+export function touchWorkItem(id: string, db: Database.Database = getRawDb()): void {
   db.prepare('UPDATE work_items SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), id);
 }
 
-export function listAllWorkItems(db: Database.Database = getDb()): WorkItem[] {
+export function listAllWorkItems(db: Database.Database = getRawDb()): WorkItem[] {
   return db.prepare('SELECT * FROM work_items ORDER BY created_at DESC').all() as WorkItem[];
 }
 
 /** Everything a team can see: items it owns OR items assigned to it. */
-export function listWorkItemsForTeam(agentGroupId: string, db: Database.Database = getDb()): WorkItem[] {
+export function listWorkItemsForTeam(agentGroupId: string, db: Database.Database = getRawDb()): WorkItem[] {
   return db
     .prepare(`SELECT * FROM work_items WHERE ${visibleToTeamSql()} ORDER BY created_at DESC`)
     .all({ agentGroupId }) as WorkItem[];
@@ -223,7 +223,7 @@ export function listWorkItemsForTeam(agentGroupId: string, db: Database.Database
  * the projection rewrite entirely for teams that never touch the feature —
  * no central-DB scan + session-DB rewrite added to their spawn latency.
  */
-export function teamHasWorkItems(agentGroupId: string, db: Database.Database = getDb()): boolean {
+export function teamHasWorkItems(agentGroupId: string, db: Database.Database = getRawDb()): boolean {
   const row = db.prepare(`SELECT 1 FROM work_items WHERE ${visibleToTeamSql()} LIMIT 1`).get({ agentGroupId }) as
     | { 1: number }
     | undefined;
@@ -237,7 +237,7 @@ export function teamHasWorkItems(agentGroupId: string, db: Database.Database = g
  * the full historical archive, so per-wake rewrite cost stays bounded as
  * items accumulate over months.
  */
-export function listProjectionRowsForTeam(agentGroupId: string, db: Database.Database = getDb()): WorkItem[] {
+export function listProjectionRowsForTeam(agentGroupId: string, db: Database.Database = getRawDb()): WorkItem[] {
   const cutoff = new Date(Date.now() - PROJECTION_TERMINAL_WINDOW_DAYS * 86_400_000).toISOString();
   return db
     .prepare(

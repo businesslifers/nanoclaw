@@ -13,7 +13,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { TIMEZONE } from './config.js';
 import { log } from './log.js';
-import { inboundDbPath } from './session-manager.js';
+import { inboundDbPath } from './mailbox/sqlite/paths.js';
 
 export interface TaskSummary {
   id: string;

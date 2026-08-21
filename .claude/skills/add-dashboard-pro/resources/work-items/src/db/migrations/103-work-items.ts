@@ -19,6 +19,7 @@ import type { Migration } from './index.js';
 export const migration103: Migration = {
   version: 103,
   name: 'work-items',
+  sqliteOnly: true,
   up(db: Database.Database) {
     db.exec(`
       CREATE TABLE work_items (

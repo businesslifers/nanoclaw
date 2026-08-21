@@ -11,40 +11,40 @@ import { runMigrations } from '../../db/migrations/index.js';
 import { createUser } from '../permissions/db/users.js';
 import { resolveAssigneeName } from './actions.js';
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
+beforeEach(async () => {
+  const db = await initTestDb();
+  await runMigrations(db);
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
-function seedUser(id: string, displayName: string | null) {
-  createUser({ id, kind: 'phone', display_name: displayName, created_at: new Date().toISOString() });
+async function seedUser(id: string, displayName: string | null) {
+  await createUser({ id, kind: 'phone', display_name: displayName, created_at: new Date().toISOString() });
 }
 
 describe('resolveAssigneeName', () => {
-  it('links on a unique case-insensitive display-name match and says so', () => {
-    seedUser('phone:+615550001', 'Raels');
-    const r = resolveAssigneeName('raels');
+  it('links on a unique case-insensitive display-name match and says so', async () => {
+    await seedUser('phone:+615550001', 'Raels');
+    const r = await resolveAssigneeName('raels');
     expect(r.userId).toBe('phone:+615550001');
     expect(r.label).toBeNull();
     expect(r.echo).toContain('resolved to user phone:+615550001');
   });
 
-  it('falls back to a raw label on no match — and the echo states it', () => {
-    const r = resolveAssigneeName('Realz');
+  it('falls back to a raw label on no match — and the echo states it', async () => {
+    const r = await resolveAssigneeName('Realz');
     expect(r.userId).toBeNull();
     expect(r.label).toBe('Realz');
     expect(r.echo).toContain('did not match any known user');
     expect(r.echo).toContain('raw label');
   });
 
-  it('falls back on an ambiguous match rather than guessing', () => {
-    seedUser('phone:+615550001', 'Adam');
-    seedUser('discord:12345', 'Adam');
-    const r = resolveAssigneeName('Adam');
+  it('falls back on an ambiguous match rather than guessing', async () => {
+    await seedUser('phone:+615550001', 'Adam');
+    await seedUser('discord:12345', 'Adam');
+    const r = await resolveAssigneeName('Adam');
     expect(r.userId).toBeNull();
     expect(r.label).toBe('Adam');
     expect(r.echo).toContain('ambiguous');

@@ -8,10 +8,8 @@
  * The dashboard pusher calls collectWorkItems() on every snapshot push
  * (~60s) and after every work-item mutator (via nudgePusher).
  */
-import { getAllAgentGroups } from './db/agent-groups.js';
-import { getDb, hasTable } from './db/connection.js';
+import { getRawDb, getAllAgentGroupsSync, getAllUsersSync, tableExistsSync } from './db/sqlite-legacy.js';
 import { listAllWorkItems, isTerminalStatus } from './db/work-items.js';
-import { getAllUsers } from './modules/permissions/db/users.js';
 import { log } from './log.js';
 
 /** Terminal (done/cancelled) items older than this drop out of the snapshot. */
@@ -60,10 +58,10 @@ export interface WorkItemSummary {
 
 export function collectWorkItems(): WorkItemSummary[] {
   try {
-    if (!hasTable(getDb(), 'work_items')) return [];
+    if (!tableExistsSync('work_items')) return [];
 
-    const groupNames = new Map(getAllAgentGroups().map((g) => [g.id, g.name]));
-    const userNames = new Map(getAllUsers().map((u) => [u.id, u.display_name ?? u.id]));
+    const groupNames = new Map(getAllAgentGroupsSync().map((g) => [g.id, g.name]));
+    const userNames = new Map(getAllUsersSync().map((u) => [u.id, u.display_name ?? u.id]));
     const cutoff = new Date(Date.now() - SNAPSHOT_TERMINAL_WINDOW_DAYS * 86_400_000).toISOString();
 
     const items = listAllWorkItems().filter(
@@ -72,7 +70,7 @@ export function collectWorkItems(): WorkItemSummary[] {
     const titleById = new Map(items.map((i) => [i.id, i.title]));
 
     // One query for all notes (bounded per item in JS) instead of N queries.
-    const noteRows = getDb()
+    const noteRows = getRawDb()
       .prepare(
         `SELECT work_item_id, ts, author_kind, author_id, note
            FROM work_item_notes ORDER BY work_item_id, ts ASC, id ASC`,

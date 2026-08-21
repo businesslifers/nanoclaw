@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from './index.js';
-import { getDb } from './connection.js';
+import { getRawDb } from './sqlite-legacy.js';
 import {
   createWorkItem,
   getWorkItem,
@@ -24,16 +24,16 @@ const TEAM_A = 'ag-team-a';
 const TEAM_B = 'ag-team-b';
 const TEAM_C = 'ag-team-c';
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
+beforeEach(async () => {
+  const db = await initTestDb();
+  await runMigrations(db);
   for (const id of [TEAM_A, TEAM_B, TEAM_C]) {
-    createAgentGroup({ id, name: id, folder: id, agent_provider: null, created_at: new Date().toISOString() });
+    await createAgentGroup({ id, name: id, folder: id, agent_provider: null, created_at: new Date().toISOString() });
   }
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
 function makeItem(overrides: Partial<Parameters<typeof createWorkItem>[0]> = {}) {
@@ -114,7 +114,7 @@ describe('completed_at transitions', () => {
 describe('projection filter (non-terminal + 14-day terminal window)', () => {
   it('carries non-terminal items regardless of age', () => {
     const item = makeItem({ status: 'blocked' });
-    getDb()
+    getRawDb()
       .prepare('UPDATE work_items SET created_at = ?, updated_at = ? WHERE id = ?')
       .run('2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z', item.id);
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).toContain(item.id);
@@ -127,7 +127,7 @@ describe('projection filter (non-terminal + 14-day terminal window)', () => {
     const old = makeItem();
     updateWorkItem(old.id, { status: 'done' });
     const staleTs = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    getDb()
+    getRawDb()
       .prepare('UPDATE work_items SET completed_at = ?, updated_at = ? WHERE id = ?')
       .run(staleTs, staleTs, old.id);
 
@@ -142,7 +142,7 @@ describe('projection filter (non-terminal + 14-day terminal window)', () => {
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).toContain(item.id);
 
     const staleTs = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    getDb().prepare('UPDATE work_items SET updated_at = ? WHERE id = ?').run(staleTs, item.id);
+    getRawDb().prepare('UPDATE work_items SET updated_at = ? WHERE id = ?').run(staleTs, item.id);
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).not.toContain(item.id);
   });
 });

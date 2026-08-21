@@ -16,7 +16,7 @@ import { MutatorAuthError, MutatorValidationError, MutatorNotFoundError } from '
 
 vi.mock('./modules/work-items/wake.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./modules/work-items/wake.js')>();
-  return { ...actual, refreshAndWake: vi.fn() };
+  return { ...actual, refreshAndWake: vi.fn(async () => {}) };
 });
 
 import { refreshAndWake } from './modules/work-items/wake.js';
@@ -39,13 +39,13 @@ function now() {
   return new Date().toISOString();
 }
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
+beforeEach(async () => {
+  const db = await initTestDb();
+  await runMigrations(db);
   vi.mocked(refreshAndWake).mockClear();
 
   for (const id of [TEAM_A, TEAM_B]) {
-    createAgentGroup({ id, name: id, folder: id, agent_provider: null, model: null, created_at: now() } as never);
+    await createAgentGroup({ id, name: id, folder: id, agent_provider: null, model: null, created_at: now() } as never);
   }
   createUser({ id: OWNER_USER, kind: 'discord', display_name: 'Owner', created_at: now() });
   grantRole({ user_id: OWNER_USER, role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
@@ -59,8 +59,8 @@ beforeEach(() => {
   createUser({ id: OUTSIDER, kind: 'discord', display_name: 'Outsider', created_at: now() });
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
 function seedItem(overrides: Record<string, unknown> = {}) {

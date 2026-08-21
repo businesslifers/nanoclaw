@@ -5,7 +5,7 @@
  */
 import type Database from 'better-sqlite3';
 
-import { getDb } from './connection.js';
+import { getRawDb } from './sqlite-legacy.js';
 import type { WorkItemAuthorKind } from './work-items.js';
 
 export interface WorkItemNote {
@@ -24,7 +24,7 @@ export function addWorkItemNote(
     author_id?: string | null;
     note: string;
   },
-  db: Database.Database = getDb(),
+  db: Database.Database = getRawDb(),
 ): WorkItemNote {
   const ts = new Date().toISOString();
   const result = db
@@ -49,7 +49,7 @@ export function addWorkItemNote(
   };
 }
 
-export function listWorkItemNotes(workItemId: string, limit = 100, db: Database.Database = getDb()): WorkItemNote[] {
+export function listWorkItemNotes(workItemId: string, limit = 100, db: Database.Database = getRawDb()): WorkItemNote[] {
   // Newest N in chronological order (subquery keeps the cap on the newest end).
   return db
     .prepare(
@@ -60,7 +60,7 @@ export function listWorkItemNotes(workItemId: string, limit = 100, db: Database.
     .all(workItemId, limit) as WorkItemNote[];
 }
 
-export function countWorkItemNotes(workItemId: string, db: Database.Database = getDb()): number {
+export function countWorkItemNotes(workItemId: string, db: Database.Database = getRawDb()): number {
   return (
     db.prepare('SELECT COUNT(*) AS c FROM work_item_notes WHERE work_item_id = ?').get(workItemId) as { c: number }
   ).c;

@@ -22,7 +22,8 @@ import { getUser } from '../permissions/db/users.js';
 import { getSessionsByAgentGroup } from '../../db/sessions.js';
 import { listProjectionRowsForTeam, type WorkItem } from '../../db/work-items.js';
 import { log } from '../../log.js';
-import { inboundDbPath, openInboundDb } from '../../session-manager.js';
+import { inboundDbPath } from '../../mailbox/sqlite/paths.js';
+import { ensureWorkItemsCacheTable, openInboundDb } from '../../mailbox/sqlite/session-db.js';
 
 export interface ProjectionRow {
   id: string;
@@ -53,36 +54,37 @@ export interface ProjectionRow {
 }
 
 /** Resolve display fields once per refresh; group/user lookups are memoized per call. */
-export function buildProjectionRows(agentGroupId: string, items: WorkItem[]): ProjectionRow[] {
+export async function buildProjectionRows(agentGroupId: string, items: WorkItem[]): Promise<ProjectionRow[]> {
   const refreshedAt = new Date().toISOString();
   const groupNames = new Map<string, string | null>();
-  const groupName = (id: string | null): string | null => {
+  const groupName = async (id: string | null): Promise<string | null> => {
     if (!id) return null;
-    if (!groupNames.has(id)) groupNames.set(id, getAgentGroup(id)?.name ?? null);
+    if (!groupNames.has(id)) groupNames.set(id, (await getAgentGroup(id))?.name ?? null);
     return groupNames.get(id) ?? null;
   };
   const titleById = new Map(items.map((i) => [i.id, i.title]));
 
-  return items.map((item) => {
+  const rows: ProjectionRow[] = [];
+  for (const item of items) {
     const isOwner = item.owner_agent_group_id === agentGroupId;
     const isAssignee = item.assignee_agent_group_id === agentGroupId;
     let assigneeKind: 'team' | 'human' | null = null;
     let assigneeName: string | null = null;
     if (item.assignee_agent_group_id) {
       assigneeKind = 'team';
-      assigneeName = groupName(item.assignee_agent_group_id);
+      assigneeName = await groupName(item.assignee_agent_group_id);
     } else if (item.assignee_user_id) {
       assigneeKind = 'human';
-      assigneeName = getUser(item.assignee_user_id)?.display_name ?? item.assignee_user_id;
+      assigneeName = (await getUser(item.assignee_user_id))?.display_name ?? item.assignee_user_id;
     } else if (item.assignee_label) {
       assigneeKind = 'human';
       assigneeName = item.assignee_label;
     }
-    return {
+    rows.push({
       id: item.id,
       relation: isOwner && isAssignee ? 'both' : isOwner ? 'owner' : 'assignee',
       owner_agent_group_id: item.owner_agent_group_id,
-      owner_name: groupName(item.owner_agent_group_id),
+      owner_name: await groupName(item.owner_agent_group_id),
       assignee_agent_group_id: item.assignee_agent_group_id,
       assignee_user_id: item.assignee_user_id,
       assignee_name: assigneeName,
@@ -104,8 +106,9 @@ export function buildProjectionRows(agentGroupId: string, items: WorkItem[]): Pr
       created_at: item.created_at,
       updated_at: item.updated_at,
       refreshed_at: refreshedAt,
-    };
-  });
+    });
+  }
+  return rows;
 }
 
 /**
@@ -113,22 +116,23 @@ export function buildProjectionRows(agentGroupId: string, items: WorkItem[]): Pr
  * Full delete+insert inside one transaction per session DB — the projection
  * is bounded (non-terminal + 14-day terminal window), so this stays cheap.
  */
-export function refreshWorkItemsProjection(agentGroupId: string): void {
+export async function refreshWorkItemsProjection(agentGroupId: string): Promise<void> {
   let rows: ProjectionRow[];
   try {
-    rows = buildProjectionRows(agentGroupId, listProjectionRowsForTeam(agentGroupId));
+    rows = await buildProjectionRows(agentGroupId, listProjectionRowsForTeam(agentGroupId));
   } catch (err) {
     log.error('work-items projection: central read failed', { agentGroupId, err });
     return;
   }
 
-  const sessions = getSessionsByAgentGroup(agentGroupId).filter((s) => s.status === 'active');
+  const sessions = (await getSessionsByAgentGroup(agentGroupId)).filter((s) => s.status === 'active');
   for (const session of sessions) {
     const dbPath = inboundDbPath(agentGroupId, session.id);
     if (!fs.existsSync(dbPath)) continue;
     try {
-      const db = openInboundDb(agentGroupId, session.id);
+      const db = openInboundDb(dbPath);
       try {
+        ensureWorkItemsCacheTable(db);
         const insert = db.prepare(
           `INSERT INTO work_items_cache (
              id, relation, owner_agent_group_id, owner_name,

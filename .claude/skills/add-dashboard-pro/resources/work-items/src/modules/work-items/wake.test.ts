@@ -9,7 +9,13 @@ vi.mock('../../db/sessions.js', () => ({ findSessionByAgentGroup: vi.fn(() => un
 vi.mock('./projection.js', () => ({ refreshWorkItemsProjection: vi.fn() }));
 vi.mock('../approvals/primitive.js', () => ({ notifyAgent: vi.fn() }));
 
-import { decideWakeTargets, affectedTeams, refreshAndWake, setWorkItemsPusherNudge, nudgeWorkItemsPusher } from './wake.js';
+import {
+  decideWakeTargets,
+  affectedTeams,
+  refreshAndWake,
+  setWorkItemsPusherNudge,
+  nudgeWorkItemsPusher,
+} from './wake.js';
 
 const A = 'ag-a';
 const B = 'ag-b';

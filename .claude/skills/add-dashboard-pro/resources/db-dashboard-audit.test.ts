@@ -4,13 +4,13 @@ import { initTestDb, closeDb } from './connection.js';
 import { runMigrations } from './migrations/index.js';
 import { appendAudit, getRecentAudit } from './dashboard-audit.js';
 
-beforeEach(() => {
-  const db = initTestDb();
-  runMigrations(db);
+beforeEach(async () => {
+  const db = await initTestDb();
+  await runMigrations(db);
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
 describe('dashboard_audit', () => {

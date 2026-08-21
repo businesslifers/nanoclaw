@@ -139,6 +139,13 @@ cp .claude/skills/add-dashboard-pro/resources/dashboard-mutators.test.ts        
 # WITH this skill — copied next. The dashboard-INDEPENDENT work-item core
 # (src/db/work-items.ts, src/modules/work-items/, migration 103, agent MCP tool)
 # was installed by Phase 0.5 above.
+# Sync seams for the dashboard package's SYNCHRONOUS mutator/permissions
+# contracts: the central DB is async behind DbDriver, so these two supply the
+# sync mirrors the dashboard modules below import (getRawDb + *Sync readers,
+# and the AccessDecision mirror). db-sqlite-legacy.ts is the same file the
+# work-item core installs; copying it twice is harmless.
+cp .claude/skills/add-dashboard-pro/resources/db-sqlite-legacy.ts                             src/db/sqlite-legacy.ts
+cp .claude/skills/add-dashboard-pro/resources/dashboard-access-sync.ts                        src/dashboard-access-sync.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items.ts                         src/dashboard-work-items.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items-mutators.ts                src/dashboard-work-items-mutators.ts
 cp .claude/skills/add-dashboard-pro/resources/dashboard-work-items-mutators.test.ts           src/dashboard-work-items-mutators.test.ts
