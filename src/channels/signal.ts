@@ -33,6 +33,9 @@ function spawnSignalDaemon(cliPath: string, account: string, host: string, port:
   if (account) args.push('-a', account);
   args.push('daemon', '--tcp', `${host}:${port}`, '--no-receive-stdout');
   args.push('--receive-mode', 'on-start');
+  // Send read receipts (in addition to signal-cli's default delivery receipts)
+  // so senders see their messages marked read once the daemon receives them.
+  args.push('--send-read-receipts');
 
   const child = spawn(cliPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let exited = false;

@@ -1,26 +1,20 @@
 /**
- * Integration test for the imessage channel's single reach-in: the self-registration
- * import in the `src/channels/index.ts` barrel. Importing the barrel runs imessage.ts's
- * top-level `registerChannelAdapter('imessage', …)`; without the import the channel is
- * silently absent.
+ * Integration test for the imessage channel's barrel reach-in: the
+ * self-registration import in `src/channels/index.ts`. Importing the barrel
+ * runs imessage.ts's top-level `registerChannelAdapter('imessage', …)`;
+ * without the import the channel is silently absent.
  *
- * Behavior, not structural: it imports the real barrel and asserts the registry
- * actually contains the channel. This reflects what happens at host boot — if the
- * `import './imessage.js';` line is deleted, or the barrel fails to evaluate for any
- * reason (so the channel genuinely would not register), this goes red. A structural
- * check of the import line would falsely pass in that second case.
+ * Behavior, not structural: it imports the real barrel and asserts the
+ * registry actually contains the channel. It goes red if the
+ * `import './imessage.js';` line is deleted or drifts, or if the barrel
+ * fails to evaluate (so the channel genuinely would not register).
  *
- * Importing the barrel is safe: registration is a pure top-level call, and imessage.ts
- * builds the SDK adapter / bridge only inside its factory (invoked at host startup),
- * never at import. It does require the adapter package (`chat-adapter-imessage`) to be installed,
- * which holds in a composed install: the skill's `pnpm install` step runs before this
- * test — so this test also implicitly guards that dependency (an unmocked import throws
- * if the package is missing).
- *
- * imessage is a Chat SDK channel: imessage.ts also consumes a load-bearing *core* API —
- * `createChatSdkBridge(...)` from ./chat-sdk-bridge.js. That core-consumption is a
- * typed call, so the build/typecheck leg (`pnpm run build`) guards it against upstream
- * drift, not this test. Every Chat SDK channel follows this same shape.
+ * It requires NO npm dependency: registration is a pure top-level call.
+ * Neither backend's package loads at module import — the hosted `spectrum-ts`
+ * only via a runtime dynamic import inside setup(), and the local
+ * `chat-adapter-imessage` only via a dynamic import inside the factory's local
+ * branch (never at module load). That's what lets the barrel evaluate before
+ * /add-imessage has installed either SDK.
  */
 import { describe, it, expect } from 'vitest';
 

@@ -32,6 +32,14 @@ export function openOutboundDb(dbPath: string): Database.Database {
   return db;
 }
 
+/** Open the outbound DB for a session with write access. Only safe to call when no container is running. */
+export function openOutboundDbRw(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = DELETE');
+  db.pragma('busy_timeout = 5000');
+  return db;
+}
+
 export function upsertSessionRouting(
   db: Database.Database,
   routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },
@@ -100,14 +108,27 @@ export function insertMessage(
      * Host countDueMessages gates on this; container reads everything.
      */
     trigger?: 0 | 1;
+    /**
+     * For agent-to-agent inbound: the source session id that emitted the
+     * outbound message which became this inbound row. Used as the return
+     * path for the target's reply. NULL on channel-side inbound.
+     */
+    sourceSessionId?: string | null;
+    /**
+     * 1 = only deliver on the container's first poll (fresh start).
+     * Dying containers (past first poll) skip these rows.
+     */
+    onWake?: 0 | 1;
   },
 ): void {
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake)`,
   ).run({
     ...message,
     trigger: message.trigger ?? 1,
+    onWake: message.onWake ?? 0,
+    sourceSessionId: message.sourceSessionId ?? null,
     seq: nextEvenSeq(db),
   });
 }
@@ -130,9 +151,8 @@ export function markMessageFailed(db: Database.Database, messageId: string): voi
 }
 
 export function retryWithBackoff(db: Database.Database, messageId: string, backoffSec: number): void {
-  db.prepare(
-    `UPDATE messages_in SET tries = tries + 1, process_after = datetime('now', '+${backoffSec} seconds') WHERE id = ?`,
-  ).run(messageId);
+  const processAfter = new Date(Date.now() + backoffSec * 1000).toISOString();
+  db.prepare('UPDATE messages_in SET tries = tries + 1, process_after = ? WHERE id = ?').run(processAfter, messageId);
 }
 
 export function getMessageForRetry(
@@ -147,25 +167,27 @@ export function getMessageForRetry(
 
 export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Database): void {
   const completed = outDb
-    .prepare("SELECT message_id FROM processing_ack WHERE status IN ('completed', 'failed')")
-    .all() as Array<{ message_id: string }>;
+    .prepare(
+      "SELECT message_id, status FROM processing_ack WHERE status IN ('completed', 'failed', 'script-skip:error')",
+    )
+    .all() as Array<{ message_id: string; status: string }>;
 
   if (completed.length === 0) return;
 
-  const updateStmt = inDb.prepare("UPDATE messages_in SET status = 'completed' WHERE id = ? AND status != 'completed'");
+  // `script-skip:error` (pre-task script crashed) lands as a FAILED run —
+  // semantically true, and it lets recurrence derive the trailing failed
+  // streak from the occurrence rows themselves (no stored counter).
+  const completeStmt = inDb.prepare(
+    "UPDATE messages_in SET status = 'completed' WHERE id = ? AND status NOT IN ('completed', 'failed')",
+  );
+  const failStmt = inDb.prepare(
+    "UPDATE messages_in SET status = 'failed' WHERE id = ? AND status NOT IN ('completed', 'failed')",
+  );
   inDb.transaction(() => {
-    for (const { message_id } of completed) {
-      updateStmt.run(message_id);
+    for (const { message_id, status } of completed) {
+      (status === 'script-skip:error' ? failStmt : completeStmt).run(message_id);
     }
   })();
-}
-
-export function getStuckProcessingIds(outDb: Database.Database): string[] {
-  return (
-    outDb.prepare("SELECT message_id FROM processing_ack WHERE status = 'processing'").all() as Array<{
-      message_id: string;
-    }>
-  ).map((r) => r.message_id);
 }
 
 export interface ProcessingClaim {
@@ -178,6 +200,19 @@ export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[]
   return outDb
     .prepare("SELECT message_id, status_changed FROM processing_ack WHERE status = 'processing'")
     .all() as ProcessingClaim[];
+}
+
+/**
+ * Delete orphan 'processing' rows. Called by the host after killing a
+ * container so the leftover claim doesn't trip claim-stuck on the next sweep
+ * tick (which would kill the freshly respawned container before its
+ * agent-runner can run its own startup cleanup).
+ *
+ * Safe because the host only writes to outbound.db when no container is
+ * running (we just killed it). Returns the number of rows deleted.
+ */
+export function deleteOrphanProcessingClaims(outDb: Database.Database): number {
+  return outDb.prepare("DELETE FROM processing_ack WHERE status = 'processing'").run().changes;
 }
 
 export interface ContainerState {
@@ -218,13 +253,14 @@ export interface OutboundMessage {
   channel_type: string | null;
   thread_id: string | null;
   content: string;
+  in_reply_to: string | null;
 }
 
 export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
   return db
     .prepare(
       `SELECT * FROM messages_out
-       WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
+       WHERE (deliver_after IS NULL OR datetime(deliver_after) <= datetime('now'))
        ORDER BY timestamp ASC`,
     )
     .all() as OutboundMessage[];
@@ -244,14 +280,14 @@ export function getDeliveredIds(db: Database.Database): Set<string> {
 
 export function markDelivered(db: Database.Database, messageOutId: string, platformMessageId: string | null): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', datetime('now'))",
-  ).run(messageOutId, platformMessageId ?? null);
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', ?)",
+  ).run(messageOutId, platformMessageId ?? null, new Date().toISOString());
 }
 
 export function markDeliveryFailed(db: Database.Database, messageOutId: string): void {
   db.prepare(
-    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', datetime('now'))",
-  ).run(messageOutId);
+    "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', ?)",
+  ).run(messageOutId, new Date().toISOString());
 }
 
 /** Ensure the delivered table has columns added after initial schema. */
@@ -267,9 +303,11 @@ export function migrateDeliveredTable(db: Database.Database): void {
   }
 }
 
-// Adds columns added to messages_in after the initial v2 schema to
-// pre-existing session DBs. No-op on fresh installs where the columns are
-// in the baseline schema. Backfills existing rows so invariants hold.
+// LEGACY-COMPAT(v1-tasks): adds columns added to messages_in after the initial
+// v2 schema to pre-existing session DBs — this lazy, on-open migration IS the
+// upgrade path for old installs (there is no central migration for session
+// DBs). No-op on fresh installs where the columns are in the baseline schema.
+// Backfills existing rows so invariants hold (series_id = id).
 export function migrateMessagesInTable(db: Database.Database): void {
   const cols = new Set(
     (db.prepare("PRAGMA table_info('messages_in')").all() as Array<{ name: string }>).map((c) => c.name),
@@ -284,4 +322,52 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // the agent" semantics, so backfill 1 and default 1 for new inserts.
     db.prepare('ALTER TABLE messages_in ADD COLUMN trigger INTEGER NOT NULL DEFAULT 1').run();
   }
+  if (!cols.has('source_session_id')) {
+    // For agent-to-agent return-path routing. NULL on existing rows is fine —
+    // their replies fall back to the legacy "newest active session" lookup.
+    db.prepare('ALTER TABLE messages_in ADD COLUMN source_session_id TEXT').run();
+  }
+  if (!cols.has('on_wake')) {
+    // 1 = only deliver on the container's first poll (fresh start).
+    // All existing rows are normal messages, so default 0.
+    db.prepare('ALTER TABLE messages_in ADD COLUMN on_wake INTEGER NOT NULL DEFAULT 0').run();
+  }
+}
+
+/**
+ * Look up an inbound row's source_session_id by its message id. Returns null
+ * if the row doesn't exist or the column is NULL (channel inbound or
+ * pre-migration a2a inbound). Used by a2a routing to route replies back to
+ * the originating session.
+ */
+export function getInboundSourceSessionId(db: Database.Database, messageId: string): string | null {
+  const row = db.prepare('SELECT source_session_id FROM messages_in WHERE id = ?').get(messageId) as
+    | { source_session_id: string | null }
+    | undefined;
+  return row?.source_session_id ?? null;
+}
+
+/**
+ * Find the source_session_id of the most recent a2a inbound row from a
+ * specific peer (by agent group id). Used as a peer-affinity fallback in
+ * a2a routing when an outbound reply has no `in_reply_to` (e.g. the
+ * container's send_message MCP tool path didn't thread the batch's
+ * in_reply_to through).
+ *
+ * Heuristic: "the last time this peer talked to me, which session was it?"
+ * Returns null when no prior a2a inbound from that peer carries a
+ * non-null source_session_id (typical for pre-migration installs).
+ */
+export function getMostRecentPeerSourceSessionId(db: Database.Database, peerAgentGroupId: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT source_session_id FROM messages_in
+        WHERE channel_type = 'agent'
+          AND platform_id = ?
+          AND source_session_id IS NOT NULL
+        ORDER BY seq DESC
+        LIMIT 1`,
+    )
+    .get(peerAgentGroupId) as { source_session_id: string | null } | undefined;
+  return row?.source_session_id ?? null;
 }

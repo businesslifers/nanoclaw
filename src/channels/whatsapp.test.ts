@@ -17,7 +17,9 @@ import {
   appendMediaFailureNote,
   computeIsMention,
   computeWhatsappDefaults,
+  hasMentionPills,
   isBotMentionedInGroup,
+  isBotTypedMention,
   parseWhatsAppMentions,
   resolveSharedMode,
   rewriteBotLidMention,
@@ -86,6 +88,75 @@ describe('isBotMentionedInGroup (#2560)', () => {
       },
     };
     expect(isBotMentionedInGroup(normalized, undefined, undefined)).toBe(false);
+  });
+});
+
+describe('typed @-mention fallback (#3085)', () => {
+  describe('isBotTypedMention', () => {
+    it('matches a typed @-mention of the assistant name, case-insensitively', () => {
+      expect(isBotTypedMention('@sprout are you there?', 'Sprout', BOT_PHONE_JID)).toBe(true);
+      expect(isBotTypedMention('hey @SPROUT look at this', 'Sprout', BOT_PHONE_JID)).toBe(true);
+    });
+
+    it('matches a typed @-mention of the bot phone number', () => {
+      expect(isBotTypedMention('@15550009999 ping', 'Sprout', BOT_PHONE_JID)).toBe(true);
+    });
+
+    it('requires a word boundary after the name', () => {
+      expect(isBotTypedMention('@Sprouted a new plan', 'Sprout', BOT_PHONE_JID)).toBe(false);
+    });
+
+    it('requires the @ prefix', () => {
+      expect(isBotTypedMention('Sprout are you there?', 'Sprout', BOT_PHONE_JID)).toBe(false);
+    });
+
+    it('does not match other @-names', () => {
+      expect(isBotTypedMention('@Maria can you check?', 'Sprout', BOT_PHONE_JID)).toBe(false);
+    });
+
+    it('escapes regex specials in the assistant name', () => {
+      expect(isBotTypedMention('@R2.D2 status?', 'R2.D2', BOT_PHONE_JID)).toBe(true);
+      expect(isBotTypedMention('@R2xD2 status?', 'R2.D2', BOT_PHONE_JID)).toBe(false);
+    });
+
+    it('matches names ending in non-ASCII letters (ASCII \\b never would)', () => {
+      expect(isBotTypedMention('@José hola', 'José', BOT_PHONE_JID)).toBe(true);
+      expect(isBotTypedMention('@小助手 status', '小助手', BOT_PHONE_JID)).toBe(true);
+    });
+
+    it('does not fire on emails or URL paths containing the name', () => {
+      expect(isBotTypedMention('write to ethan@sprout.com please', 'Sprout', BOT_PHONE_JID)).toBe(false);
+      expect(isBotTypedMention('https://x.com/@sprout/status/1', 'Sprout', BOT_PHONE_JID)).toBe(false);
+    });
+
+    it('still matches after punctuation openers', () => {
+      expect(isBotTypedMention('(@Sprout can you look?)', 'Sprout', BOT_PHONE_JID)).toBe(true);
+      expect(isBotTypedMention('¿@Sprout puedes?', 'Sprout', BOT_PHONE_JID)).toBe(true);
+    });
+
+    it('does not match a multi-word name by its first word alone', () => {
+      expect(isBotTypedMention('@Autónomos can you check', 'Autónomos Expert', BOT_PHONE_JID)).toBe(false);
+      expect(isBotTypedMention('@Autónomos Expert can you check', 'Autónomos Expert', BOT_PHONE_JID)).toBe(true);
+    });
+
+    it('matches on the name alone when the bot phone JID is unknown', () => {
+      expect(isBotTypedMention('@Sprout hi', 'Sprout', undefined)).toBe(true);
+    });
+  });
+
+  describe('hasMentionPills', () => {
+    it('is false for a message with no contextInfo or an empty mentionedJid', () => {
+      expect(hasMentionPills({})).toBe(false);
+      expect(hasMentionPills({ extendedTextMessage: { contextInfo: { mentionedJid: [] } } })).toBe(false);
+    });
+
+    it('is true when anyone at all is pilled, not just the bot', () => {
+      expect(
+        hasMentionPills({
+          extendedTextMessage: { contextInfo: { mentionedJid: ['15551112222@s.whatsapp.net'] } },
+        }),
+      ).toBe(true);
+    });
   });
 });
 

@@ -14,22 +14,26 @@ import type Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
+import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
+import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
-  findSession,
+  findSystemSession,
   findSessionByAgentGroup,
   findSessionForAgent,
   getSession,
+  taskThreadId,
   updateSession,
 } from './db/sessions.js';
 import {
   ensureSchema,
   openInboundDb as openInboundDbRaw,
   openOutboundDb as openOutboundDbRaw,
+  openOutboundDbRw as openOutboundDbRwRaw,
   upsertSessionRouting,
   insertMessage,
   migrateMessagesInTable,
@@ -60,14 +64,6 @@ export function outboundDbPath(agentGroupId: string, sessionId: string): string 
 /** Path to the container heartbeat file (touched instead of DB writes). */
 export function heartbeatPath(agentGroupId: string, sessionId: string): string {
   return path.join(sessionDir(agentGroupId, sessionId), '.heartbeat');
-}
-
-/**
- * @deprecated Use inboundDbPath / outboundDbPath instead.
- * Kept temporarily for test compatibility during migration.
- */
-export function sessionDbPath(agentGroupId: string, sessionId: string): string {
-  return inboundDbPath(agentGroupId, sessionId);
 }
 
 function generateId(): string {
@@ -126,6 +122,33 @@ export function resolveSession(
   return { session, created: true };
 }
 
+/** Find or create the per-agent-group session used for scheduled tasks. */
+/** Find or create the isolated session for one task series (thread `system:tasks:<seriesId>`). */
+export function resolveTaskSession(agentGroupId: string, seriesId: string): { session: Session; created: boolean } {
+  const threadId = taskThreadId(seriesId);
+  const existing = findSystemSession(agentGroupId, threadId);
+  if (existing) return { session: existing, created: false };
+
+  const id = generateId();
+  const session: Session = {
+    id,
+    agent_group_id: agentGroupId,
+    messaging_group_id: null,
+    thread_id: threadId,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'stopped',
+    last_active: null,
+    created_at: new Date().toISOString(),
+  };
+
+  createSession(session);
+  initSessionFolder(agentGroupId, id);
+  log.info('Task session created', { id, agentGroupId, seriesId });
+
+  return { session, created: true };
+}
+
 /** Create the session folder and initialize both DBs. */
 export function initSessionFolder(agentGroupId: string, sessionId: string): void {
   const dir = sessionDir(agentGroupId, sessionId);
@@ -137,10 +160,10 @@ export function initSessionFolder(agentGroupId: string, sessionId: string): void
 }
 
 /**
- * Write the default reply routing for a session into its inbound.db.
+ * Write the current chat/thread routing for a session into its inbound.db.
  *
- * The container reads this as the default (channel_type, platform_id, thread_id)
- * for outbound messages when the agent doesn't specify an explicit destination.
+ * The container uses this to preserve thread_id when an explicitly named
+ * destination resolves to the conversation this session is bound to.
  * Derived from session.messaging_group_id → messaging_groups row + session.thread_id.
  *
  * Called on every container wake alongside the agent-to-agent module's
@@ -204,8 +227,29 @@ export function writeSessionMessage(
      * a trigger-1 message does arrive.
      */
     trigger?: 0 | 1;
+    /**
+     * For agent-to-agent inbound: the source session id that emitted the
+     * outbound message which became this inbound row. Used as the return
+     * path so the target's reply routes back to that exact session.
+     */
+    sourceSessionId?: string | null;
+    /**
+     * 1 = only deliver on the container's first poll (fresh start).
+     * Dying containers (past first poll) skip these rows.
+     */
+    onWake?: 0 | 1;
   },
 ): void {
+  // Documented reset: operators `rm -rf` a session folder to clear a stuck
+  // session. The sessions row survives, so the next message takes the
+  // existing-session path and lands here with a missing inbound.db — the open
+  // below would throw and the message would be logged-and-dropped forever.
+  // Re-provision the folder + DBs (initSessionFolder is idempotent) so the
+  // documented reset actually re-provisions instead of killing the chat.
+  if (!fs.existsSync(inboundDbPath(agentGroupId, sessionId))) {
+    initSessionFolder(agentGroupId, sessionId);
+  }
+
   // Extract base64 attachment data, save to inbox, replace with file paths
   const content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
 
@@ -222,6 +266,8 @@ export function writeSessionMessage(
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
       trigger: message.trigger ?? 1,
+      sourceSessionId: message.sourceSessionId ?? null,
+      onWake: message.onWake ?? 0,
     });
   } finally {
     db.close();
@@ -233,6 +279,20 @@ export function writeSessionMessage(
 /**
  * If message content has attachments with base64 `data`, save them to
  * the session's inbox directory and replace with `localPath`.
+ *
+ * Both `messageId` and `att.name` originate in untrusted input. WhatsApp
+ * passes `msg.key.id` through raw (and that field is client generated, so a
+ * peer can craft it), and other adapters may follow. The session dir is
+ * mounted writable into the container, so a compromised agent can also
+ * pre-place a symlink at `inbox/<future msgId>/` and wait for a chat message
+ * with a matching id to redirect the host's write.
+ *
+ * Defenses, mirrored from the outbound side:
+ *   1. basename check on `messageId` and `filename`.
+ *   2. lstat of the inbox dir to refuse pre-placed symlinks.
+ *   3. realpath-based containment under the session inbox root.
+ *   4. `wx` flag on writeFileSync to refuse following a pre-existing symlink
+ *      at the target file path or overwriting any existing file.
  */
 function extractAttachmentFiles(
   agentGroupId: string,
@@ -250,34 +310,63 @@ function extractAttachmentFiles(
   const attachments = parsed.attachments as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(attachments)) return contentStr;
 
+  if (!isSafeAttachmentName(messageId)) {
+    log.warn('Rejecting unsafe inbound message id', { messageId });
+    return contentStr;
+  }
+
+  const inboxRoot = path.join(sessionDir(agentGroupId, sessionId), 'inbox');
+  // Resolved lazily on the first attachment that actually carries bytes, so a
+  // message whose attachments have no inline `data` never creates an inbox dir.
+  // ensureContainedInboxDir refuses a pre-placed symlink at the inbox root or
+  // the per-message subdir before any write lands outside the sandbox (#2828).
+  let inboxDir: string | null = null;
+  let inboxResolved = false;
+
   let changed = false;
   for (const att of attachments) {
-    if (typeof att.data === 'string') {
-      // The name field is attacker-controlled: chat platforms with E2E
-      // attachment encryption (WhatsApp, Matrix) cannot sanitize filename
-      // server-side, and other adapters pass att.name through raw. Without
-      // this guard, `path.join(inboxDir, '../../...')` writes anywhere the
-      // host process has fs permission — see Signal Desktop's Nov 2025
-      // attachment-fileName advisory for the same archetype.
-      const rawName = (att.name as string | undefined) ?? `attachment-${Date.now()}`;
-      const filename = isSafeAttachmentName(rawName) ? rawName : `attachment-${Date.now()}`;
-      if (filename !== rawName) {
-        log.warn('Refused unsafe attachment filename — would escape inbox', {
-          messageId,
-          rawName,
-          replacement: filename,
-        });
-      }
-      const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
-      fs.mkdirSync(inboxDir, { recursive: true });
-      const filePath = path.join(inboxDir, filename);
-      fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'));
-      att.name = filename;
-      att.localPath = `inbox/${messageId}/${filename}`;
-      delete att.data;
-      changed = true;
-      log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });
+    if (typeof att.data !== 'string') continue;
+
+    const rawName = deriveAttachmentName(att);
+    const filename = isSafeAttachmentName(rawName) ? rawName : `attachment-${Date.now()}`;
+    if (filename !== rawName) {
+      log.warn('Refused unsafe attachment filename, would escape inbox', {
+        messageId,
+        rawName,
+        replacement: filename,
+      });
     }
+
+    if (!inboxResolved) {
+      inboxDir = ensureContainedInboxDir(inboxRoot, messageId, { messageId });
+      inboxResolved = true;
+    }
+    // Unsafe inbox (symlink / escape) — no attachment can be written safely.
+    if (!inboxDir) break;
+
+    const filePath = path.join(inboxDir, filename);
+    try {
+      // wx = exclusive create. Refuses to follow a pre existing symlink or
+      // overwrite any existing file. The host expects to be the sole writer
+      // of these attachments.
+      fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'), { flag: 'wx' });
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === 'EEXIST') {
+        log.warn('Inbox attachment target already exists, refusing to overwrite', {
+          messageId,
+          filename,
+        });
+        continue;
+      }
+      throw err;
+    }
+
+    att.name = filename;
+    att.localPath = `inbox/${messageId}/${filename}`;
+    delete att.data;
+    changed = true;
+    log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });
   }
 
   return changed ? JSON.stringify(parsed) : contentStr;
@@ -290,15 +379,36 @@ export function openInboundDb(agentGroupId: string, sessionId: string): Database
   return db;
 }
 
+/** Open a session's inbound DB, run `fn`, and always close it. */
+export function withInboundDb<T>(agentGroupId: string, sessionId: string, fn: (db: Database.Database) => T): T {
+  const db = openInboundDb(agentGroupId, sessionId);
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
 /** Open the outbound DB for a session (host reads only). */
 export function openOutboundDb(agentGroupId: string, sessionId: string): Database.Database {
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
+}
+
+/** Open the outbound DB for a session with write access. Only safe to call when no container is running. */
+export function openOutboundDbRw(agentGroupId: string, sessionId: string): Database.Database {
+  return openOutboundDbRwRaw(outboundDbPath(agentGroupId, sessionId));
 }
 
 /**
  * Write a message directly to a session's outbound DB so the host delivery
  * loop picks it up. Used by the command gate to send denial responses
  * without waking a container.
+ *
+ * Needs the read-write open — the readonly handle the delivery poll uses
+ * can't INSERT. This is a host-side write to the container-owned outbound.db,
+ * but it's safe even with a container running: both sides open with DELETE
+ * journal + busy_timeout, and the even host seq stays out of the container's
+ * odd-seq space.
  */
 export function writeOutboundDirect(
   agentGroupId: string,
@@ -312,43 +422,23 @@ export function writeOutboundDirect(
     content: string;
   },
 ): void {
-  const db = openOutboundDb(agentGroupId, sessionId);
+  const db = openOutboundDbRw(agentGroupId, sessionId);
   try {
     db.prepare(
       `INSERT OR IGNORE INTO messages_out (id, seq, timestamp, kind, platform_id, channel_type, thread_id, content)
-       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_out), datetime('now'), ?, ?, ?, ?, ?)`,
-    ).run(message.id, message.kind, message.platformId, message.channelType, message.threadId, message.content);
+       VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 2 FROM messages_out), ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      message.id,
+      new Date().toISOString(),
+      message.kind,
+      message.platformId,
+      message.channelType,
+      message.threadId,
+      message.content,
+    );
   } finally {
     db.close();
   }
-}
-
-/**
- * @deprecated Use openInboundDb / openOutboundDb instead.
- */
-export function openSessionDb(agentGroupId: string, sessionId: string): Database.Database {
-  return openInboundDb(agentGroupId, sessionId);
-}
-
-/** Write a system response to a session's inbound.db so the container's findQuestionResponse() picks it up. */
-export function writeSystemResponse(
-  agentGroupId: string,
-  sessionId: string,
-  requestId: string,
-  status: string,
-  result: Record<string, unknown>,
-): void {
-  writeSessionMessage(agentGroupId, sessionId, {
-    id: `sys-resp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'system',
-    timestamp: new Date().toISOString(),
-    content: JSON.stringify({
-      type: 'question_response',
-      questionId: requestId,
-      status,
-      result,
-    }),
-  });
 }
 
 /**
@@ -368,14 +458,48 @@ export function readOutboxFiles(
   messageId: string,
   filenames: string[],
 ): OutboundFile[] | undefined {
+  if (!isSafeAttachmentName(messageId)) {
+    log.warn('Rejecting unsafe outbox message id', { messageId });
+    return undefined;
+  }
+
   const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
   if (!fs.existsSync(outboxDir)) return undefined;
+
+  let realOutboxDir: string;
+  try {
+    const stat = fs.lstatSync(outboxDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      log.warn('Rejecting unsafe outbox directory', { messageId, outboxDir });
+      return undefined;
+    }
+    realOutboxDir = fs.realpathSync(outboxDir);
+  } catch (err) {
+    log.warn('Failed to inspect outbox directory', { messageId, err });
+    return undefined;
+  }
+
   const files: OutboundFile[] = [];
   for (const filename of filenames) {
+    if (!isSafeAttachmentName(filename)) {
+      log.warn('Refused unsafe outbox filename, would escape outbox', { messageId, filename });
+      continue;
+    }
+
     const filePath = path.join(outboxDir, filename);
-    if (fs.existsSync(filePath)) {
-      files.push({ filename, data: fs.readFileSync(filePath) });
-    } else {
+    try {
+      const stat = fs.lstatSync(filePath);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        log.warn('Rejecting unsafe outbox file', { messageId, filename });
+        continue;
+      }
+      const realFilePath = fs.realpathSync(filePath);
+      if (!isPathInside(realOutboxDir, realFilePath)) {
+        log.warn('Rejecting outbox file outside message directory', { messageId, filename });
+        continue;
+      }
+      files.push({ filename, data: fs.readFileSync(realFilePath) });
+    } catch {
       log.warn('Outbox file not found', { messageId, filename });
     }
   }
@@ -389,10 +513,26 @@ export function readOutboxFiles(
  * thrown error would trigger the delivery retry path and deliver twice.
  */
 export function clearOutbox(agentGroupId: string, sessionId: string, messageId: string): void {
+  if (!isSafeAttachmentName(messageId)) {
+    log.warn('Rejecting unsafe outbox cleanup message id', { messageId });
+    return;
+  }
+
   const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
   if (!fs.existsSync(outboxDir)) return;
   try {
-    fs.rmSync(outboxDir, { recursive: true, force: true });
+    const stat = fs.lstatSync(outboxDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      log.warn('Rejecting unsafe outbox cleanup directory', { messageId, outboxDir });
+      return;
+    }
+    const realOutboxBase = fs.realpathSync(path.join(sessionDir(agentGroupId, sessionId), 'outbox'));
+    const realOutboxDir = fs.realpathSync(outboxDir);
+    if (!isPathInside(realOutboxBase, realOutboxDir)) {
+      log.warn('Rejecting outbox cleanup outside session outbox', { messageId, outboxDir });
+      return;
+    }
+    fs.rmSync(realOutboxDir, { recursive: true, force: true });
   } catch (err) {
     log.warn('Outbox cleanup failed (message already delivered)', { messageId, err });
   }

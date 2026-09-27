@@ -21,6 +21,7 @@ import { basename, join, resolve } from 'path';
 import { getDb, hasTable } from '../db/connection.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
+import { isGlobalAdmin, isOwner } from '../modules/permissions/db/user-roles.js';
 import type { ChannelAdapter, ChannelDefaults, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -39,21 +40,11 @@ const OPTIONAL_ENV = ['DC_IMAP_SECURITY', 'DC_SMTP_SECURITY'] as const;
 
 type DcEnv = { [K in (typeof REQUIRED_ENV)[number]]: string } & { [K in (typeof OPTIONAL_ENV)[number]]?: string };
 
-function isDcAdmin(userId: string): boolean {
+async function isDcAdmin(userId: string): Promise<boolean> {
   try {
     const db = getDb();
-    if (!hasTable(db, 'user_roles')) return true;
-    return (
-      db
-        .prepare(
-          `SELECT 1 FROM user_roles
-       WHERE user_id = ?
-         AND (role = 'owner' OR role = 'admin')
-         AND agent_group_id IS NULL
-       LIMIT 1`,
-        )
-        .get(userId) != null
-    );
+    if (!(await hasTable(db, 'user_roles'))) return true;
+    return (await isOwner(userId)) || (await isGlobalAdmin(userId));
   } catch {
     return false;
   }
@@ -146,7 +137,7 @@ function createAdapter(env: DcEnv): ChannelAdapter {
           if (/^\/set-avatar$/i.test((msg.text || '').trim()) && msg.file) {
             const userId = `deltachat:${contact.address}`;
             try {
-              if (isDcAdmin(userId)) {
+              if (await isDcAdmin(userId)) {
                 const absPath = resolve(msg.file as string);
                 await dc.rpc.setConfig(accountId, 'selfavatar', absPath);
                 await dc.rpc.sendMsg(accountId, event.chatId, { text: 'Avatar updated.' });

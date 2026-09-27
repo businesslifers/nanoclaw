@@ -6,7 +6,7 @@
 import { createWhatsAppAdapter } from '@chat-adapter/whatsapp';
 
 import { readEnvFile } from '../env.js';
-import type { ChannelDefaults } from './adapter.js';
+import type { ChannelDefaults, ChannelRegistration } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -21,7 +21,7 @@ const WHATSAPP_CLOUD_DEFAULTS: ChannelDefaults = {
   mentions: 'platform',
 };
 
-registerChannelAdapter('whatsapp-cloud', {
+export const whatsappCloudRegistration: ChannelRegistration = {
   factory: () => {
     const env = readEnvFile([
       'WHATSAPP_ACCESS_TOKEN',
@@ -51,4 +51,6 @@ registerChannelAdapter('whatsapp-cloud', {
     });
   },
   defaults: WHATSAPP_CLOUD_DEFAULTS,
-});
+};
+
+registerChannelAdapter('whatsapp-cloud', whatsappCloudRegistration);

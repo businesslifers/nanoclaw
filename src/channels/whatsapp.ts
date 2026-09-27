@@ -226,18 +226,68 @@ export function isBotMentionedInGroup(
   botLidUser: string | undefined,
 ): boolean {
   if (!botPhoneJid && !botLidUser) return false;
-  const mentionedJids: string[] = [
+  const botLidJid = botLidUser ? `${botLidUser}@lid` : undefined;
+  return collectMentionedJids(normalized).some((jid) => {
+    if (!jid) return false;
+    const bare = jid.split(':')[0];
+    return bare === botPhoneJid || bare === botLidJid;
+  });
+}
+
+function collectMentionedJids(normalized: MentionContextSource): string[] {
+  return [
     ...(normalized.extendedTextMessage?.contextInfo?.mentionedJid ?? []),
     ...(normalized.imageMessage?.contextInfo?.mentionedJid ?? []),
     ...(normalized.videoMessage?.contextInfo?.mentionedJid ?? []),
     ...(normalized.documentMessage?.contextInfo?.mentionedJid ?? []),
   ];
-  const botLidJid = botLidUser ? `${botLidUser}@lid` : undefined;
-  return mentionedJids.some((jid) => {
-    if (!jid) return false;
-    const bare = jid.split(':')[0];
-    return bare === botPhoneJid || bare === botLidJid;
-  });
+}
+
+/**
+ * Whether the message carries any mention pill at all, for anyone.
+ * Gates the typed-mention fallback below: when a pill exists, the `@`
+ * text in the body belongs to whoever was pilled, and text-matching it
+ * against the bot's names would false-fire on a group member whose
+ * name matches the assistant's.
+ */
+export function hasMentionPills(normalized: MentionContextSource): boolean {
+  return collectMentionedJids(normalized).length > 0;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Fallback detection for typed @-mentions of the bot in a group (#3085).
+ * Only the autocomplete pill carries `contextInfo.mentionedJid`, and the
+ * pill can only target the bot's contact name — a user who types
+ * `@<name>` and hits send produces plain text that
+ * `isBotMentionedInGroup` can never match, so mention-mode wirings
+ * silently ignore the message.
+ *
+ * Matches `@<assistant name>` and `@<bot phone number>` in the text,
+ * case-insensitive. The boundaries deliberately diverge from the
+ * chat-sdk `detectMention` shape (`@name\b`): its ASCII `\b` never
+ * matches after a name ending in an accented or CJK letter (`@José`,
+ * `@小助手`), and its missing leading guard false-fires on emails and
+ * URL paths (`ethan@sprout.com`, `x.com/@sprout/...`). Here the
+ * trailing boundary is Unicode-aware, and the char before `@` must not
+ * be a letter, digit, `_`, `@`, `/`, or `.`.
+ *
+ * Known limitation: only the full name matches. Typing the first word
+ * of a multi-word assistant name (`@Autónomos` for "Autónomos Expert")
+ * does not count — matching name prefixes would false-fire too easily.
+ *
+ * Callers must gate this on `!hasMentionPills(...)` (see that helper)
+ * and on dedicated mode: on a shared number the assistant's name in
+ * text can be ordinary human conversation about the assistant.
+ */
+export function isBotTypedMention(text: string, assistantName: string, botPhoneJid: string | undefined): boolean {
+  const botPhoneUser = botPhoneJid?.split('@')[0];
+  return [assistantName, botPhoneUser]
+    .filter((name): name is string => !!name)
+    .some((name) => new RegExp(`(?<![\\p{L}\\p{N}_@/.])@${escapeRegex(name)}(?![\\p{L}\\p{N}_])`, 'iu').test(text));
 }
 
 /**
@@ -466,19 +516,21 @@ registerChannelAdapter('whatsapp', {
       const cached = groupMetadataCache.get(jid);
       if (cached && cached.expiresAt > Date.now()) return cached.metadata;
 
+      // Return WhatsApp's native group metadata UNMODIFIED. Baileys uses this to
+      // distribute the group sender-key; it also reads `addressingMode` from it.
+      // For LID-addressed groups the participants must keep their native @lid ids
+      // so they match addressingMode='lid'. Translating them to phone JIDs
+      // (previous behavior) left addressingMode='lid' but pn-shaped participant
+      // ids — an inconsistency that desynced sender-key distribution, so member
+      // devices never received the key and group messages stuck on "waiting for
+      // this message". DMs and phone-addressed (small) groups were unaffected.
+      // The LID→phone translation for inbound sender routing happens separately.
       const metadata = await sock.groupMetadata(jid);
-      const participants = await Promise.all(
-        metadata.participants.map(async (p) => ({
-          ...p,
-          id: await translateJid(p.id),
-        })),
-      );
-      const normalized = { ...metadata, participants };
       groupMetadataCache.set(jid, {
-        metadata: normalized,
+        metadata,
         expiresAt: Date.now() + GROUP_METADATA_CACHE_TTL_MS,
       });
-      return normalized;
+      return metadata;
     }
 
     async function syncGroupMetadata(force = false): Promise<void> {
@@ -863,8 +915,15 @@ registerChannelAdapter('whatsapp', {
             // Detect explicit @-mentions of the bot in groups. Detail in
             // isBotMentionedInGroup(); short version is contextInfo.mentionedJid
             // on text + caption-bearing messages, matched against the bot's
-            // phone JID and LID (#2560).
-            const botMentionedInGroup = isGroup && isBotMentionedInGroup(normalized, botPhoneJid, botLidUser);
+            // phone JID and LID (#2560). Typed `@<name>` text never carries a
+            // pill, so in dedicated mode fall back to text matching when the
+            // message pills nobody (#3085).
+            const botMentionedInGroup =
+              isGroup &&
+              (isBotMentionedInGroup(normalized, botPhoneJid, botLidUser) ||
+                (!WHATSAPP_SHARED &&
+                  !hasMentionPills(normalized) &&
+                  isBotTypedMention(content, ASSISTANT_NAME, botPhoneJid)));
 
             const inbound: InboundMessage = {
               id: msg.key.id || `wa-${Date.now()}`,

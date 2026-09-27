@@ -13,9 +13,9 @@ const STEPS: Record<
   'set-env': () => import('./set-env.js'),
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
-  groups: () => import('./groups.js'),
   register: () => import('./register.js'),
   'pair-telegram': () => import('./pair-telegram.js'),
+  groups: () => import('./groups.js'),
   'whatsapp-auth': () => import('./whatsapp-auth.js'),
   'signal-auth': () => import('./signal-auth.js'),
   mounts: () => import('./mounts.js'),
@@ -23,7 +23,12 @@ const STEPS: Record<
   verify: () => import('./verify.js'),
   onecli: () => import('./onecli.js'),
   auth: () => import('./auth.js'),
+  'provider-auth': () => import('./provider-auth.js'),
   'cli-agent': () => import('./cli-agent.js'),
+  registry: () => import('./registry.js'),
+  'registry-reconcile': () => import('./registry-reconcile.js'),
+  // >>> nanoclaw:setup-steps
+  // <<< nanoclaw:setup-steps
 };
 
 async function main(): Promise<void> {

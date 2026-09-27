@@ -4,6 +4,8 @@
  * Writes to outbound.db (container-owned).
  * The host polls this DB (read-only) for undelivered messages.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { getInboundDb, getOutboundDb } from './connection.js';
 
 export interface MessageOutRow {
@@ -33,6 +35,49 @@ export interface WriteMessageOut {
 }
 
 /**
+ * Extra entries merged into system-action payloads for the duration of a
+ * call, without the writing handler knowing about them. This is the seam
+ * `extendTool` (../mcp-tools/server.ts) uses so an installed module can
+ * add params to a base tool and have them land in the tool's outbound
+ * payload while the base tool's source stays untouched.
+ *
+ * Scope is deliberately narrow: only `kind: 'system'` messages whose
+ * content parses to a JSON object are decorated, and entries never
+ * overwrite keys the handler wrote itself. Everything else passes through
+ * byte-identical. With no active context (the default), this is a no-op.
+ */
+const outboundPassthrough = new AsyncLocalStorage<Record<string, unknown>>();
+
+/** Run `fn` with `entries` merged into system-action payloads it writes. */
+export function withOutboundPassthrough<T>(entries: Record<string, unknown>, fn: () => T): T {
+  return outboundPassthrough.run(entries, fn);
+}
+
+/** Apply any active passthrough entries to a system-action JSON payload. */
+function decorateContent(msg: WriteMessageOut): string {
+  const entries = outboundPassthrough.getStore();
+  if (!entries || msg.kind !== 'system') return msg.content;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(msg.content);
+  } catch {
+    return msg.content;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return msg.content;
+
+  const payload = parsed as Record<string, unknown>;
+  let changed = false;
+  for (const [key, value] of Object.entries(entries)) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) {
+      payload[key] = value;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(payload) : msg.content;
+}
+
+/**
  * Write a new outbound message, auto-assigning an odd seq number.
  * Container uses odd seq (1, 3, 5...), host uses even (2, 4, 6...).
  *
@@ -58,11 +103,12 @@ export function writeMessageOut(msg: WriteMessageOut): number {
   outbound
     .prepare(
       `INSERT INTO messages_out (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
-     VALUES ($id, $seq, $in_reply_to, datetime('now'), $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
+     VALUES ($id, $seq, $in_reply_to, $timestamp, $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
     )
     .run({
       $id: msg.id,
       $seq: nextSeq,
+      $timestamp: new Date().toISOString(),
       $in_reply_to: msg.in_reply_to ?? null,
       $deliver_after: msg.deliver_after ?? null,
       $recurrence: msg.recurrence ?? null,
@@ -70,7 +116,7 @@ export function writeMessageOut(msg: WriteMessageOut): number {
       $platform_id: msg.platform_id ?? null,
       $channel_type: msg.channel_type ?? null,
       $thread_id: msg.thread_id ?? null,
-      $content: msg.content,
+      $content: decorateContent(msg),
     });
 
   return nextSeq;
@@ -136,7 +182,7 @@ export function getUndeliveredMessages(): MessageOutRow[] {
   return getOutboundDb()
     .prepare(
       `SELECT * FROM messages_out
-       WHERE (deliver_after IS NULL OR deliver_after <= datetime('now'))
+       WHERE (deliver_after IS NULL OR datetime(deliver_after) <= datetime('now'))
        ORDER BY timestamp ASC`,
     )
     .all() as MessageOutRow[];

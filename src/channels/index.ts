@@ -13,7 +13,10 @@ import './cli.js';
 import './discord.js';
 
 // slack
-// import './slack.js';
+import './slack.js';
+// slack bot-authored inbound guard (registers the bridge inbound policy for
+// the 'slack' channel type — installs alongside the slack adapter)
+import './slack-a2a-guard.js';
 
 // telegram
 import './telegram.js';
@@ -45,6 +48,9 @@ import './whatsapp-cloud.js';
 // imessage
 import './imessage.js';
 
+// mattermost
+import './mattermost.js';
+
 // gmail (native, no Chat SDK)
 
 // whatsapp (native, no Chat SDK)
@@ -53,8 +59,14 @@ import './whatsapp.js';
 // signal (native, no Chat SDK — signal-cli TCP JSON-RPC daemon)
 // import './signal.js';
 
+// dial (native, no Chat SDK — REST outbound + CLI command-target inbound)
+import './dial.js';
+
 // emacs (native HTTP bridge, no Chat SDK)
 // import './emacs.js';
+
+// local web (native loopback HTTP, no Chat SDK)
+import './local-web.js';
 
 // deltachat (native, no Chat SDK)
 // import './deltachat.js'

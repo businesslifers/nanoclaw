@@ -22,7 +22,7 @@
  * typed call, so the build/typecheck leg (`pnpm run build`) guards it against upstream
  * drift, not this test. Every Chat SDK channel follows this same shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { getRegisteredChannelNames } from './channel-registry.js';
 import './index.js'; // the real barrel — triggers every channel's self-registration

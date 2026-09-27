@@ -14,8 +14,8 @@ import Database from 'better-sqlite3';
 import { DATA_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
-import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
+import { inspectAgentImage, readImageSource } from './lib/registry-state.js';
 import {
   getPlatform,
   getServiceManager,
@@ -33,11 +33,12 @@ export async function run(_args: string[]): Promise<void> {
 
   // 1. Check service status + detect checkout mismatch.
   //
-  // Why the mismatch matters: the host binds `<DATA_DIR>/cli.sock` relative
-  // to the project root it was started from. If the running service is from
-  // a sibling checkout (common for developers with multiple clones), this
-  // repo's `data/cli.sock` won't exist — AGENT_PING would return a
-  // misleading `socket_error`. Surface the mismatch directly instead.
+  // Why the mismatch matters: the host reads `<projectRoot>/data/v2.db` and
+  // binds `<DATA_DIR>/cli.sock` relative to the project root it was started
+  // from. If the running service is from a sibling checkout (common for
+  // developers with multiple clones), nothing in this checkout is actually
+  // wired up. Surface the mismatch directly so the user knows to point the
+  // service at the right folder.
   let service:
     | 'not_found'
     | 'stopped'
@@ -139,7 +140,7 @@ export async function run(_args: string[]): Promise<void> {
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ONECLI_URL)=/m.test(envContent)) {
+    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ONECLI_URL)=/m.test(envContent)) {
       credentials = 'configured';
     }
   }
@@ -160,6 +161,8 @@ export async function run(_args: string[]): Promise<void> {
     'RESEND_API_KEY',
     'WHATSAPP_ACCESS_TOKEN',
     'IMESSAGE_ENABLED',
+    'PHOTON_PROJECT_ID',
+    'PHOTON_PROJECT_SECRET',
   ]);
 
   const has = (key: string) => !!(process.env[key] || envVars[key]);
@@ -183,28 +186,53 @@ export async function run(_args: string[]): Promise<void> {
   if (has('MATRIX_ACCESS_TOKEN')) channelAuth.matrix = 'configured';
   if (has('RESEND_API_KEY')) channelAuth.resend = 'configured';
   if (has('WHATSAPP_ACCESS_TOKEN')) channelAuth['whatsapp-cloud'] = 'configured';
-  if (has('IMESSAGE_ENABLED')) channelAuth.imessage = 'configured';
+  // One `imessage` channel, either backend: local (IMESSAGE_ENABLED) or
+  // hosted (Photon project credentials).
+  if (has('IMESSAGE_ENABLED') || (has('PHOTON_PROJECT_ID') && has('PHOTON_PROJECT_SECRET'))) {
+    channelAuth.imessage = 'configured';
+  }
 
   const configuredChannels = Object.keys(channelAuth);
-  const anyChannelConfigured = configuredChannels.length > 0;
 
-  // 5. Check registered groups in v2 central DB (agent_groups + messaging_group_agents)
+  // 5. Check registered groups in v2 central DB (agent_groups + messaging_group_agents),
+  //    plus how many agent groups pin an image of their own (reported in step 7).
+  //    The two counts get their own try/catch: they read different tables, and a
+  //    partially migrated DB must not hide one behind the other's failure.
   let registeredGroups = 0;
+  let derivedGroups = 0;
   const dbPath = path.join(DATA_DIR, 'v2.db');
   if (fs.existsSync(dbPath)) {
+    let db: Database.Database | null = null;
     try {
-      const db = new Database(dbPath, { readonly: true });
-      // Count agent groups that have at least one messaging group wired
-      const row = db
-        .prepare(
-          `SELECT COUNT(DISTINCT ag.id) as count FROM agent_groups ag
-           JOIN messaging_group_agents mga ON mga.agent_group_id = ag.id`,
-        )
-        .get() as { count: number };
-      registeredGroups = row.count;
-      db.close();
+      db = new Database(dbPath, { readonly: true });
     } catch {
-      // Table might not exist (DB not migrated yet)
+      // Unreadable (permissions, or mid-migration) — leave both counts at 0
+      // rather than failing the health check on a transient condition.
+    }
+    if (db) {
+      try {
+        // Count agent groups that have at least one messaging group wired
+        const row = db
+          .prepare(
+            `SELECT COUNT(DISTINCT ag.id) as count FROM agent_groups ag
+             JOIN messaging_group_agents mga ON mga.agent_group_id = ag.id`,
+          )
+          .get() as { count: number };
+        registeredGroups = row.count;
+      } catch {
+        // Table might not exist (DB not migrated yet)
+      }
+      try {
+        const row = db
+          .prepare(
+            'SELECT COUNT(*) as count FROM container_configs WHERE image_tag IS NOT NULL',
+          )
+          .get() as { count: number };
+        derivedGroups = row.count;
+      } catch {
+        // Same: container_configs arrives with the migrations
+      }
+      db.close();
     }
   }
 
@@ -218,27 +246,57 @@ export async function run(_args: string[]): Promise<void> {
     mountAllowlist = 'configured';
   }
 
-  // 7. End-to-end: ping the CLI agent and confirm it replies. Only run if
-  // everything upstream looks healthy, since a broken socket would just hang.
-  let agentPing: 'ok' | 'no_reply' | 'socket_error' | 'auth_error' | 'skipped' = 'skipped';
-  if (service === 'running' && registeredGroups > 0) {
-    log.info('Pinging CLI agent');
-    agentPing = await pingCliAgent();
-    log.info('Agent ping result', { agentPing });
-  }
+  // 7. Where the agent image came from — intended vs actual.
+  //
+  // These two can disagree, and reporting the disagreement is the whole point.
+  // The hardened path pulls by digest and retags onto the same slug tag a local
+  // build writes, so nothing downstream can tell them apart; a pull that failed
+  // and fell back to `./container/build.sh` would leave `.env` saying "hardened"
+  // over locally built bits. IMAGE_SOURCE is the operator's intent, read from
+  // `.env`; IMAGE_SOURCE_ACTUAL is read off the image itself and cannot be
+  // talked into agreeing. Only inspect once `docker info` has already
+  // succeeded — otherwise a stopped daemon reads as "image missing".
+  const imageSource = readImageSource();
+  const image =
+    containerRuntime === 'docker'
+      ? inspectAgentImage(projectRoot)
+      : { source: 'unknown' as const, registryDigest: undefined };
 
-  // Determine overall status. A CLI-only install is valid when the local
-  // agent round-trip succeeds; messaging app credentials are optional.
+  // Deferred-wire channels can't have a group yet: their platform id only
+  // exists after the first inbound DM (see add-teams' "Finish wiring"), so
+  // configured-but-unwired is pending operator action, not a broken install.
+  // Only claim pending when EVERY configured channel is defer-wire — a
+  // wire-during-setup channel (slack, telegram, …) with zero groups is a
+  // genuine failure this must not mask.
+  const wiringPending =
+    registeredGroups === 0 &&
+    configuredChannels.length > 0 &&
+    configuredChannels.every((c) => DEFER_WIRE_CHANNELS.has(c));
+
+  // Determine overall status. The cli-agent step earlier in setup already
+  // proved the agent round-trip works; verify is a static health check.
   const status = determineVerifyStatus({
     service,
     credentials,
-    anyChannelConfigured,
     registeredGroups,
-    agentPing,
+    wiringPending,
   });
 
-  log.info('Verification complete', { status, channelAuth });
+  log.info('Verification complete', {
+    status,
+    channelAuth,
+    wiringPending,
+    imageSource,
+    imageSourceActual: image.source,
+    derivedGroups,
+  });
 
+  // The image fields are reporting only — they are not inputs to
+  // determineVerifyStatus above. A derived-image pin is a real finding on the
+  // hardened path but the normal, supported state of an install_packages user
+  // on the local path, and IMAGE_SOURCE_ACTUAL is 'unknown' whenever Docker
+  // isn't reachable. Failing verify on either would fire offerClaudeOnFailure
+  // (setup/auto.ts) at installs that are working exactly as designed.
   emitStatus('VERIFY', {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
@@ -247,7 +305,13 @@ export async function run(_args: string[]): Promise<void> {
     CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
-    AGENT_PING: agentPing,
+    IMAGE_SOURCE: imageSource,
+    IMAGE_SOURCE_ACTUAL: image.source,
+    // Registry manifest digest, to compare against the `agent-image` pin in
+    // versions.json. Empty for a locally built image — it has never had one.
+    IMAGE_DIGEST: image.registryDigest ?? '',
+    DERIVED_GROUPS: derivedGroups,
+    ...(wiringPending ? { WIRING: 'pending_first_dm' } : {}),
     STATUS: status,
     LOG: 'logs/setup.log',
   });
@@ -255,21 +319,25 @@ export async function run(_args: string[]): Promise<void> {
   if (status === 'failed') process.exit(1);
 }
 
+/**
+ * Channels whose wiring only completes after the first inbound message —
+ * the platform id doesn't exist until the bot is DM'd, so setup ends with
+ * the channel configured but no group wired. Kept in lockstep with the
+ * wireIfResolved call site in setup/auto.ts (its unresolved drop-through
+ * leaves the channel configured but unwired).
+ */
+export const DEFER_WIRE_CHANNELS = new Set(['teams']);
+
 export function determineVerifyStatus(input: {
   service: 'not_found' | 'stopped' | 'running' | 'running_other_checkout';
   credentials: string;
-  anyChannelConfigured: boolean;
   registeredGroups: number;
-  agentPing: PingResult | 'skipped';
+  /** Zero groups but every configured channel defers wiring to the first DM. */
+  wiringPending?: boolean;
 }): 'success' | 'failed' {
-  const cliAgentResponds = input.agentPing === 'ok';
-  const hasUsableChannel = input.anyChannelConfigured || cliAgentResponds;
-
   return input.service === 'running' &&
     input.credentials !== 'missing' &&
-    hasUsableChannel &&
-    input.registeredGroups > 0 &&
-    (cliAgentResponds || input.agentPing === 'skipped')
+    (input.registeredGroups > 0 || input.wiringPending === true)
     ? 'success'
     : 'failed';
 }

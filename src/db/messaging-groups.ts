@@ -21,20 +21,80 @@ import { getDb, hasTable } from './connection.js';
 export function createMessagingGroup(group: MessagingGroup): void {
   getDb()
     .prepare(
-      `INSERT INTO messaging_groups (id, channel_type, platform_id, name, is_group, unknown_sender_policy, created_at)
-       VALUES (@id, @channel_type, @platform_id, @name, @is_group, @unknown_sender_policy, @created_at)`,
+      `INSERT INTO messaging_groups (id, channel_type, platform_id, instance, name, is_group, unknown_sender_policy, created_at)
+       VALUES (@id, @channel_type, @platform_id, @instance, @name, @is_group, @unknown_sender_policy, @created_at)`,
     )
-    .run(group);
+    .run({ ...group, instance: group.instance ?? group.channel_type });
 }
 
 export function getMessagingGroup(id: string): MessagingGroup | undefined {
   return getDb().prepare('SELECT * FROM messaging_groups WHERE id = ?').get(id) as MessagingGroup | undefined;
 }
 
-export function getMessagingGroupByPlatform(channelType: string, platformId: string): MessagingGroup | undefined {
+/**
+ * Outbound / cold-DM / setup lookup by platform address.
+ *
+ * Instance semantics are deliberately ASYMMETRIC with the router's
+ * `getMessagingGroupWithAgentCount` (exact-only): outbound callers usually
+ * don't know (or care) which adapter instance owns a chat, so an unset
+ * `instance` resolves the default instance first (instance = channel_type),
+ * falling back deterministically to the lexically-first named instance.
+ * A set `instance` is exact-only — unknown instance returns undefined.
+ */
+export function getMessagingGroupByPlatform(
+  channelType: string,
+  platformId: string,
+  instance?: string,
+): MessagingGroup | undefined {
+  if (instance !== undefined) {
+    return getDb()
+      .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ? AND instance = ?')
+      .get(channelType, platformId, instance) as MessagingGroup | undefined;
+  }
   return getDb()
-    .prepare('SELECT * FROM messaging_groups WHERE channel_type = ? AND platform_id = ?')
+    .prepare(
+      `SELECT * FROM messaging_groups
+        WHERE channel_type = ? AND platform_id = ?
+     ORDER BY (instance = channel_type) DESC, instance ASC
+        LIMIT 1`,
+    )
     .get(channelType, platformId) as MessagingGroup | undefined;
+}
+
+/**
+ * Instance-exact messaging group for a channel a given agent group is
+ * sending to, resolved through THAT agent's own `agent_destinations` entry
+ * rather than by platform address alone.
+ *
+ * Needed because `getMessagingGroupByPlatform`'s no-instance fallback picks
+ * one row deterministically (default instance, else lexically-first named
+ * instance) when several sibling-instance rows share one `(channel_type,
+ * platform_id)` pair — i.e. multiple adapter instances sharing one channel
+ * address, each owning its own row for the same physical channel. That pick
+ * is arbitrary with respect to who's actually sending: it need not be the
+ * row the sending agent is wired to, which silently breaks both destination
+ * authorization (`src/delivery.ts`) and any per-instance state on the
+ * resolved row (e.g. the `instance` used to pick the delivering adapter).
+ * Every caller resolving a non-origin-chat send should prefer this over the
+ * platform-only lookup, falling back to it only when the sender has no
+ * matching destination (e.g. the agent-to-agent module isn't installed).
+ */
+export function getMessagingGroupForOwnDestination(
+  agentGroupId: string,
+  channelType: string,
+  platformId: string,
+): MessagingGroup | undefined {
+  if (!hasTable(getDb(), 'agent_destinations')) return undefined;
+  return getDb()
+    .prepare(
+      `SELECT mg.* FROM agent_destinations ad
+         JOIN messaging_groups mg ON mg.id = ad.target_id
+        WHERE ad.agent_group_id = ? AND ad.target_type = 'channel'
+          AND mg.channel_type = ? AND mg.platform_id = ?
+     ORDER BY ad.created_at ASC
+        LIMIT 1`,
+    )
+    .get(agentGroupId, channelType, platformId) as MessagingGroup | undefined;
 }
 
 /**
@@ -46,23 +106,31 @@ export function getMessagingGroupByPlatform(channelType: string, platformId: str
  *
  * Returns `null` when no messaging_groups row exists for this channel.
  * Returns `{ mg, agentCount: 0 }` when the row exists but has no wired
- * agents. Uses the `UNIQUE(channel_type, platform_id)` index plus the
- * `UNIQUE(messaging_group_id, agent_group_id)` index for the JOIN — both
+ * agents. Uses the `UNIQUE(channel_type, platform_id, instance)` index plus
+ * the `UNIQUE(messaging_group_id, agent_group_id)` index for the JOIN — both
  * covered by existing SQLite auto-indexes from the UNIQUE constraints.
+ *
+ * `instance` is EXACT-ONLY, with no fallback — deliberately asymmetric with
+ * `getMessagingGroupByPlatform`'s default-instance-first resolution. An
+ * unknown named instance must return null so the router auto-creates a
+ * per-instance group instead of hijacking a sibling instance's row. The
+ * default param (= channelType) keeps instance-less callers resolving the
+ * default instance, identical to pre-instance behavior.
  */
 export function getMessagingGroupWithAgentCount(
   channelType: string,
   platformId: string,
+  instance: string = channelType,
 ): { mg: MessagingGroup; agentCount: number } | null {
   const row = getDb()
     .prepare(
       `SELECT mg.*, COUNT(mga.id) AS agent_count
          FROM messaging_groups mg
     LEFT JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
-        WHERE mg.channel_type = ? AND mg.platform_id = ?
+        WHERE mg.channel_type = ? AND mg.platform_id = ? AND mg.instance = ?
      GROUP BY mg.id`,
     )
-    .get(channelType, platformId) as (MessagingGroup & { agent_count: number }) | undefined;
+    .get(channelType, platformId, instance) as (MessagingGroup & { agent_count: number }) | undefined;
   if (!row) return null;
   const { agent_count, ...mg } = row;
   return { mg: mg as MessagingGroup, agentCount: agent_count };
@@ -72,6 +140,12 @@ export function getAllMessagingGroups(): MessagingGroup[] {
   return getDb().prepare('SELECT * FROM messaging_groups ORDER BY name').all() as MessagingGroup[];
 }
 
+/**
+ * All messaging groups on a platform, across every adapter instance.
+ * Semantics intentionally unchanged by the instance dimension — channel_type
+ * stays the semantic platform key. No live caller today; if a caller needs
+ * a single instance's rows, filter on `mg.instance`.
+ */
 export function getMessagingGroupsByChannel(channelType: string): MessagingGroup[] {
   return getDb().prepare('SELECT * FROM messaging_groups WHERE channel_type = ?').all(channelType) as MessagingGroup[];
 }
@@ -114,6 +188,26 @@ export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): 
   getDb().prepare('UPDATE messaging_groups SET denied_at = ? WHERE id = ?').run(deniedAt, id);
 }
 
+/**
+ * Mark a messaging group as detached — our own bot left the platform channel
+ * this row maps to (written by a channel membership module, migration 022).
+ * The wiring, sessions, and destinations all survive detachment;
+ * delivery/typing should skip the row until the bot rejoins. Passing null
+ * clears the flag (rejoin), restoring the room with zero re-setup.
+ */
+export function setMessagingGroupDetachedAt(id: string, detachedAt: string | null): void {
+  getDb().prepare('UPDATE messaging_groups SET detached_at = ? WHERE id = ?').run(detachedAt, id);
+}
+
+/** True when the bot has left this conversation (detached_at set). The check
+ *  delivery-side callers should consult before attempting a send. */
+export function isMessagingGroupDetached(id: string): boolean {
+  const row = getDb().prepare('SELECT detached_at FROM messaging_groups WHERE id = ?').get(id) as
+    | { detached_at: string | null }
+    | undefined;
+  return typeof row?.detached_at === 'string' && row.detached_at.length > 0;
+}
+
 // ── Messaging Group Agents ──
 
 /**
@@ -145,26 +239,45 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
     )
     .run(mga);
 
-  // Auto-create an agent_destinations row so delivery's ACL doesn't block
-  // outbound messages that target this chat. Guarded: when the agent-to-agent
-  // module isn't installed the table doesn't exist — skip silently. Without
-  // the module, the ACL check in delivery is also skipped (same guard), so
-  // channel sends still work.
-  //
-  // ⚠️  DESTINATION PROJECTION NOTE: this function only writes the central
-  // `agent_destinations` row. It does NOT project into any running
-  // agent's session inbound.db (see top-of-file invariant in
-  // src/modules/agent-to-agent/db/agent-destinations.ts). In practice this
-  // is fine because the only real callers are one-shot setup scripts
-  // (setup/register.ts, scripts/init-first-agent.ts, /manage-channels
-  // skill) that run in a separate process from the host. Any already-
-  // running container for `mga.agent_group_id` will keep serving the
-  // stale projection until its next wake (idle timeout or next inbound
-  // message) at which point spawnContainer's writeDestinations call
-  // refreshes from central. If you call this from code that runs INSIDE
-  // the host process and need the refresh to happen immediately,
-  // explicitly call the module's `writeDestinations(mga.agent_group_id,
-  // <sessionId>)` afterwards.
+  // `threads` (migration 019) is written separately so existing callers that
+  // omit it keep passing named-param sets that match the INSERT exactly
+  // (better-sqlite3 rejects missing named params). Omitted/NULL = column
+  // stays NULL = inherit the channel declaration at fanout time.
+  if (mga.threads !== undefined && mga.threads !== null) {
+    getDb().prepare('UPDATE messaging_group_agents SET threads = ? WHERE id = ?').run(mga.threads, mga.id);
+  }
+
+  ensureAgentDestinationForWiring(mga);
+}
+
+/**
+ * Create the `agent_destinations` row that lets the agent address this chat
+ * as a delivery target. Idempotent — no-op when the destination already
+ * exists, the agent-to-agent module isn't installed, or the messaging group
+ * has been deleted out from under the wiring.
+ *
+ * Split out from `createMessagingGroupAgent` so callers that already wrote
+ * the `messaging_group_agents` row directly (e.g. the generic ncl CRUD path)
+ * can still get the companion destination without re-inserting the wiring.
+ *
+ * ⚠️  DESTINATION PROJECTION NOTE: this function only writes the central
+ * `agent_destinations` row. It does NOT project into any running agent's
+ * session inbound.db (see top-of-file invariant in
+ * src/modules/agent-to-agent/db/agent-destinations.ts). In practice this is
+ * fine because the only real callers are one-shot setup paths
+ * (setup/register.ts, scripts/init-first-agent.ts, /manage-channels skill,
+ * ncl wirings create) that run in a separate process from the host. Any
+ * already-running container for `mga.agent_group_id` will keep serving the
+ * stale projection until its next wake (idle timeout or next inbound
+ * message) at which point spawnContainer's writeDestinations call refreshes
+ * from central. If you call this from code that runs INSIDE the host
+ * process and need the refresh to happen immediately, explicitly call the
+ * module's `writeDestinations(mga.agent_group_id, <sessionId>)` afterwards.
+ */
+export function ensureAgentDestinationForWiring(mga: MessagingGroupAgent): void {
+  // Guarded: when the agent-to-agent module isn't installed the table
+  // doesn't exist — skip silently. Without the module, the ACL check in
+  // delivery is also skipped (same guard), so channel sends still work.
   if (!hasTable(getDb(), 'agent_destinations')) return;
 
   const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
@@ -216,7 +329,13 @@ export function updateMessagingGroupAgent(
   updates: Partial<
     Pick<
       MessagingGroupAgent,
-      'engage_mode' | 'engage_pattern' | 'sender_scope' | 'ignored_message_policy' | 'session_mode' | 'priority'
+      | 'engage_mode'
+      | 'engage_pattern'
+      | 'sender_scope'
+      | 'ignored_message_policy'
+      | 'session_mode'
+      | 'priority'
+      | 'threads'
     >
   >,
 ): void {

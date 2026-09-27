@@ -26,8 +26,8 @@
  * bridge (#2911). `@chat-adapter/whatsapp` hardcodes name = 'whatsapp', so the bridge's
  * channelType is 'whatsapp' — shared with the native Baileys adapter. The factory must pass
  * `instance: 'whatsapp-cloud'` so the registry keys the two apart (`instance ?? channelType`)
- * instead of last-write-wins. We build the adapter through its registered factory (the real
- * code path) with credentials mocked in, since the factory returns null when they are absent.
+ * instead of last-write-wins. We build the adapter through the exported registration object
+ * used by self-registration, with credentials mocked in since the factory otherwise returns null.
  */
 import { describe, it, expect, vi } from 'vitest';
 
@@ -43,8 +43,9 @@ vi.mock('../env.js', () => ({
   }),
 }));
 
-import { getRegisteredChannelNames, getChannelRegistration } from './channel-registry.js';
+import { getRegisteredChannelNames } from './channel-registry.js';
 import './index.js'; // the real barrel — triggers every channel's self-registration
+import { whatsappCloudRegistration } from './whatsapp-cloud.js';
 
 describe('whatsapp-cloud channel registration', () => {
   it('registers whatsapp-cloud via the channel barrel', () => {
@@ -52,10 +53,7 @@ describe('whatsapp-cloud channel registration', () => {
   });
 
   it('builds under a distinct instance key while keeping channelType whatsapp', async () => {
-    const registration = getChannelRegistration('whatsapp-cloud');
-    expect(registration).toBeDefined();
-
-    const adapter = await registration!.factory();
+    const adapter = await whatsappCloudRegistration.factory();
     expect(adapter).not.toBeNull();
 
     // instance keeps this bridge off the native Baileys adapter's 'whatsapp'
