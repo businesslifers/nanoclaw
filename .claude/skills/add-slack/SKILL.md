@@ -26,6 +26,8 @@ Fetch the `channels` branch and copy the payload into place (overwrite — the b
 src/channels/slack.ts
 src/channels/slack-lib.ts
 src/channels/slack-lib.test.ts
+src/channels/slack-raw-text.ts
+src/channels/slack-raw-text.test.ts
 src/channels/slack-a2a-guard.ts
 src/channels/slack-a2a-guard.test.ts
 src/channels/slack-registration.test.ts
@@ -35,7 +37,7 @@ src/provisioning/slack-app.test.ts
 container/skills/slack-formatting/SKILL.md
 ```
 
-- **Adapter + shared lib** (`slack.ts`, `slack-lib.ts`): bridge registration, wiring defaults, conversation resolver, the native `SLACK_INSTANCES` loop — pinned by the two registration tests.
+- **Adapter + shared lib** (`slack.ts`, `slack-lib.ts`, `slack-raw-text.ts` — pasted-table recovery from the raw event, imported by `slack.ts`): bridge registration, wiring defaults, conversation resolver, the native `SLACK_INSTANCES` loop — pinned by the two registration tests.
 - **Bot-inbound guard** (`slack-a2a-guard.ts`): drops bot-authored inbound at the bridge by default; feature skills register a narrower admission policy on its seam.
 - **Provisioning core** (`src/provisioning/slack-app.ts`): manifest template, scope/event constants, and the broker + manager-token transports for creating a Slack app programmatically. Nothing on the adapter path imports it — the setup wizard's auto-provision pre-step and feature skills do.
 - **Container skills**: `slack-formatting/` (mrkdwn syntax; synced to `~/.claude/skills`).
