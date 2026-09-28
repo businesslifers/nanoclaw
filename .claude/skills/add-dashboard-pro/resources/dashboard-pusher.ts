@@ -2,12 +2,27 @@
  * Dashboard pusher — collects NanoClaw state and POSTs a JSON
  * snapshot to the dashboard's /api/ingest endpoint every interval.
  */
+import {
+  getAdminsOfAgentGroupSync,
+  getAgentGroupSync,
+  getAllAgentGroupsSync,
+  getAllMessagingGroupsSync,
+  getAllUsersSync,
+  getDestinationsSync,
+  getLiveContainerConfigSync,
+  getMembersSync,
+  getMessagingGroupAgentsSync,
+  getSessionsByAgentGroupSync,
+  getUserDmsForUserSync,
+  getUserRolesSync,
+  getUserSync,
+  rawDb,
+} from './central-db-sync.js';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import Database from 'better-sqlite3';
 
-import { getAgentGroupSync as getAgentGroup, getAllAgentGroupsSync as getAllAgentGroups } from './db/sqlite-legacy.js';
 import { getRecentAudit } from './db/dashboard-audit.js';
 import { listWikis } from './wiki/discovery.js';
 // Pricing table — USD per 1M tokens. Dashboard cost columns are
@@ -48,12 +63,18 @@ import { listWikis } from './wiki/discovery.js';
 //     gpt-5.5+ tiers) aren't modelled, same as Anthropic's — the aggregated
 //     bags can't be split back into per-request context sizes.
 const PRICING = {
+  'opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
   opus: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   'opus-legacy': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  'fable-5-1': { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   fable: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // GPT-6 short-context standard-tier rates (developers.openai.com pricing, 2026-09-28).
+  'gpt-6-astra': { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
+  'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2 },
+  'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.1 },
   'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
   'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
   'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
@@ -66,13 +87,23 @@ const PRICING = {
 
 function modelFamily(model: string): keyof typeof PRICING | null {
   const m = (model || '').toLowerCase();
+  // Fable/Mythos 5.1 keep the 10/50 rate but cut cache reads to 0.25.
+  if (/(fable|mythos)-5-1/.test(m)) return 'fable-5-1';
   if (m.includes('fable') || m.includes('mythos')) return 'fable';
+  // Opus 5.5 is cheaper than the rest of the 4.5+ line (4/20). Bare `opus`
+  // stays on 5/25: costs are keyed by the resolved id from the JSONL, not
+  // the alias, so the alias only reaches here from legacy rows.
+  if (m.includes('opus-5-5')) return 'opus-5-5';
   // Opus 4.5 onward (incl. the bare `opus` alias, which the SDK resolves to a
   // 4.8+ id) bills at 5/25; Opus 4.1, 4.0 and Opus 3 billed at 15/75.
   if (m.includes('opus')) return /opus-(3|4-0|4-1)|claude-3-opus|opus-4-2025|opus-4$/.test(m) ? 'opus-legacy' : 'opus';
   if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
+  if (m.includes('gpt-6-astra')) return 'gpt-6-astra';
+  if (m.includes('gpt-6-luna')) return 'gpt-6-luna';
+  // Unknown gpt-6 slugs price at the sol tier rather than falling to 0.
+  if (m.includes('gpt-6')) return 'gpt-6-sol';
   if (m.includes('gpt-5.6-sol')) return 'gpt-5.6-sol';
   if (m.includes('gpt-5.6-terra')) return 'gpt-5.6-terra';
   if (m.includes('gpt-5.6-luna')) return 'gpt-5.6-luna';
@@ -115,26 +146,14 @@ export function computeCostUsd(model: string, tokens: TokenBag): number {
     (tokens.cacheCreationTokens / 1_000_000) * p.cacheWrite
   );
 }
-import { getSessionsByAgentGroupSync as getSessionsByAgentGroup } from './db/sqlite-legacy.js';
-import {
-  getAllMessagingGroupsSync as getAllMessagingGroups,
-  getMessagingGroupAgentsSync as getMessagingGroupAgents,
-} from './db/sqlite-legacy.js';
 // Agent-to-agent and permissions concerns live in module subdirectories in
 // v2, not flat under src/db. Import from their canonical locations.
-import { getDestinationsSync as getDestinations } from './db/sqlite-legacy.js';
-import { getMembersSync as getMembers } from './db/sqlite-legacy.js';
-import { getAllUsersSync as getAllUsers, getUserSync as getUser } from './db/sqlite-legacy.js';
-import { getAdminsOfAgentGroupSync as getAdminsOfAgentGroup, getUserRolesSync as getUserRoles } from './db/sqlite-legacy.js';
-import { getUserDmsForUserSync as getUserDmsForUser } from './db/sqlite-legacy.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
-import { getLiveContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
 import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { collectWorkItems } from './dashboard-work-items.js';
-import { getRawDb } from './db/sqlite-legacy.js';
 import { log } from './log.js';
 import { getEffortPresets, getModelPresets } from './dashboard-model-presets.js';
 
@@ -466,7 +485,7 @@ function errorLogTouchedRecently(thresholdMs = 5 * 60 * 1000): boolean {
 }
 
 function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
-  const allAgentGroups = getAllAgentGroups();
+  const allAgentGroups = getAllAgentGroupsSync();
   const agentById = new Map(allAgentGroups.map((g) => [g.id, g] as const));
 
   // Pre-fetch container config per group once so we can resolve effective
@@ -474,7 +493,7 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   // an N+1 lookup. The dashboard surfaces the same value the runtime would
   // pick — agent_groups.agent_provider falls through to container_configs.provider
   // (mirroring resolveProviderName in container-runner.ts), and similarly for model.
-  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfig(g.id)] as const));
+  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfigSync(g.id)] as const));
   const effectiveProvider = (gid: string): string | null => {
     const ag = agentById.get(gid);
     return ag?.agent_provider || containerConfigById.get(gid)?.provider || null;
@@ -486,13 +505,13 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
 
   // Pre-compute parent + sub-agent-count for every group based on the
   // `parent` destination convention that create_agent sets up. Cheap: one
-  // getDestinations() per group, reused below. Agents not created via
+  // getDestinationsSync() per group, reused below. Agents not created via
   // create_agent (e.g. the Content Team built by scripts) may lack this
   // row and render as top-level, which is correct.
   const parentByChild = new Map<string, string>(); // childId → parentId
   const subAgentCount = new Map<string, number>(); // parentId → count
   for (const ag of allAgentGroups) {
-    const dests = getDestinations(ag.id);
+    const dests = getDestinationsSync(ag.id);
     for (const d of dests) {
       if (d.target_type === 'agent' && d.local_name === 'parent') {
         parentByChild.set(ag.id, d.target_id);
@@ -502,14 +521,14 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   }
 
   return allAgentGroups.map((g) => {
-    const sessions = getSessionsByAgentGroup(g.id);
+    const sessions = getSessionsByAgentGroupSync(g.id);
     const running = sessions.filter((s) => s.container_status === 'running' || s.container_status === 'idle');
     // Enrich destinations so the UI can render agent vs channel rows
     // differently without a second lookup per row. For agent-type rows
     // include the target's display name, provider, and model so the
     // sub-agent table can show "claude · opus[1m]" / "codex · gpt-5.4"
     // / "claude · default" without extra API calls.
-    const destinations = getDestinations(g.id).map((d) => {
+    const destinations = getDestinationsSync(g.id).map((d) => {
       if (d.target_type !== 'agent') return d;
       const t = agentById.get(d.target_id);
       return {
@@ -519,17 +538,17 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
         target_model: effectiveModel(d.target_id),
       };
     });
-    const members = getMembers(g.id).map((m) => {
-      const user = getUser(m.user_id);
+    const members = getMembersSync(g.id).map((m) => {
+      const user = getUserSync(m.user_id);
       return { ...m, display_name: user?.display_name ?? null };
     });
-    const admins = getAdminsOfAgentGroup(g.id).map((a) => {
-      const user = getUser(a.user_id);
+    const admins = getAdminsOfAgentGroupSync(g.id).map((a) => {
+      const user = getUserSync(a.user_id);
       return { ...a, display_name: user?.display_name ?? null };
     });
 
     // Wirings
-    const db = getRawDb();
+    const db = rawDb();
     const wirings = db
       .prepare(
         `SELECT mga.*, mg.channel_type, mg.platform_id, mg.name as mg_name, mg.is_group, mg.unknown_sender_policy
@@ -578,7 +597,7 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
 }
 
 function collectSessions() {
-  const db = getRawDb();
+  const db = rawDb();
   return db
     .prepare(
       `SELECT s.*, ag.name as agent_group_name, ag.folder as agent_group_folder,
@@ -592,7 +611,7 @@ function collectSessions() {
 }
 
 function collectChannels() {
-  const messagingGroups = getAllMessagingGroups();
+  const messagingGroups = getAllMessagingGroupsSync();
   const liveAdapters = getActiveAdapters().map((a) => a.channelType);
   const registeredChannels = getRegisteredChannelNames();
 
@@ -608,8 +627,8 @@ function collectChannels() {
       };
     }
 
-    const agents = getMessagingGroupAgents(mg.id).map((a) => {
-      const group = getAgentGroup(a.agent_group_id);
+    const agents = getMessagingGroupAgentsSync(mg.id).map((a) => {
+      const group = getAgentGroupSync(a.agent_group_id);
       return { agent_group_id: a.agent_group_id, agent_group_name: group?.name ?? null, priority: a.priority };
     });
 
@@ -636,11 +655,11 @@ function collectChannels() {
 }
 
 function collectUsers() {
-  return getAllUsers().map((u) => {
-    const roles = getUserRoles(u.id);
-    const dms = getUserDmsForUser(u.id);
+  return getAllUsersSync().map((u) => {
+    const roles = getUserRolesSync(u.id);
+    const dms = getUserDmsForUserSync(u.id);
 
-    const db = getRawDb();
+    const db = rawDb();
     const memberships = db
       .prepare(
         `SELECT agm.agent_group_id, ag.name as agent_group_name
@@ -672,7 +691,7 @@ function collectUsers() {
 function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   const sessionsDir = path.join(DATA_DIR, 'v2-sessions');
   const allEntries: Array<TokenEntry & { agentGroupId: string }> = [];
-  const agentGroups = getAllAgentGroups();
+  const agentGroups = getAllAgentGroupsSync();
   const nameMap = new Map(agentGroups.map((g) => [g.id, g.name]));
 
   if (fs.existsSync(sessionsDir)) {
@@ -680,7 +699,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
       // Claude Code transcript (.claude-shared/projects/*.jsonl)
       const claudeEntries = scanJsonlTokens(path.join(sessionsDir, agDir));
       allEntries.push(...claudeEntries.map((e) => ({ ...e, agentGroupId: agDir })));
-      // Codex app-server trace log (per-group .codex-shared/logs_2.sqlite)
+      // Codex app-server logs (logs_2.sqlite per session)
       const codexEntries = scanCodexTokens(path.join(sessionsDir, agDir));
       allEntries.push(...codexEntries.map((e) => ({ ...e, agentGroupId: agDir })));
     }
@@ -852,63 +871,36 @@ function scanJsonlTokens(agentDir: string): TokenEntry[] {
 }
 
 /**
- * Pull Codex per-turn token usage from a group's app-server trace log.
+ * Pull Codex per-turn token usage from each session's app-server logs.
  *
- * Codex writes a `logs_2.sqlite` feedback-trace DB under its CODEX_HOME. The
- * current /add-codex layout mounts CODEX_HOME from a per-GROUP `.codex-shared`
- * dir, so the DB is per group. (The old hand-backported provider used a
- * per-SESSION `<sess>/codex/` CODEX_HOME, so this used to scan
- * `<sess>/codex/logs_2.sqlite` — a path the new layout never creates, which
- * left the Codex token panel silently empty.) We locate the DB anywhere under
- * `.codex-shared` (codex's exact subpath has drifted across versions) and
- * degrade to no entries if it's absent or its schema differs.
- *
- * Each `response.completed` body carries a JSON usage block like:
+ * Codex stores structured trace data in `<session>/codex/logs_2.sqlite`;
+ * every `response.completed` SSE event carries a JSON usage block like:
  *   "usage":{"input_tokens":N,"input_tokens_details":{"cached_tokens":C},"output_tokens":M,...}
- * Model name appears as `model=<name>` in the same body. We pair the two into
- * an entry shaped like the Claude-side bag so both feed the same totals.
+ * Model name is earlier in the same log body as `model=<name>` in the
+ * tracing spans. We pair the two to synthesise an entry shaped like the
+ * Claude-side bag so both feed the same totals.
  *
  * Cache semantics differ: Claude reports cache read + creation separately,
  * Codex reports cached_tokens (reads only). We bucket them as cacheReadTokens
  * and leave cacheCreationTokens=0 for Codex.
- *
- * NOTE: unverified against a live codex@0.138 run (needs vault auth + a real
- * turn — no `.codex-shared` exists until then). If the panel stays empty once
- * a codex group runs, the fallback is to capture usage from the provider's
- * app-server `turn/completed` stream and persist it ourselves rather than
- * scraping codex's internal DB.
  */
-function findCodexTraceDbs(root: string, maxDepth = 3): string[] {
-  const found: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    let ents: fs.Dirent[];
-    try {
-      ents = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of ents) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && e.name === 'logs_2.sqlite') found.push(full);
-      else if (e.isDirectory() && depth > 0) walk(full, depth - 1);
-    }
-  };
-  walk(root, maxDepth);
-  return found;
-}
-
 function scanCodexTokens(agentDir: string): TokenEntry[] {
   const entries: TokenEntry[] = [];
-  const dbPaths = findCodexTraceDbs(path.join(agentDir, '.codex-shared'));
-  if (dbPaths.length === 0) return entries;
-
+  let sessNames: string[];
+  try {
+    sessNames = fs.readdirSync(agentDir).filter((d) => d.startsWith('sess-'));
+  } catch {
+    return entries;
+  }
   const usageRe = /"usage":\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
   // Best-effort ISO timestamp scrape from the log body — matches the standard
   // 2025-01-02T03:04:05(.000)Z shape that Codex's tracing layer emits. If we
   // can't find one, the entry gets `timestamp: ''` and is treated as
   // "always include" by the range filter (matches the pre-range behavior).
   const tsRe = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/;
-  for (const dbPath of dbPaths) {
+  for (const sess of sessNames) {
+    const dbPath = path.join(agentDir, sess, 'codex', 'logs_2.sqlite');
+    if (!fs.existsSync(dbPath)) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true });
@@ -945,7 +937,7 @@ function scanCodexTokens(agentDir: string): TokenEntry[] {
         });
       }
     } catch {
-      /* missing `logs` table / different schema / locked DB — skip */
+      /* skip session */
     } finally {
       db?.close();
     }
@@ -958,7 +950,7 @@ function collectContextWindows() {
   if (!fs.existsSync(sessionsDir)) return [];
 
   const results: unknown[] = [];
-  const agentGroups = getAllAgentGroups();
+  const agentGroups = getAllAgentGroupsSync();
   const nameMap = new Map(agentGroups.map((g) => [g.id, g.name]));
 
   for (const agDir of fs.readdirSync(sessionsDir).filter((d) => d.startsWith('ag-'))) {
@@ -1175,7 +1167,7 @@ function collectMessages() {
 }
 
 function collectWikis() {
-  const groups = getAllAgentGroups().map((g) => ({
+  const groups = getAllAgentGroupsSync().map((g) => ({
     id: g.id,
     name: g.name,
     folder: g.folder,

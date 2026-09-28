@@ -40,20 +40,33 @@ const CLAUDE_PRESETS = [
   'fable',
   'opus[1m]',
   'sonnet[1m]',
-  'claude-opus-5',
+  'claude-opus-5-5',
+  'claude-fable-5-1',
   'claude-sonnet-5',
-  'claude-fable-5',
   'claude-haiku-4-5',
+  'claude-opus-5',
+  'claude-fable-5',
 ];
-// Mirrors the list-visible slice of `codex debug models` as of 2026-07-24,
+// Mirrors the list-visible slice of `codex debug models` as of 2026-09-28
+// (codex-cli 0.155.1 — the server gates newer slugs by client version, so a
+// host codex older than the image's cli-tools.json pin hides new models),
 // in catalog-priority order. Only ever served when the codex bin can't be
 // found or the call fails — a successful refresh replaces it wholesale, so
 // this going stale degrades the dropdown, never the stored value.
-const CODEX_FALLBACK = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
+const CODEX_FALLBACK = [
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+];
 
 // Effort vocab is per-provider and stable (an SDK/CLI enum, not a server-side
 // catalog), so static lists don't go stale the way codex model slugs do.
-// claude: agent-sdk EffortLevel (default 'high' when unset); codex: the
+// claude: agent-sdk EffortLevel (unset = the model's own default: 'medium'
+// on Opus 5.5, 'high' on most others); codex: the
 // model_reasoning_effort values codex-app-server accepts.
 const CLAUDE_EFFORT_PRESETS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CODEX_EFFORT_PRESETS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];

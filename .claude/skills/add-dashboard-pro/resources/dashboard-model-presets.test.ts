@@ -69,10 +69,12 @@ describe('getModelPresets', () => {
       'fable',
       'opus[1m]',
       'sonnet[1m]',
-      'claude-opus-5',
+      'claude-opus-5-5',
+      'claude-fable-5-1',
       'claude-sonnet-5',
-      'claude-fable-5',
       'claude-haiku-4-5',
+      'claude-opus-5',
+      'claude-fable-5',
     ]);
     expect(getModelPresets(null)).toEqual(getModelPresets('claude'));
     expect(getModelPresets('CLAUDE')).toEqual(getModelPresets('claude'));
@@ -93,7 +95,15 @@ describe('getModelPresets', () => {
     // First call: cache empty → fallback served, refresh kicked off (if a
     // codex bin is resolvable on this machine; otherwise fallback is stamped).
     const first = getModelPresets('codex');
-    expect(first).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
+    expect(first).toEqual([
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+    ]);
 
     if (captured) {
       captured(null, LIVE_CATALOG, '');
@@ -113,12 +123,13 @@ describe('getModelPresets', () => {
 
     captured(new Error('boom'), '', '');
     expect(getModelPresets('codex')).toEqual([
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
     ]);
   });
 });
