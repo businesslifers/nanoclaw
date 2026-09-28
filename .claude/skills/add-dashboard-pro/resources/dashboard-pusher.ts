@@ -32,11 +32,14 @@ import { listWikis } from './wiki/discovery.js';
 //     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
 //     the standard sonnet rate above after that date; update the 'sonnet-5'
 //     entry then (platform.claude.com/docs/en/about-claude/pricing#claude-sonnet-5-introductory-pricing).
-//   - OpenAI gpt-5 family (ChatGPT Plus subscription OR API), from
-//     developers.openai.com/api/docs/pricing:
-//       gpt-5.6-sol   — in 5,    out 30,   cache-read 0.5
-//       gpt-5.6-terra — in 2.5,  out 15,   cache-read 0.25
-//       gpt-5.6-luna  — in 1,    out 6,    cache-read 0.1
+//   - OpenAI gpt-6 / gpt-5 family (ChatGPT Plus subscription OR API), from
+//     developers.openai.com/api/docs/pricing (checked 2026-09-28):
+//       gpt-6-astra   — in 10,   out 50,   cache-read 1
+//       gpt-6-sol     — in 2,    out 10,   cache-read 0.2
+//       gpt-6-luna    — in 0.1,  out 0.5,  cache-read 0.01
+//       gpt-5.6-sol   — in 4,    out 20,   cache-read 0.4
+//       gpt-5.6-terra — in 2,    out 12,   cache-read 0.2
+//       gpt-5.6-luna  — in 0.2,  out 1.2,  cache-read 0.02
 //       gpt-5.5       — in 5,    out 30,   cache-read 0.5
 //       gpt-5.4       — in 2.5,  out 15,   cache-read 0.25
 //       gpt-5.4-mini  — in 0.75, out 4.5,  cache-read 0.075
@@ -56,13 +59,12 @@ const PRICING = {
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  // GPT-6 short-context standard-tier rates (developers.openai.com pricing, 2026-09-28).
   'gpt-6-astra': { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
   'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2 },
   'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.1 },
-  'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
-  'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
-  'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
+  'gpt-5.6-sol': { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 4 },
+  'gpt-5.6-terra': { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  'gpt-5.6-luna': { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
   'gpt-5.5': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
   'gpt-5.4': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
   'gpt-5.4-mini': { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0.75 },
