@@ -48,12 +48,18 @@ import { listWikis } from './wiki/discovery.js';
 //     gpt-5.5+ tiers) aren't modelled, same as Anthropic's — the aggregated
 //     bags can't be split back into per-request context sizes.
 const PRICING = {
+  'opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
   opus: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   'opus-legacy': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  'fable-5-1': { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
   fable: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // GPT-6 short-context standard-tier rates (developers.openai.com pricing, 2026-09-28).
+  'gpt-6-astra': { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
+  'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2 },
+  'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.1 },
   'gpt-5.6-sol': { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
   'gpt-5.6-terra': { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
   'gpt-5.6-luna': { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
@@ -66,13 +72,23 @@ const PRICING = {
 
 function modelFamily(model: string): keyof typeof PRICING | null {
   const m = (model || '').toLowerCase();
+  // Fable/Mythos 5.1 keep the 10/50 rate but cut cache reads to 0.25.
+  if (/(fable|mythos)-5-1/.test(m)) return 'fable-5-1';
   if (m.includes('fable') || m.includes('mythos')) return 'fable';
+  // Opus 5.5 is cheaper than the rest of the 4.5+ line (4/20). Bare `opus`
+  // stays on 5/25: costs are keyed by the resolved id from the JSONL, not
+  // the alias, so the alias only reaches here from legacy rows.
+  if (m.includes('opus-5-5')) return 'opus-5-5';
   // Opus 4.5 onward (incl. the bare `opus` alias, which the SDK resolves to a
   // 4.8+ id) bills at 5/25; Opus 4.1, 4.0 and Opus 3 billed at 15/75.
   if (m.includes('opus')) return /opus-(3|4-0|4-1)|claude-3-opus|opus-4-2025|opus-4$/.test(m) ? 'opus-legacy' : 'opus';
   if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
   if (m.includes('haiku')) return 'haiku';
+  if (m.includes('gpt-6-astra')) return 'gpt-6-astra';
+  if (m.includes('gpt-6-luna')) return 'gpt-6-luna';
+  // Unknown gpt-6 slugs price at the sol tier rather than falling to 0.
+  if (m.includes('gpt-6')) return 'gpt-6-sol';
   if (m.includes('gpt-5.6-sol')) return 'gpt-5.6-sol';
   if (m.includes('gpt-5.6-terra')) return 'gpt-5.6-terra';
   if (m.includes('gpt-5.6-luna')) return 'gpt-5.6-luna';
