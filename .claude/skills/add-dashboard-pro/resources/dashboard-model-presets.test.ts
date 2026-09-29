@@ -71,10 +71,11 @@ describe('getModelPresets', () => {
       'sonnet[1m]',
       'claude-opus-5-5',
       'claude-fable-5-1',
-      'claude-sonnet-5',
+      'claude-sonnet-5-5',
       'claude-haiku-4-5',
       'claude-opus-5',
       'claude-fable-5',
+      'claude-sonnet-5',
     ]);
     expect(getModelPresets(null)).toEqual(getModelPresets('claude'));
     expect(getModelPresets('CLAUDE')).toEqual(getModelPresets('claude'));

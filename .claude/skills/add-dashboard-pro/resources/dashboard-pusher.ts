@@ -28,10 +28,10 @@ import { listWikis } from './wiki/discovery.js';
 //     The opus rate halved at Opus 4.5: 4.5 through 5 all bill at 5/25, while
 //     Opus 4.1 and older stayed at 15/75 — hence the separate 'opus-legacy'
 //     entry, which only historical aggregates can still hit.
-//   - Claude Sonnet 5 (`claude-sonnet-5`): introductory pricing through
-//     2026-08-31 — in 2, out 10, cache-read 0.2, cache-write 2.5. Reverts to
-//     the standard sonnet rate above after that date; update the 'sonnet-5'
-//     entry then (platform.claude.com/docs/en/about-claude/pricing#claude-sonnet-5-introductory-pricing).
+//   - Claude Sonnet 5 / 5.5 (`claude-sonnet-5`, `claude-sonnet-5-5`): in 2,
+//     out 10, cache-read 0.2, cache-write 2.5. The 2/10 rate began as Sonnet
+//     5's introductory price and was made permanent at the Sonnet 5.5 launch
+//     (2026-09-28); the 'sonnet-5' entry matches both ids.
 //   - OpenAI gpt-6 / gpt-5 family (ChatGPT Plus subscription OR API), from
 //     developers.openai.com/api/docs/pricing (checked 2026-09-28):
 //       gpt-6-astra   — in 10,   out 50,   cache-read 1

@@ -42,10 +42,11 @@ const CLAUDE_PRESETS = [
   'sonnet[1m]',
   'claude-opus-5-5',
   'claude-fable-5-1',
-  'claude-sonnet-5',
+  'claude-sonnet-5-5',
   'claude-haiku-4-5',
   'claude-opus-5',
   'claude-fable-5',
+  'claude-sonnet-5',
 ];
 // Mirrors the list-visible slice of `codex debug models` as of 2026-09-28
 // (codex-cli 0.155.1 — the server gates newer slugs by client version, so a
