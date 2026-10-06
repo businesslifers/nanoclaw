@@ -18,8 +18,8 @@ severing merge-base ancestry with `upstream/main`. **Every staged-`git merge`
 step in the transactional flow below will false-conflict on nearly every shared
 file here.** Do not run it.
 
-Instead follow the classify procedure in the repo's `CLAUDE.md`
-("Git hygiene: live `groups/` drift + severed upstream history"):
+Instead follow the classify procedure in the repo's `docs/upstream-sync.md`
+(read it in full first — conflict patterns, sibling branches, exclusions, stamp):
 
 1. `git log last-synced-upstream..upstream/main` for net-new work.
 2. Classify each changed file: `git diff --quiet last-synced-upstream HEAD -- <file>`
