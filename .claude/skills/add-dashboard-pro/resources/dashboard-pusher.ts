@@ -25,6 +25,8 @@ import { listWikis } from './wiki/discovery.js';
 //       fable  — in 10,   out 50,   cache-read 1,     cache-write 12.5
 //       sonnet — in 3,    out 15,   cache-read 0.3,   cache-write 3.75
 //       haiku  — in 1,    out 5,    cache-read 0.1,   cache-write 1.25
+//     Claude Haiku 5.5 (`claude-haiku-5-5`): in 0.1, out 0.5; cache rates
+//     assumed at the usual 0.1x read / 1.25x write.
 //     The opus rate halved at Opus 4.5: 4.5 through 5 all bill at 5/25, while
 //     Opus 4.1 and older stayed at 15/75 — hence the separate 'opus-legacy'
 //     entry, which only historical aggregates can still hit.
@@ -58,6 +60,7 @@ const PRICING = {
   fable: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
   'sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  'haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   'gpt-6-astra': { input: 10, output: 50, cacheRead: 1, cacheWrite: 10 },
   'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2 },
@@ -86,6 +89,9 @@ function modelFamily(model: string): keyof typeof PRICING | null {
   if (m.includes('opus')) return /opus-(3|4-0|4-1)|claude-3-opus|opus-4-2025|opus-4$/.test(m) ? 'opus-legacy' : 'opus';
   if (m.includes('sonnet-5')) return 'sonnet-5';
   if (m.includes('sonnet')) return 'sonnet';
+  // Haiku 5.5 is a tenth of Haiku 4.5's rate (0.1/0.5 up to 100K-token
+  // prompts; the 0.5/2.5 long-prompt tier isn't modelled, as above).
+  if (m.includes('haiku-5-5')) return 'haiku-5-5';
   if (m.includes('haiku')) return 'haiku';
   if (m.includes('gpt-6-astra')) return 'gpt-6-astra';
   if (m.includes('gpt-6-luna')) return 'gpt-6-luna';
