@@ -245,7 +245,7 @@ If any match, ask the operator with AskUserQuestion:
 
 If overlay (either form), apply these adjustments downstream:
 
-- **Skip phase 5b** — OneCLI agent already exists. List its current assigned secrets (`onecli agents secrets --id <id>`) and confirm they match the v1 twin's set. No `onecli agents create` call.
+- **Skip phase 5b** — OneCLI agent already exists. List its current grants (`onecli agents grants list --id <id>`) and confirm they match the v1 twin's set. No `onecli agents create` call.
 - **Skip phase 6 (`init-group-agent.ts`)** — agent group + scaffold already in place. Capture the existing `agent_groups.id` as `V2_AGENT_GROUP_ID`. Run phase 6a's wiring audit anyway — re-ports often inherit a stray default-DM-agent wiring on the same messaging group.
 - **Verify the `agent_destinations` self-row exists** — `init-group-agent.ts` auto-creates a central `agent_destinations` row when it wires a fresh agent to its messaging group, but skeleton v2 agents that pre-existed via other paths (dashboard, manual scripting, channel adapter auto-create + later manual `messaging_group_agents` insert) often end up wired *without* this row. Skipping phase 6 means you skip that auto-create — and an empty `agent_destinations` is a silent phase 10 blocker: the agent runs and produces correct answers, but the runtime addendum tells it "you have no configured destinations," `dispatchResultText`'s strict `<message to="...">` parser finds no blocks to route, and the reply lands in scratchpad with `WARNING: agent output had no <message to="..."> blocks — nothing was sent`. Check and fix before phase 10:
 
@@ -370,23 +370,23 @@ for a in json.load(sys.stdin):
 "
 ```
 
-If found, list its assigned secrets and surface them to the operator with AskUserQuestion: "v1 has secrets X, Y, Z assigned to this team — clone the same set, mode=all, or start fresh with just Anthropic?" Don't decide silently; the answer often differs by team scope.
+If found, list its assigned secrets and surface them to the operator with AskUserQuestion: "v1 has secrets X, Y, Z attached to this team — clone the same set, or start fresh with just the model key?" Don't decide silently; the answer often differs by team scope.
 
 ```bash
 # 1. Discover v1's secret assignments (V1's identifier is its v1 group name, e.g. "whatsapp-<team>").
-V1_OC_ID=$(onecli agents list 2>/dev/null | python3 -c "import json,sys; ids=[a['id'] for a in json.load(sys.stdin) if a.get('identifier')=='<v1-onecli-identifier>']; print(ids[0] if ids else '')")
-[ -n "$V1_OC_ID" ] && onecli agents secrets --id "$V1_OC_ID"
-onecli secrets list
+V1_OC_ID=$(onecli agents list --max 500 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else d['data']; ids=[a['id'] for a in d if a.get('identifier')=='<v1-onecli-identifier>']; print(ids[0] if ids else '')")
+[ -n "$V1_OC_ID" ] && onecli agents grants list --id "$V1_OC_ID"
+onecli secrets list --max 500
 
 # 2. AFTER phase 6 completes — pre-create the v2 agent. Identifier MUST match v2 agent_groups.id.
 onecli agents create --identifier <V2_AGENT_GROUP_ID> --name "<Display Name>"
 
-# 3. Either flip to mode=all (every host-pattern-matching secret injects)
-NEW=$(onecli agents list | python3 -c "import json,sys; print([a['id'] for a in json.load(sys.stdin) if a.get('identifier')=='<V2_AGENT_GROUP_ID>'][0])")
-onecli agents set-secret-mode --id "$NEW" --mode all
-
-# OR stay selective and copy v1's exact set
-onecli agents set-secrets --id "$NEW" --secret-ids "$(onecli agents secrets --id "$V1_OC_ID" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
+# 3. Attach v1's secrets one by one (gateway 1.44+ grants; attach is additive).
+#    There is no "all" mode any more — the host attaches the model key on spawn.
+NEW=$(onecli agents list --max 500 | python3 -c "import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else d['data']; print([a['id'] for a in d if a.get('identifier')=='<V2_AGENT_GROUP_ID>'][0])")
+for S in $(onecli agents grants list --id "$V1_OC_ID" | jq -r '.secrets[].secretId'); do
+  onecli agents grants attach-secret --id "$NEW" --secret-id "$S"
+done
 ```
 
 For lane agents (phase 8), `init-lane-agent.ts --clone-secrets-from-parent` does this automatically — no manual `onecli` work needed.
