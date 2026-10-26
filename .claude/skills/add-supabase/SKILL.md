@@ -84,26 +84,21 @@ Verify:
 onecli secrets list | grep -i supabase
 ```
 
-### Assign the secret to selective-mode agents
+### Attach the secret to the agents that use Supabase
 
-Agents in `secretMode: "all"` already auto-receive every secret whose host pattern matches — no assignment needed (and calling `set-secrets` on them would flip them to `selective` and strip that auto-access). Only `selective`-mode agents need explicit assignment.
-
-`set-secrets` REPLACES the entire list, so read-then-merge per agent. Ask the user which agents should get the credential (typical answers: only the dev-supabase Derek; all `mediamate` Dereks; all selective agents). Then run:
+On a OneCLI 1.44+ gateway every agent receives only the secrets attached to it (NanoClaw attaches just the group's model key on spawn). Ask the user which agent groups should get the credential (typical answer: only the dev-supabase Derek), then attach it to each one's OneCLI agent — attach is additive, nothing else on the agent changes:
 
 ```bash
-SUPABASE_SECRET_ID=$(onecli secrets list | jq -r '.[] | select(.name | test("(?i)supabase")) | .id' | head -1)
+SUPABASE_SECRET_ID=$(onecli secrets list --max 500 | jq -r '(if type=="array" then . else .data end)[] | select(.hostPattern == "api.supabase.com") | .id' | head -1)
 
-# Narrow this jq filter to the agents you want — e.g.
-#   select(.secretMode=="selective" and (.identifier // "" | test("dev-supabase")))
-# for just the dev-supabase Derek.
-onecli agents list | jq -r '.[] | select(.secretMode=="selective") | "\(.id)\t\(.name)"' | \
+# Narrow the identifier regex to the groups you want, e.g. "dev-supabase".
+onecli agents list --max 500 | jq -r '(if type=="array" then . else .data end)[] | select(.identifier // "" | test("dev-supabase")) | "\(.id)\t\(.name)"' | \
 while IFS=$'\t' read -r agent name; do
-  CURRENT=$(onecli agents secrets --id "$agent" | jq -r '.[]')
-  MERGED=$(printf '%s\n%s\n' "$CURRENT" "$SUPABASE_SECRET_ID" | grep -v '^$' | sort -u | paste -sd ',' -)
-  STATUS=$(onecli agents set-secrets --id "$agent" --secret-ids "$MERGED" | jq -r '.status')
-  echo "$name ($agent): $STATUS"
+  onecli agents grants attach-secret --id "$agent" --secret-id "$SUPABASE_SECRET_ID" >/dev/null && echo "attached: $name ($agent)"
 done
 ```
+
+Check one with `onecli agents grants list --id <agent-id>`; remove with `onecli agents grants detach-secret --id <agent-id> --secret-id <id>`. A group that has never spawned has no OneCLI agent yet — create it first with `onecli agents create --identifier <ag-id> --name "<name>"`.
 
 ## Phase 4: Ensure Supabase CLI in Container Image
 
