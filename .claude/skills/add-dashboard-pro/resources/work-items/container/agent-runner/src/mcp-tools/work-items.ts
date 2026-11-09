@@ -18,7 +18,7 @@
 // implementation). This tool reads the host-written work_items_cache
 // projection, which is not part of the semantic mailbox contract, so it stays
 // explicitly SQLite-only — see docs/agent-mailbox-seam-migration.md.
-import { getInboundDb } from '../mailbox/sqlite/connection.js';
+import { readInbound } from '../mailbox/sqlite/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { findByName } from '../destinations.js';
 import { registerTools } from './server.js';
@@ -81,9 +81,9 @@ interface CacheRow {
 }
 
 function hasCacheTable(): boolean {
-  const row = getInboundDb()
-    .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items_cache' LIMIT 1`)
-    .get();
+  const row = readInbound((db) =>
+    db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items_cache' LIMIT 1`).get(),
+  );
   return row != null;
 }
 
@@ -314,9 +314,16 @@ export const listWorkItems: McpToolDefinition = {
     }
     let rows: CacheRow[];
     try {
-      rows = getInboundDb()
-        .prepare('SELECT * FROM work_items_cache ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC')
-        .all() as CacheRow[];
+      // inbound.db is host-written: read through a fresh read-only connection
+      // (getInboundDb() became test-only upstream in #4118).
+      rows = readInbound(
+        (db) =>
+          db
+            .prepare(
+              'SELECT * FROM work_items_cache ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC',
+            )
+            .all() as CacheRow[],
+      );
     } catch (e) {
       return err(`could not read work_items_cache: ${e instanceof Error ? e.message : String(e)}`);
     }
