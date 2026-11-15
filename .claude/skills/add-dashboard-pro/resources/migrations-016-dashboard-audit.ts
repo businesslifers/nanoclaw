@@ -4,7 +4,6 @@ import type { Migration } from './index.js';
 export const migration016: Migration = {
   version: 16,
   name: 'dashboard-audit',
-  sqliteOnly: true,
   up(db: Database.Database) {
     db.exec(`
       CREATE TABLE dashboard_audit (

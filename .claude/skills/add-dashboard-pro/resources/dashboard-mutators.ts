@@ -7,34 +7,27 @@
  * method runs the DB write + side effects + audit row, then asks the
  * pusher to push immediately so the UI refreshes within ~1s.
  */
+import {
+  ensureContainerConfigSync,
+  getAgentGroupSync,
+  getContainerConfigSync,
+  getOwnersSync,
+  getSessionSync,
+  getSessionsByAgentGroupSync,
+  hasAdminPrivilegeSync,
+  updateAgentGroupSync,
+  updateContainerConfigScalarsSync,
+} from './central-db-sync.js';
 import type { IncomingMessage } from 'http';
 import Database from 'better-sqlite3';
 
 import { CronExpressionParser } from 'cron-parser';
 
 import { appendAudit } from './db/dashboard-audit.js';
-
-
-
-
+import { sqliteRaw } from './db/drivers/sqlite.js';
+import { getDb } from './db/connection.js';
 import { killContainer } from './container-runner.js';
-
-import { canAccessAgentGroupSync } from './dashboard-access-sync.js';
-// The dashboard package's mutator + permissions contracts are synchronous
-// (dist/types.d.ts), so every central read here goes through the legacy
-// SQLite handle rather than the async DbDriver. See src/db/sqlite-legacy.ts.
-import {
-  ensureContainerConfigSync as ensureContainerConfig,
-  getAgentGroupSync as getAgentGroup,
-  getContainerConfigSync as getContainerConfig,
-  getOwnersSync as getOwners,
-  getRawDb,
-  getSessionSync as getSession,
-  getSessionsByAgentGroupSync as getSessionsByAgentGroup,
-  hasAdminPrivilegeSync as hasAdminPrivilege,
-  updateAgentGroupSync as updateAgentGroup,
-  updateContainerConfigScalarsSync as updateContainerConfigScalars,
-} from './db/sqlite-legacy.js';
+import { canAccessAgentGroupDecisionSync } from './dashboard-access.js';
 import {
   cancelTask as cancelTaskPrim,
   pauseTask as pauseTaskPrim,
@@ -175,7 +168,7 @@ export interface MutatorContext {
  * any caller.
  */
 export function resolveDashboardActor(_req: IncomingMessage): string | undefined {
-  const owners = getOwners();
+  const owners = getOwnersSync();
   return owners[0]?.user_id;
 }
 
@@ -185,10 +178,10 @@ export function renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string
   }
   const newName = validateName(args.name);
 
-  const before = getAgentGroup(args.id);
+  const before = getAgentGroupSync(args.id);
   if (!before) throw new MutatorNotFoundError('agent group not found');
 
-  if (!hasAdminPrivilege(actorUserId, args.id)) {
+  if (!hasAdminPrivilegeSync(actorUserId, args.id)) {
     throw new MutatorAuthError('actor lacks admin privilege over this agent group');
   }
 
@@ -196,14 +189,14 @@ export function renameAgentGroup(args: RenameAgentGroupArgs, actorUserId: string
     return { id: before.id, name: before.name };
   }
 
-  const collision = getRawDb()
+  const collision = sqliteRaw(getDb())
     .prepare('SELECT id FROM agent_groups WHERE name = ? AND id != ? LIMIT 1')
     .get(newName, args.id) as { id: string } | undefined;
   if (collision) throw new MutatorConflictError('another agent group already uses this name');
 
-  const db = getRawDb();
+  const db = sqliteRaw(getDb());
   db.transaction(() => {
-    updateAgentGroup(args.id, { name: newName });
+    updateAgentGroupSync(args.id, { name: newName });
     appendAudit(
       {
         actor_user_id: actorUserId,
@@ -232,10 +225,10 @@ export function setAgentGroupHidden(
     throw new MutatorValidationError('hidden must be a boolean');
   }
 
-  const before = getAgentGroup(args.id);
+  const before = getAgentGroupSync(args.id);
   if (!before) throw new MutatorNotFoundError('agent group not found');
 
-  if (!hasAdminPrivilege(actorUserId, args.id)) {
+  if (!hasAdminPrivilegeSync(actorUserId, args.id)) {
     throw new MutatorAuthError('actor lacks admin privilege over this agent group');
   }
 
@@ -244,9 +237,9 @@ export function setAgentGroupHidden(
     return { id: before.id, hidden: beforeHidden };
   }
 
-  const db = getRawDb();
+  const db = sqliteRaw(getDb());
   db.transaction(() => {
-    updateAgentGroup(args.id, { hidden_in_dashboard: args.hidden ? 1 : 0 });
+    updateAgentGroupSync(args.id, { hidden_in_dashboard: args.hidden ? 1 : 0 });
     appendAudit(
       {
         actor_user_id: actorUserId,
@@ -275,10 +268,10 @@ export function updateAgentGroupModel(
   const newEffort = validateEffort(args.effort);
   const restart = args.restart === true;
 
-  const before = getAgentGroup(args.id);
+  const before = getAgentGroupSync(args.id);
   if (!before) throw new MutatorNotFoundError('agent group not found');
 
-  if (!hasAdminPrivilege(actorUserId, args.id)) {
+  if (!hasAdminPrivilegeSync(actorUserId, args.id)) {
     throw new MutatorAuthError('actor lacks admin privilege over this agent group');
   }
 
@@ -288,14 +281,14 @@ export function updateAgentGroupModel(
   // Effort has no resolution ladder — it lives only in container_configs
   // (materialized into container.json at spawn), unlike model which writes
   // agent_groups.model. `undefined` = field absent = leave untouched.
-  const beforeEffort = getContainerConfig(args.id)?.effort ?? null;
+  const beforeEffort = getContainerConfigSync(args.id)?.effort ?? null;
   const effortChanged = newEffort !== undefined && newEffort !== beforeEffort;
 
   if (modelChanged || effortChanged) {
-    const db = getRawDb();
+    const db = sqliteRaw(getDb());
     db.transaction(() => {
       if (modelChanged) {
-        updateAgentGroup(args.id, { model: newModel });
+        updateAgentGroupSync(args.id, { model: newModel });
         appendAudit(
           {
             actor_user_id: actorUserId,
@@ -310,8 +303,8 @@ export function updateAgentGroupModel(
       }
       if (effortChanged) {
         // Rows are backfilled at startup, but guard the never-seeded case.
-        ensureContainerConfig(args.id, before.agent_provider);
-        updateContainerConfigScalars(args.id, { effort: newEffort ?? null });
+        ensureContainerConfigSync(args.id, before.agent_provider);
+        updateContainerConfigScalarsSync(args.id, { effort: newEffort ?? null });
         appendAudit(
           {
             actor_user_id: actorUserId,
@@ -335,7 +328,7 @@ export function updateAgentGroupModel(
   // waits for the next natural spawn.
   let killed = 0;
   if (restart) {
-    for (const sess of getSessionsByAgentGroup(args.id)) {
+    for (const sess of getSessionsByAgentGroupSync(args.id)) {
       if (sess.container_status === 'running' || sess.container_status === 'idle') {
         killContainer(sess.id, `dashboard model change by ${actorUserId}`);
         killed++;
@@ -378,7 +371,7 @@ export function buildDashboardMutatorContext(): MutatorContext {
 // Each task lives as a `kind='task'` row inside its session's per-session
 // inbound.db (data/v2-sessions/<id>/inbound.db). The dashboard mutator
 // resolves the session via the central DB, opens its inbound.db, and
-// delegates to one of the primitives in `src/modules/scheduling/db.ts`.
+// delegates to one of the primitives in `src/mailbox/sqlite/tasks.ts`.
 //
 // Authorization is `canAccessAgentGroup` (member or higher) — this is more
 // permissive than the rename mutator's hasAdminPrivilege gate. Pause /
@@ -426,7 +419,7 @@ function readTaskRow(db: Database.Database, taskId: string): TaskRowSummary | un
 }
 
 function authorizeTaskAccess(actorUserId: string, agentGroupId: string): void {
-  const decision = canAccessAgentGroupSync(actorUserId, agentGroupId);
+  const decision = canAccessAgentGroupDecisionSync(actorUserId, agentGroupId);
   if (!decision.allowed) {
     throw new MutatorAuthError(`actor cannot access agent group ${agentGroupId}: ${decision.reason}`);
   }
@@ -446,7 +439,7 @@ function validateTaskArgs(args: unknown): asserts args is TaskMutatorArgs {
 export function cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult {
   validateTaskArgs(args);
 
-  const session = getSession(args.sessionId);
+  const session = getSessionSync(args.sessionId);
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
@@ -486,7 +479,7 @@ export function cancelTask(args: TaskMutatorArgs, actorUserId: string): TaskMuta
 export function pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult {
   validateTaskArgs(args);
 
-  const session = getSession(args.sessionId);
+  const session = getSessionSync(args.sessionId);
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
@@ -526,7 +519,7 @@ export function pauseTask(args: TaskMutatorArgs, actorUserId: string): TaskMutat
 export function resumeTask(args: TaskMutatorArgs, actorUserId: string): TaskMutatorResult {
   validateTaskArgs(args);
 
-  const session = getSession(args.sessionId);
+  const session = getSessionSync(args.sessionId);
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 
@@ -578,7 +571,7 @@ export function updateTask(args: UpdateTaskMutatorArgs, actorUserId: string): Ta
     }
   }
 
-  const session = getSession(args.sessionId);
+  const session = getSessionSync(args.sessionId);
   if (!session) throw new MutatorNotFoundError(`session ${args.sessionId} not found`);
   authorizeTaskAccess(actorUserId, session.agent_group_id);
 

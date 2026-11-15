@@ -27,7 +27,7 @@
  * wake one of them. None of the 6 current lead teams run that mode for their
  * lead session — whoever adds the first one that does needs to revisit this.
  */
-import { findSessionByAgentGroup } from '../../db/sessions.js';
+import { findSessionByAgentGroupSync } from '../../central-db-sync.js';
 import type { WorkItem } from '../../db/work-items.js';
 import { log } from '../../log.js';
 import { notifyAgent } from '../approvals/primitive.js';
@@ -113,17 +113,21 @@ export function affectedTeams(input: WakeDecisionInput): string[] {
  * spawn-hook projection refresh covers it: a team receiving its first work
  * item now has ≥1 row, so the has-items guard no longer skips it).
  */
-export async function refreshAndWake(input: WakeDecisionInput, message: string): Promise<void> {
+export function refreshAndWake(input: WakeDecisionInput, message: string): void {
   nudgeWorkItemsPusher();
   for (const team of affectedTeams(input)) {
-    await refreshWorkItemsProjection(team);
+    refreshWorkItemsProjection(team);
   }
   for (const team of decideWakeTargets(input)) {
-    const session = await findSessionByAgentGroup(team);
+    const session = findSessionByAgentGroupSync(team);
     if (!session) {
       log.debug('work-items wake skipped — no active session', { team });
       continue;
     }
-    await notifyAgent(session, message);
+    // Fire-and-forget — refreshAndWake is called from the dashboard's sync
+    // mutators as well as the async action path.
+    void Promise.resolve(notifyAgent(session, message)).catch((err) =>
+      log.error('work-items wake: notifyAgent failed', { team, err }),
+    );
   }
 }

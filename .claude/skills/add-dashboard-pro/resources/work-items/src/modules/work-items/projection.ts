@@ -15,15 +15,14 @@
  *       wake, so the woken agent sees a projection that already reflects
  *       the change it's being woken about.
  */
+import { getAgentGroupSync, getSessionsByAgentGroupSync, getUserSync } from '../../central-db-sync.js';
+import { ensureWorkItemsCacheTable } from '../../mailbox/sqlite/session-db.js';
 import fs from 'fs';
 
-import { getAgentGroup } from '../../db/agent-groups.js';
-import { getUser } from '../permissions/db/users.js';
-import { getSessionsByAgentGroup } from '../../db/sessions.js';
 import { listProjectionRowsForTeam, type WorkItem } from '../../db/work-items.js';
 import { log } from '../../log.js';
 import { inboundDbPath } from '../../mailbox/sqlite/paths.js';
-import { ensureWorkItemsCacheTable, openInboundDb } from '../../mailbox/sqlite/session-db.js';
+import { openInboundDb } from '../../mailbox/sqlite/session-db.js';
 
 export interface ProjectionRow {
   id: string;
@@ -54,37 +53,36 @@ export interface ProjectionRow {
 }
 
 /** Resolve display fields once per refresh; group/user lookups are memoized per call. */
-export async function buildProjectionRows(agentGroupId: string, items: WorkItem[]): Promise<ProjectionRow[]> {
+export function buildProjectionRows(agentGroupId: string, items: WorkItem[]): ProjectionRow[] {
   const refreshedAt = new Date().toISOString();
   const groupNames = new Map<string, string | null>();
-  const groupName = async (id: string | null): Promise<string | null> => {
+  const groupName = (id: string | null): string | null => {
     if (!id) return null;
-    if (!groupNames.has(id)) groupNames.set(id, (await getAgentGroup(id))?.name ?? null);
+    if (!groupNames.has(id)) groupNames.set(id, getAgentGroupSync(id)?.name ?? null);
     return groupNames.get(id) ?? null;
   };
   const titleById = new Map(items.map((i) => [i.id, i.title]));
 
-  const rows: ProjectionRow[] = [];
-  for (const item of items) {
+  return items.map((item) => {
     const isOwner = item.owner_agent_group_id === agentGroupId;
     const isAssignee = item.assignee_agent_group_id === agentGroupId;
     let assigneeKind: 'team' | 'human' | null = null;
     let assigneeName: string | null = null;
     if (item.assignee_agent_group_id) {
       assigneeKind = 'team';
-      assigneeName = await groupName(item.assignee_agent_group_id);
+      assigneeName = groupName(item.assignee_agent_group_id);
     } else if (item.assignee_user_id) {
       assigneeKind = 'human';
-      assigneeName = (await getUser(item.assignee_user_id))?.display_name ?? item.assignee_user_id;
+      assigneeName = getUserSync(item.assignee_user_id)?.display_name ?? item.assignee_user_id;
     } else if (item.assignee_label) {
       assigneeKind = 'human';
       assigneeName = item.assignee_label;
     }
-    rows.push({
+    return {
       id: item.id,
       relation: isOwner && isAssignee ? 'both' : isOwner ? 'owner' : 'assignee',
       owner_agent_group_id: item.owner_agent_group_id,
-      owner_name: await groupName(item.owner_agent_group_id),
+      owner_name: groupName(item.owner_agent_group_id),
       assignee_agent_group_id: item.assignee_agent_group_id,
       assignee_user_id: item.assignee_user_id,
       assignee_name: assigneeName,
@@ -106,9 +104,8 @@ export async function buildProjectionRows(agentGroupId: string, items: WorkItem[
       created_at: item.created_at,
       updated_at: item.updated_at,
       refreshed_at: refreshedAt,
-    });
-  }
-  return rows;
+    };
+  });
 }
 
 /**
@@ -116,23 +113,23 @@ export async function buildProjectionRows(agentGroupId: string, items: WorkItem[
  * Full delete+insert inside one transaction per session DB — the projection
  * is bounded (non-terminal + 14-day terminal window), so this stays cheap.
  */
-export async function refreshWorkItemsProjection(agentGroupId: string): Promise<void> {
+export function refreshWorkItemsProjection(agentGroupId: string): void {
   let rows: ProjectionRow[];
   try {
-    rows = await buildProjectionRows(agentGroupId, listProjectionRowsForTeam(agentGroupId));
+    rows = buildProjectionRows(agentGroupId, listProjectionRowsForTeam(agentGroupId));
   } catch (err) {
     log.error('work-items projection: central read failed', { agentGroupId, err });
     return;
   }
 
-  const sessions = (await getSessionsByAgentGroup(agentGroupId)).filter((s) => s.status === 'active');
+  const sessions = getSessionsByAgentGroupSync(agentGroupId).filter((s) => s.status === 'active');
   for (const session of sessions) {
     const dbPath = inboundDbPath(agentGroupId, session.id);
     if (!fs.existsSync(dbPath)) continue;
     try {
       const db = openInboundDb(dbPath);
+      ensureWorkItemsCacheTable(db);
       try {
-        ensureWorkItemsCacheTable(db);
         const insert = db.prepare(
           `INSERT INTO work_items_cache (
              id, relation, owner_agent_group_id, owner_name,

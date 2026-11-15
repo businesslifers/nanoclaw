@@ -4,7 +4,6 @@ import type { Migration } from './index.js';
 export const migration017: Migration = {
   version: 17,
   name: 'agent-group-hidden-dashboard',
-  sqliteOnly: true,
   up(db: Database.Database) {
     db.exec(`
       ALTER TABLE agent_groups

@@ -8,7 +8,8 @@
  * The dashboard pusher calls collectWorkItems() on every snapshot push
  * (~60s) and after every work-item mutator (via nudgePusher).
  */
-import { getRawDb, getAllAgentGroupsSync, getAllUsersSync, tableExistsSync } from './db/sqlite-legacy.js';
+import { getAllAgentGroupsSync, getAllUsersSync, hasTableSync, rawDb } from './central-db-sync.js';
+
 import { listAllWorkItems, isTerminalStatus } from './db/work-items.js';
 import { log } from './log.js';
 
@@ -58,7 +59,7 @@ export interface WorkItemSummary {
 
 export function collectWorkItems(): WorkItemSummary[] {
   try {
-    if (!tableExistsSync('work_items')) return [];
+    if (!hasTableSync('work_items')) return [];
 
     const groupNames = new Map(getAllAgentGroupsSync().map((g) => [g.id, g.name]));
     const userNames = new Map(getAllUsersSync().map((u) => [u.id, u.display_name ?? u.id]));
@@ -70,7 +71,7 @@ export function collectWorkItems(): WorkItemSummary[] {
     const titleById = new Map(items.map((i) => [i.id, i.title]));
 
     // One query for all notes (bounded per item in JS) instead of N queries.
-    const noteRows = getRawDb()
+    const noteRows = rawDb()
       .prepare(
         `SELECT work_item_id, ts, author_kind, author_id, note
            FROM work_item_notes ORDER BY work_item_id, ts ASC, id ASC`,

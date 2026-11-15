@@ -4,10 +4,11 @@
  * in the feature depends on), the derived completed_at transitions, and the
  * bounded projection filter (non-terminal + 14-day terminal window).
  */
+import { sqliteRaw } from './drivers/sqlite.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup } from './index.js';
-import { getRawDb } from './sqlite-legacy.js';
+import { getDb } from './connection.js';
 import {
   createWorkItem,
   getWorkItem,
@@ -114,7 +115,7 @@ describe('completed_at transitions', () => {
 describe('projection filter (non-terminal + 14-day terminal window)', () => {
   it('carries non-terminal items regardless of age', () => {
     const item = makeItem({ status: 'blocked' });
-    getRawDb()
+    sqliteRaw(getDb())
       .prepare('UPDATE work_items SET created_at = ?, updated_at = ? WHERE id = ?')
       .run('2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z', item.id);
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).toContain(item.id);
@@ -127,7 +128,7 @@ describe('projection filter (non-terminal + 14-day terminal window)', () => {
     const old = makeItem();
     updateWorkItem(old.id, { status: 'done' });
     const staleTs = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    getRawDb()
+    sqliteRaw(getDb())
       .prepare('UPDATE work_items SET completed_at = ?, updated_at = ? WHERE id = ?')
       .run(staleTs, staleTs, old.id);
 
@@ -142,7 +143,7 @@ describe('projection filter (non-terminal + 14-day terminal window)', () => {
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).toContain(item.id);
 
     const staleTs = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    getRawDb().prepare('UPDATE work_items SET updated_at = ? WHERE id = ?').run(staleTs, item.id);
+    sqliteRaw(getDb()).prepare('UPDATE work_items SET updated_at = ? WHERE id = ?').run(staleTs, item.id);
     expect(listProjectionRowsForTeam(TEAM_A).map((i) => i.id)).not.toContain(item.id);
   });
 });

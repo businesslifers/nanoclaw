@@ -29,9 +29,7 @@
  * the original scripts' single wake with full data).
  */
 import { TIMEZONE } from '../../config.js';
-import { getDb, hasTable } from '../../db/connection.js';
-import { getRawDb } from '../../db/sqlite-legacy.js';
-import { findSessionByAgentGroup } from '../../db/sessions.js';
+import { findSessionByAgentGroupSync, hasTableSync, rawDb } from '../../central-db-sync.js';
 import type { WorkItem } from '../../db/work-items.js';
 import { log } from '../../log.js';
 import { notifyAgent } from '../approvals/primitive.js';
@@ -116,8 +114,84 @@ export function decideCadenceOverdue(
   return lastYmd !== today;
 }
 
+export type DailyRag = 'GREEN' | 'AMBER' | 'RED';
+
+export interface DailyRagRollup {
+  rag: DailyRag;
+  overdueDeliverables: WorkItem[];
+  soonDeliverables: WorkItem[];
+  overdueStreams: WorkItem[];
+  blockedStreams: WorkItem[];
+}
+
+/**
+ * Daily owner-facing RAG rollup — cadence-health.mjs parity, generalized
+ * across every team instead of just LPG. Pure snapshot classification (no
+ * reminder_last_sent_at dedup — that's a nag-throttle concern, not a
+ * classification one): RED if any open deliverable is overdue; AMBER if a
+ * deliverable is due within 3 days OR a non-blocked cadence stream is
+ * overdue; GREEN otherwise. Blocked cadence streams never affect the RAG —
+ * same as cadence-health.mjs's blockedStreams, informational only.
+ *
+ * NOT wired into decideSweepActions/sweepWorkItems yet. LPG's own
+ * cadence-health.mjs cron still owns its daily 17:00 alert during the
+ * dual-write trial; wiring this into a live wake here would double-nag LPG
+ * and pollute the trial's "zero missed/extra nags" parity measurement. Land
+ * this ready for the cutover the trial is gating, not before it.
+ */
+export function computeDailyRagRollup(
+  items: WorkItem[],
+  opts: { today: string; tz?: string },
+): Map<string, DailyRagRollup> {
+  const tz = opts.tz ?? TIMEZONE;
+  const byTeam = new Map<string, DailyRagRollup>();
+  const rollupFor = (team: string): DailyRagRollup => {
+    let r = byTeam.get(team);
+    if (!r) {
+      r = { rag: 'GREEN', overdueDeliverables: [], soonDeliverables: [], overdueStreams: [], blockedStreams: [] };
+      byTeam.set(team, r);
+    }
+    return r;
+  };
+
+  for (const item of items) {
+    if (item.status === 'done' || item.status === 'cancelled') continue;
+    if (item.kind !== 'deliverable' && item.kind !== 'cadence') continue;
+
+    if (item.kind === 'deliverable') {
+      const dueYmd = toLocalYmd(item.due_at, tz);
+      if (!dueYmd) continue;
+      const r = rollupFor(item.owner_agent_group_id);
+      const daysUntil = daysBetween(opts.today, dueYmd);
+      if (daysUntil < 0) r.overdueDeliverables.push(item);
+      else if (daysUntil <= 3) r.soonDeliverables.push(item);
+      continue;
+    }
+
+    // kind === 'cadence' — always establishes a (possibly GREEN) entry for
+    // its team, since a fully-serviced or not-yet-due stream is still a
+    // real, currently-healthy tracked obligation, not an untracked team.
+    const r = rollupFor(item.owner_agent_group_id);
+    const expected = Number(item.cadence_expected_dow) || 7;
+    if (isoDow(opts.today) < expected) continue;
+    if (item.cadence_last_completed_period === isoWeek(opts.today)) continue;
+    if (item.status === 'blocked') r.blockedStreams.push(item);
+    else r.overdueStreams.push(item);
+  }
+
+  for (const r of byTeam.values()) {
+    r.rag = r.overdueDeliverables.length
+      ? 'RED'
+      : r.overdueStreams.length || r.soonDeliverables.length
+        ? 'AMBER'
+        : 'GREEN';
+  }
+  return byTeam;
+}
+
 interface SweepStamp {
   id: string;
+  owner_agent_group_id: string;
   reminder_tier?: string;
   reminder_last_sent_at: string;
 }
@@ -145,6 +219,11 @@ export function decideSweepActions(
     lines.push(line);
   };
   const nowIso = new Date(opts.nowMs).toISOString();
+  // Blocked cadence items are deferred to a second pass (below) — whether
+  // they ride along informationally depends on whether their owner team
+  // ends up woken by something ELSE this tick, which isn't known until
+  // every item has been processed once, regardless of array order.
+  const deferredBlockedCadence: WorkItem[] = [];
 
   for (const item of items) {
     // 1. Delegation follow-up
@@ -154,7 +233,7 @@ export function decideSweepActions(
         item.owner_agent_group_id,
         `- OPEN follow-up "${item.title}" (${item.id}, to ${who}) was due a check-in at ${item.follow_up_at}. Chase it or close it (update_work_item / complete_work_item); this nag repeats until the item leaves open status.`,
       );
-      stamps.push({ id: item.id, reminder_last_sent_at: nowIso });
+      stamps.push({ id: item.id, owner_agent_group_id: item.owner_agent_group_id, reminder_last_sent_at: nowIso });
       continue;
     }
 
@@ -170,27 +249,59 @@ export function decideSweepActions(
         item.owner_agent_group_id,
         `- Deliverable "${item.title}" (${item.id}) — ${whenStr}. Remind ${owners}; mark it done with complete_work_item when supplied.`,
       );
-      stamps.push({ id: item.id, reminder_tier: String(fired.tier), reminder_last_sent_at: opts.today });
+      stamps.push({
+        id: item.id,
+        owner_agent_group_id: item.owner_agent_group_id,
+        reminder_tier: String(fired.tier),
+        reminder_last_sent_at: nowIso,
+      });
       continue;
     }
 
-    // 3. Cadence RAG
+    // 3. Cadence RAG. A blocked stream can't be un-blocked by the owner team
+    // alone — parity with cadence-health.mjs, whose blockedStreams are
+    // excluded from RAG/wakeAgent entirely and only ever appear as
+    // informational data when the agent is already awake for another
+    // reason. So a blocked item must NOT stand up a wake on its own;
+    // defer it to the second pass below.
     if (decideCadenceOverdue(item, opts.today, tz)) {
+      if (item.status === 'blocked') {
+        deferredBlockedCadence.push(item);
+        continue;
+      }
       push(
         item.owner_agent_group_id,
         `- Weekly stream "${item.title}" (${item.id}) has not been completed for ${isoWeek(opts.today)} (expected by ISO weekday ${item.cadence_expected_dow}). If it actually shipped, stamp it with complete_work_item; otherwise recover it and alert the owners.`,
       );
-      stamps.push({ id: item.id, reminder_last_sent_at: opts.today });
+      stamps.push({ id: item.id, owner_agent_group_id: item.owner_agent_group_id, reminder_last_sent_at: nowIso });
     }
+  }
+
+  // Second pass: a blocked cadence item only gets an informational line if
+  // its owner team is ALREADY being woken for something else this tick. A
+  // team blocked-alone stays completely silent (and unstamped, so it's
+  // re-considered — and can ride along — on a later tick today rather than
+  // waiting until tomorrow).
+  for (const item of deferredBlockedCadence) {
+    if (!wakes.has(item.owner_agent_group_id)) continue;
+    push(
+      item.owner_agent_group_id,
+      `- Weekly stream "${item.title}" (${item.id}) is BLOCKED for ${isoWeek(opts.today)} (not counted as overdue): ${item.status_detail ?? 'no detail recorded'}. Informational only — no chase needed unless the blocker clears.`,
+    );
+    stamps.push({ id: item.id, owner_agent_group_id: item.owner_agent_group_id, reminder_last_sent_at: nowIso });
   }
 
   return { wakes, stamps };
 }
 
-/** Applies a sweep tick: stamp dedup state FIRST, then refresh + wake. */
+/**
+ * Applies a sweep tick: stamp dedup state FIRST (per owner team — only for
+ * teams with a live session to actually receive the wake), then refresh +
+ * wake each team.
+ */
 export async function sweepWorkItems(): Promise<void> {
-  if (!(await hasTable(getDb(), 'work_items'))) return;
-  const db = getRawDb();
+  const db = rawDb();
+  if (!hasTableSync('work_items')) return;
 
   const items = db
     .prepare(
@@ -204,8 +315,23 @@ export async function sweepWorkItems(): Promise<void> {
   const decision = decideSweepActions(items, { nowMs: Date.now(), today: todayInTz(TIMEZONE) });
   if (decision.stamps.length === 0) return;
 
-  // Stamp before waking — a forgotten/failed wake must not cause duplicate
-  // reminders next tick (the dependency-cascade.mjs write-before-output rule).
+  // Resolve session liveness per owner team BEFORE stamping. Stamping is what
+  // suppresses re-nagging next tick, so a team with no live session must not
+  // get its items stamped — that would mark the reminder "sent" when nothing
+  // was ever delivered, silently losing that tier/cadence nag for good (it
+  // would never re-fire once the tier/day dedup stamp is in place). Teams
+  // that DO have a session still get the original write-before-wake
+  // guarantee: a forgotten/failed wake must not cause duplicate reminders
+  // next tick (the dependency-cascade.mjs write-before-output rule).
+  const sessionByTeam = new Map(
+    [...decision.wakes.keys()].map((team) => [team, findSessionByAgentGroupSync(team)] as const),
+  );
+  const stampable = decision.stamps.filter((s) => sessionByTeam.get(s.owner_agent_group_id) != null);
+  const skipped = decision.stamps.length - stampable.length;
+  if (skipped > 0) {
+    log.warn('work-items sweep: skipping stamp for no-session teams (will retry next tick)', { skipped });
+  }
+
   const stampStmt = db.prepare(
     `UPDATE work_items
         SET reminder_tier = COALESCE(@reminder_tier, reminder_tier),
@@ -213,7 +339,7 @@ export async function sweepWorkItems(): Promise<void> {
       WHERE id = @id`,
   );
   const applyStamps = db.transaction(() => {
-    for (const s of decision.stamps) {
+    for (const s of stampable) {
       stampStmt.run({
         id: s.id,
         reminder_tier: s.reminder_tier ?? null,
@@ -224,14 +350,18 @@ export async function sweepWorkItems(): Promise<void> {
   applyStamps();
 
   for (const [team, lines] of decision.wakes) {
-    await refreshWorkItemsProjection(team);
-    const session = await findSessionByAgentGroup(team);
+    refreshWorkItemsProjection(team);
+    const session = sessionByTeam.get(team);
     if (!session) {
       log.warn('work-items sweep: no active session to wake', { team, lines: lines.length });
       continue;
     }
     const message = `[work-items sweep] ${lines.length} item${lines.length === 1 ? '' : 's'} need${lines.length === 1 ? 's' : ''} attention:\n${lines.join('\n')}`;
-    await notifyAgent(session, message);
+    // Fire-and-forget: sweepWorkItems' callers are synchronous, so the async
+    // notify is dispatched with its own rejection handler.
+    void Promise.resolve(notifyAgent(session, message)).catch((err) =>
+      log.error('work-items sweep: notifyAgent failed', { team, err }),
+    );
     log.info('work-items sweep wake', { team, items: lines.length });
   }
 }

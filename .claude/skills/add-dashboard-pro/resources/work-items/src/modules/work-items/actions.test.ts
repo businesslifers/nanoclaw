@@ -27,14 +27,14 @@ async function seedUser(id: string, displayName: string | null) {
 describe('resolveAssigneeName', () => {
   it('links on a unique case-insensitive display-name match and says so', async () => {
     await seedUser('phone:+615550001', 'Raels');
-    const r = await resolveAssigneeName('raels');
+    const r = resolveAssigneeName('raels');
     expect(r.userId).toBe('phone:+615550001');
     expect(r.label).toBeNull();
     expect(r.echo).toContain('resolved to user phone:+615550001');
   });
 
   it('falls back to a raw label on no match — and the echo states it', async () => {
-    const r = await resolveAssigneeName('Realz');
+    const r = resolveAssigneeName('Realz');
     expect(r.userId).toBeNull();
     expect(r.label).toBe('Realz');
     expect(r.echo).toContain('did not match any known user');
@@ -44,7 +44,7 @@ describe('resolveAssigneeName', () => {
   it('falls back on an ambiguous match rather than guessing', async () => {
     await seedUser('phone:+615550001', 'Adam');
     await seedUser('discord:12345', 'Adam');
-    const r = await resolveAssigneeName('Adam');
+    const r = resolveAssigneeName('Adam');
     expect(r.userId).toBeNull();
     expect(r.label).toBe('Adam');
     expect(r.echo).toContain('ambiguous');

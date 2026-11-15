@@ -14,10 +14,6 @@
  * against the central ACL on delivery — this side is convenience, not the
  * security boundary.
  */
-// The runner's raw session-DB opener moved under the mailbox seam (SQLite
-// implementation). This tool reads the host-written work_items_cache
-// projection, which is not part of the semantic mailbox contract, so it stays
-// explicitly SQLite-only — see docs/agent-mailbox-seam-migration.md.
 import { readInbound } from '../mailbox/sqlite/connection.js';
 import { writeMessageOut } from '../db/messages-out.js';
 import { findByName } from '../destinations.js';

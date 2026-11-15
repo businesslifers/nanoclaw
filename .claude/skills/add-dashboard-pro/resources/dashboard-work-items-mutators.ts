@@ -19,8 +19,7 @@
  * see the registered hook in modules/work-items/wake.ts — so the UI
  * refreshes within ~1s without a duplicate call here.
  */
-
-import { getAgentGroupSync as getAgentGroup, getUserSync as getUser } from './db/sqlite-legacy.js';
+import { getAgentGroupSync, getUserSync } from './central-db-sync.js';
 import { appendAudit } from './db/dashboard-audit.js';
 import {
   createWorkItem as createWorkItemDb,
@@ -36,8 +35,7 @@ import {
   type WorkItemUpdate,
 } from './db/work-items.js';
 import { addWorkItemNote as addWorkItemNoteDb } from './db/work-item-notes.js';
-import { canAccessAgentGroupSync } from './dashboard-access-sync.js';
-import { log } from './log.js';
+import { canAccessAgentGroupDecisionSync } from './dashboard-access.js';
 import { refreshAndWake, type WorkItemMutationKind } from './modules/work-items/wake.js';
 import { MutatorAuthError, MutatorNotFoundError, MutatorValidationError } from './dashboard-mutators.js';
 
@@ -94,17 +92,17 @@ function requireItem(id: unknown): WorkItem {
 
 /** Member-or-higher on the item's owner OR assignee team. */
 function authorizeItemAccess(actorUserId: string, item: WorkItem): void {
-  const owner = canAccessAgentGroupSync(actorUserId, item.owner_agent_group_id);
+  const owner = canAccessAgentGroupDecisionSync(actorUserId, item.owner_agent_group_id);
   if (owner.allowed) return;
   if (item.assignee_agent_group_id) {
-    const assignee = canAccessAgentGroupSync(actorUserId, item.assignee_agent_group_id);
+    const assignee = canAccessAgentGroupDecisionSync(actorUserId, item.assignee_agent_group_id);
     if (assignee.allowed) return;
   }
   throw new MutatorAuthError(`actor cannot access work item ${item.id}: ${owner.reason}`);
 }
 
 function authorizeTeam(actorUserId: string, agentGroupId: string, why: string): void {
-  const decision = canAccessAgentGroupSync(actorUserId, agentGroupId);
+  const decision = canAccessAgentGroupDecisionSync(actorUserId, agentGroupId);
   if (!decision.allowed) {
     throw new MutatorAuthError(`actor cannot access ${why} ${agentGroupId}: ${decision.reason}`);
   }
@@ -150,13 +148,13 @@ function validateAssignee(
     throw new MutatorValidationError('assignee is a team OR a human, not both');
   }
   if (teamId) {
-    if (!getAgentGroup(teamId)) throw new MutatorNotFoundError(`assignee team ${teamId} not found`);
+    if (!getAgentGroupSync(teamId)) throw new MutatorNotFoundError(`assignee team ${teamId} not found`);
     // Target-team ACL — the reassignment asymmetry fix.
     authorizeTeam(actorUserId, teamId, 'target team');
     return { teamId, userId: null, label: null };
   }
   if (userId) {
-    if (!getUser(userId)) throw new MutatorNotFoundError(`assignee user ${userId} not found`);
+    if (!getUserSync(userId)) throw new MutatorNotFoundError(`assignee user ${userId} not found`);
     return { teamId: null, userId, label: null };
   }
   return { teamId: null, userId: null, label: label ? String(label).trim() || null : null };
@@ -172,7 +170,7 @@ function validateParent(parentId: string, ownerAgentGroupId: string, selfId?: st
 }
 
 function actorDisplay(actorUserId: string): string {
-  return getUser(actorUserId)?.display_name ?? actorUserId;
+  return getUserSync(actorUserId)?.display_name ?? actorUserId;
 }
 
 function buildDashboardWakeMessage(what: string, item: WorkItem, actorUserId: string): string {
@@ -192,7 +190,7 @@ export function createWorkItem(args: CreateWorkItemArgs, actorUserId: string): W
   if (typeof args.ownerAgentGroupId !== 'string' || !args.ownerAgentGroupId) {
     throw new MutatorValidationError('ownerAgentGroupId is required');
   }
-  if (!getAgentGroup(args.ownerAgentGroupId)) {
+  if (!getAgentGroupSync(args.ownerAgentGroupId)) {
     throw new MutatorNotFoundError(`owner team ${args.ownerAgentGroupId} not found`);
   }
   authorizeTeam(actorUserId, args.ownerAgentGroupId, 'owner team');
@@ -239,10 +237,10 @@ export function createWorkItem(args: CreateWorkItemArgs, actorUserId: string): W
     after: item as unknown as Record<string, unknown>,
   });
 
-  void refreshAndWake(
+  refreshAndWake(
     { mutation: 'create', item },
     buildDashboardWakeMessage('created and assigned to you', item, actorUserId),
-  ).catch((err) => log.error('work-item refresh/wake failed', { err }));
+  );
   return { ok: true, item };
 }
 
@@ -322,10 +320,10 @@ export function updateWorkItem(args: UpdateWorkItemArgs, actorUserId: string): W
     what = 'schedule changed';
   }
 
-  void refreshAndWake(
+  refreshAndWake(
     { mutation, item: after, previousAssigneeAgentGroupId: before.assignee_agent_group_id },
     buildDashboardWakeMessage(what, after, actorUserId),
-  ).catch((err) => log.error('work-item refresh/wake failed', { err }));
+  );
   return { ok: true, item: after };
 }
 
@@ -360,14 +358,14 @@ export function reassignWorkItem(args: ReassignWorkItemArgs, actorUserId: string
     },
   });
 
-  void refreshAndWake(
+  refreshAndWake(
     {
       mutation: 'reassign',
       item: after,
       previousAssigneeAgentGroupId: before.assignee_agent_group_id,
     },
     buildDashboardWakeMessage('reassigned', after, actorUserId),
-  ).catch((err) => log.error('work-item refresh/wake failed', { err }));
+  );
   return { ok: true, item: after };
 }
 
@@ -397,10 +395,10 @@ export function cancelWorkItem(args: { id: string; note?: string | null }, actor
     after: { status: after.status },
   });
 
-  void refreshAndWake(
+  refreshAndWake(
     { mutation: 'cancel', item: after, previousAssigneeAgentGroupId: before.assignee_agent_group_id },
     buildDashboardWakeMessage('cancelled', after, actorUserId),
-  ).catch((err) => log.error('work-item refresh/wake failed', { err }));
+  );
   return { ok: true, item: after };
 }
 
@@ -424,11 +422,6 @@ export function addWorkItemNote(args: { id: string; note: string }, actorUserId:
   });
 
   // Notes wake nobody, but projections refresh so agents see the narrative.
-  // Sync by the dashboard package's mutator contract — the projection refresh
-  // and wake are async, so they are fired and their failure logged rather than
-  // awaited. Never leave this as a bare floating promise.
-  void refreshAndWake({ mutation: 'note', item }, '').catch((err) =>
-    log.error('work-item refresh/wake failed', { itemId: item.id, mutation: 'note', err }),
-  );
+  refreshAndWake({ mutation: 'note', item }, '');
   return { ok: true, item: getWorkItem(item.id) as WorkItem };
 }

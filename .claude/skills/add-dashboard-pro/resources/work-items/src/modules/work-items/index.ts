@@ -28,11 +28,9 @@ import {
   handleUpdateWorkItem,
 } from './actions.js';
 
-const WORK_ITEM_UNGUARDED = unguarded(
-  'team-scoped work-item CRUD — handlers write only rows owned by or assigned to the calling session’s agent group, and cross-team assignment is gated by agent_destinations',
-);
+const WORK_ITEMS_UNGUARDED = unguarded('agent-scoped work-item mutations carry no cross-tenant privilege boundary');
 
-registerDeliveryAction('create_work_item', handleCreateWorkItem, WORK_ITEM_UNGUARDED);
-registerDeliveryAction('update_work_item', handleUpdateWorkItem, WORK_ITEM_UNGUARDED);
-registerDeliveryAction('add_work_item_note', handleAddWorkItemNote, WORK_ITEM_UNGUARDED);
-registerDeliveryAction('complete_work_item', handleCompleteWorkItem, WORK_ITEM_UNGUARDED);
+registerDeliveryAction('create_work_item', handleCreateWorkItem, WORK_ITEMS_UNGUARDED);
+registerDeliveryAction('update_work_item', handleUpdateWorkItem, WORK_ITEMS_UNGUARDED);
+registerDeliveryAction('add_work_item_note', handleAddWorkItemNote, WORK_ITEMS_UNGUARDED);
+registerDeliveryAction('complete_work_item', handleCompleteWorkItem, WORK_ITEMS_UNGUARDED);

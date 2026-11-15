@@ -17,10 +17,7 @@
  * a typo'd name that fell back to a raw label is visible in the transcript,
  * never silently swallowed.
  */
-import { getAgentGroup } from '../../db/agent-groups.js';
-import { getDb, hasTable } from '../../db/connection.js';
-import { getRawDb } from '../../db/sqlite-legacy.js';
-import { getSession } from '../../db/sessions.js';
+import { getAgentGroupSync, getAllUsersSync, getSessionSync, hasTableSync, rawDb } from '../../central-db-sync.js';
 import {
   createWorkItem,
   generateWorkItemId,
@@ -37,7 +34,6 @@ import {
   type WorkItemUpdate,
 } from '../../db/work-items.js';
 import { addWorkItemNote } from '../../db/work-item-notes.js';
-import { getAllUsers } from '../permissions/db/users.js';
 import { TIMEZONE } from '../../config.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
@@ -52,8 +48,11 @@ import { nudgeWorkItemsPusher, refreshAndWake } from './wake.js';
  * row (context accumulated for the next turn, no extra container turn);
  * `wake=true` is for failures the agent must act on now.
  */
-async function echoToAgent(session: Session, text: string, wake: boolean): Promise<void> {
-  await writeSessionMessage(session.agent_group_id, session.id, {
+function echoToAgent(session: Session, text: string, wake: boolean): void {
+  // Fire-and-forget: this module's entry points are synchronous by constraint
+  // (the dashboard's mutator callbacks call them), so the async mailbox write
+  // is dispatched with its own rejection handler rather than awaited.
+  void writeSessionMessage(session.agent_group_id, session.id, {
     id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     kind: 'chat',
     timestamp: new Date().toISOString(),
@@ -62,9 +61,9 @@ async function echoToAgent(session: Session, text: string, wake: boolean): Promi
     threadId: null,
     content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
     trigger: wake,
-  });
+  }).catch((err) => log.error('work-items echo write failed', { sessionId: session.id, err }));
   if (wake) {
-    const fresh = await getSession(session.id);
+    const fresh = getSessionSync(session.id);
     if (fresh) {
       wakeContainer(fresh).catch((err) => log.error('Failed to wake container after work-item echo', { err }));
     }
@@ -76,13 +75,13 @@ async function echoToAgent(session: Session, text: string, wake: boolean): Promi
  * exact match). Returns the user id only on a UNIQUE match; otherwise falls
  * back to carrying the raw label, with an echo message describing why.
  */
-export async function resolveAssigneeName(name: string): Promise<{
+export function resolveAssigneeName(name: string): {
   userId: string | null;
   label: string | null;
   echo: string;
-}> {
+} {
   const needle = name.trim().toLowerCase();
-  const matches = (await getAllUsers()).filter((u) => (u.display_name ?? '').trim().toLowerCase() === needle);
+  const matches = getAllUsersSync().filter((u) => (u.display_name ?? '').trim().toLowerCase() === needle);
   if (matches.length === 1) {
     return {
       userId: matches[0].id,
@@ -105,10 +104,10 @@ export async function resolveAssigneeName(name: string): Promise<{
 }
 
 /** Host-side re-validation of a team assignment against the destinations ACL. */
-async function canAssignToTeam(sourceAgentGroupId: string, targetAgentGroupId: string): Promise<boolean> {
+function canAssignToTeam(sourceAgentGroupId: string, targetAgentGroupId: string): boolean {
   if (sourceAgentGroupId === targetAgentGroupId) return true;
-  if (!(await hasTable(getDb(), 'agent_destinations'))) return false;
-  const row = getRawDb()
+  if (!hasTableSync('agent_destinations')) return false;
+  const row = rawDb()
     .prepare(
       `SELECT 1 FROM agent_destinations WHERE agent_group_id = ? AND target_type = 'agent' AND target_id = ? LIMIT 1`,
     )
@@ -125,7 +124,7 @@ interface ResolvedAssignee {
 }
 
 /** Shared assignee resolution for create + update. */
-async function resolveAssignee(content: Record<string, unknown>, session: Session): Promise<ResolvedAssignee> {
+function resolveAssignee(content: Record<string, unknown>, session: Session): ResolvedAssignee {
   const echoes: string[] = [];
   let teamId: string | null = null;
   let userId: string | null = null;
@@ -133,10 +132,10 @@ async function resolveAssignee(content: Record<string, unknown>, session: Sessio
 
   const rawTeam = content.assigneeAgentGroupId;
   if (typeof rawTeam === 'string' && rawTeam.length > 0) {
-    if (!getAgentGroup(rawTeam)) {
+    if (!getAgentGroupSync(rawTeam)) {
       return { teamId, userId, label, echoes, error: `assignee team "${rawTeam}" does not exist.` };
     }
-    if (!(await canAssignToTeam(session.agent_group_id, rawTeam))) {
+    if (!canAssignToTeam(session.agent_group_id, rawTeam)) {
       return {
         teamId,
         userId,
@@ -150,7 +149,7 @@ async function resolveAssignee(content: Record<string, unknown>, session: Sessio
 
   const rawName = content.assigneeName;
   if (!teamId && typeof rawName === 'string' && rawName.trim().length > 0) {
-    const resolved = await resolveAssigneeName(rawName);
+    const resolved = resolveAssigneeName(rawName);
     userId = resolved.userId;
     label = resolved.label;
     echoes.push(resolved.echo);
@@ -162,7 +161,7 @@ async function resolveAssignee(content: Record<string, unknown>, session: Sessio
 export async function handleCreateWorkItem(content: Record<string, unknown>, session: Session): Promise<void> {
   const title = typeof content.title === 'string' ? content.title.trim() : '';
   if (!title) {
-    await echoToAgent(session, 'create_work_item failed: title is required.', true);
+    echoToAgent(session, 'create_work_item failed: title is required.', true);
     return;
   }
 
@@ -175,9 +174,9 @@ export async function handleCreateWorkItem(content: Record<string, unknown>, ses
       ? (content.status as WorkItemStatus)
       : 'open';
 
-  const assignee = await resolveAssignee(content, session);
+  const assignee = resolveAssignee(content, session);
   if (assignee.error) {
-    await echoToAgent(session, `create_work_item failed: ${assignee.error}`, true);
+    echoToAgent(session, `create_work_item failed: ${assignee.error}`, true);
     return;
   }
 
@@ -185,7 +184,7 @@ export async function handleCreateWorkItem(content: Record<string, unknown>, ses
   if (parentId) {
     const parent = getWorkItem(parentId);
     if (!parent || !isVisibleToTeam(parent, session.agent_group_id)) {
-      await echoToAgent(session, `create_work_item failed: parent item "${parentId}" not found for your team.`, true);
+      echoToAgent(session, `create_work_item failed: parent item "${parentId}" not found for your team.`, true);
       return;
     }
   }
@@ -229,15 +228,15 @@ export async function handleCreateWorkItem(content: Record<string, unknown>, ses
 
   log.info('Work item created by agent', { id, owner: session.agent_group_id, kind, assigneeTeam: assignee.teamId });
 
-  await refreshAndWake(
+  refreshAndWake(
     { mutation: 'create', item: created, actorAgentGroupId: session.agent_group_id },
-    await buildWakeMessage('created and assigned to you', created, session),
+    buildWakeMessage('created and assigned to you', created, session),
   );
 
   // Assignee-resolution echo: a failed human match must be visible to the
   // agent, not silently swallowed. Failures wake; clean matches accumulate.
   for (const echo of assignee.echoes) {
-    await echoToAgent(session, `create_work_item ${id}: ${echo}`, assignee.userId === null);
+    echoToAgent(session, `create_work_item ${id}: ${echo}`, assignee.userId === null);
   }
 }
 
@@ -245,7 +244,7 @@ export async function handleUpdateWorkItem(content: Record<string, unknown>, ses
   const itemId = typeof content.itemId === 'string' ? content.itemId : '';
   const before = itemId ? getWorkItem(itemId) : undefined;
   if (!before || !isVisibleToTeam(before, session.agent_group_id)) {
-    await echoToAgent(session, `update_work_item failed: no work item "${itemId}" visible to your team.`, true);
+    echoToAgent(session, `update_work_item failed: no work item "${itemId}" visible to your team.`, true);
     return;
   }
 
@@ -253,7 +252,7 @@ export async function handleUpdateWorkItem(content: Record<string, unknown>, ses
   if (typeof content.title === 'string' && content.title.trim()) updates.title = content.title.trim();
   if (typeof content.status === 'string') {
     if (!WORK_ITEM_STATUSES.includes(content.status as WorkItemStatus)) {
-      await echoToAgent(
+      echoToAgent(
         session,
         `update_work_item failed: invalid status "${content.status}" (expected ${WORK_ITEM_STATUSES.join('|')}).`,
         true,
@@ -277,9 +276,9 @@ export async function handleUpdateWorkItem(content: Record<string, unknown>, ses
     updates.assignee_label = null;
     isReassign = before.assignee_agent_group_id !== null;
   } else if (content.assigneeAgentGroupId !== undefined || content.assigneeName !== undefined) {
-    const assignee = await resolveAssignee(content, session);
+    const assignee = resolveAssignee(content, session);
     if (assignee.error) {
-      await echoToAgent(session, `update_work_item failed: ${assignee.error}`, true);
+      echoToAgent(session, `update_work_item failed: ${assignee.error}`, true);
       return;
     }
     updates.assignee_agent_group_id = assignee.teamId;
@@ -290,7 +289,7 @@ export async function handleUpdateWorkItem(content: Record<string, unknown>, ses
   }
 
   if (Object.keys(updates).length === 0) {
-    await echoToAgent(session, `update_work_item ${itemId}: nothing to update.`, false);
+    echoToAgent(session, `update_work_item ${itemId}: nothing to update.`, false);
     return;
   }
 
@@ -306,18 +305,18 @@ export async function handleUpdateWorkItem(content: Record<string, unknown>, ses
         : ('status_change' as const)
       : ('note' as const); // metadata-only edit: refresh projections, wake nobody
 
-  await refreshAndWake(
+  refreshAndWake(
     {
       mutation,
       item: after,
       previousAssigneeAgentGroupId: before.assignee_agent_group_id,
       actorAgentGroupId: session.agent_group_id,
     },
-    await buildWakeMessage(describeChange(before, after), after, session),
+    buildWakeMessage(describeChange(before, after), after, session),
   );
 
   for (const echo of assigneeEchoes) {
-    await echoToAgent(
+    echoToAgent(
       session,
       `update_work_item ${itemId}: ${echo}`,
       after.assignee_user_id === null && !after.assignee_agent_group_id,
@@ -330,17 +329,17 @@ export async function handleAddWorkItemNote(content: Record<string, unknown>, se
   const note = typeof content.note === 'string' ? content.note.trim() : '';
   const item = itemId ? getWorkItem(itemId) : undefined;
   if (!item || !isVisibleToTeam(item, session.agent_group_id)) {
-    await echoToAgent(session, `add_work_item_note failed: no work item "${itemId}" visible to your team.`, true);
+    echoToAgent(session, `add_work_item_note failed: no work item "${itemId}" visible to your team.`, true);
     return;
   }
   if (!note) {
-    await echoToAgent(session, 'add_work_item_note failed: note text is required.', true);
+    echoToAgent(session, 'add_work_item_note failed: note text is required.', true);
     return;
   }
   addWorkItemNote({ work_item_id: itemId, author_kind: 'agent', author_id: session.agent_group_id, note });
   // Touch updated_at so bounded projections keep carrying actively-narrated items.
   touchWorkItem(itemId);
-  await refreshAndWake(
+  refreshAndWake(
     { mutation: 'note', item, actorAgentGroupId: session.agent_group_id },
     '', // note wakes nobody; message unused
   );
@@ -351,7 +350,7 @@ export async function handleCompleteWorkItem(content: Record<string, unknown>, s
   const itemId = typeof content.itemId === 'string' ? content.itemId : '';
   const before = itemId ? getWorkItem(itemId) : undefined;
   if (!before || !isVisibleToTeam(before, session.agent_group_id)) {
-    await echoToAgent(session, `complete_work_item failed: no work item "${itemId}" visible to your team.`, true);
+    echoToAgent(session, `complete_work_item failed: no work item "${itemId}" visible to your team.`, true);
     return;
   }
 
@@ -369,9 +368,9 @@ export async function handleCompleteWorkItem(content: Record<string, unknown>, s
       author_id: session.agent_group_id,
       note: `cadence completed for ${period}${note ? ` — ${note}` : ''}`,
     });
-    await refreshWorkItemsProjection(before.owner_agent_group_id);
+    refreshWorkItemsProjection(before.owner_agent_group_id);
     nudgeWorkItemsPusher();
-    await echoToAgent(session, `complete_work_item ${itemId}: cadence stamped for ${period}.`, false);
+    echoToAgent(session, `complete_work_item ${itemId}: cadence stamped for ${period}.`, false);
     log.info('Cadence work item stamped', { id: itemId, period, by: session.agent_group_id });
     return;
   }
@@ -383,14 +382,14 @@ export async function handleCompleteWorkItem(content: Record<string, unknown>, s
   const after = getWorkItem(itemId) as WorkItem;
   log.info('Work item completed by agent', { id: itemId, by: session.agent_group_id });
 
-  await refreshAndWake(
+  refreshAndWake(
     {
       mutation: 'status_change',
       item: after,
       previousAssigneeAgentGroupId: before.assignee_agent_group_id,
       actorAgentGroupId: session.agent_group_id,
     },
-    await buildWakeMessage('marked done', after, session),
+    buildWakeMessage('marked done', after, session),
   );
 }
 
@@ -404,8 +403,8 @@ function describeChange(before: WorkItem, after: WorkItem): string {
   return 'updated';
 }
 
-async function buildWakeMessage(what: string, item: WorkItem, session: Session): Promise<string> {
-  const actor = (await getAgentGroup(session.agent_group_id))?.name ?? session.agent_group_id;
+function buildWakeMessage(what: string, item: WorkItem, session: Session): string {
+  const actor = getAgentGroupSync(session.agent_group_id)?.name ?? session.agent_group_id;
   const parts = [
     `[work-item] "${item.title}" (${item.id}) ${what} by team ${actor}.`,
     `Status: ${item.status}${item.status_detail ? ` (${item.status_detail})` : ''}.`,

@@ -3,9 +3,35 @@
  * item (migration 103). Higher-volume, free-text; separate from the
  * structured dashboard_audit compliance log by design.
  */
+/**
+ * FORK NOTE — why these helpers stay synchronous while the central DB went
+ * async behind `DbDriver`.
+ *
+ * They are called from BOTH the async module side and the dashboard side, and
+ * `@nanoco/nanoclaw-dashboard` is synchronous end to end: `dispatchMutating`
+ * does `const after = fn(...)` then serializes `after` directly, and the
+ * permission check runs inside an `Array.prototype.filter`. An async callback
+ * there would serialize `{}` for every mutation, turn a rejection into an
+ * unhandled rejection behind an `ok: true` response, and make every Promise
+ * truthy in the permission filter — i.e. show every team to every actor.
+ *
+ * So these keep a raw better-sqlite3 handle via `sqliteRaw(getDb())` — the
+ * same connection the driver holds, not a second one, so there is no write
+ * contention and no cache staleness. Sync functions are callable from async
+ * callers; the reverse is not true, which is why the shared helpers are the
+ * ones that stay sync.
+ *
+ * One consequence worth knowing: the async driver's `transaction()` yields,
+ * so a raw write here can now land inside an open host transaction and be
+ * rolled back with it. Dashboard writes are rare human clicks, so that is
+ * accepted — but never open a raw `BEGIN` here: a nested BEGIN while a driver
+ * transaction is open throws. Single-statement writes only.
+ */
+
 import type Database from 'better-sqlite3';
 
-import { getRawDb } from './sqlite-legacy.js';
+import { getDb } from './connection.js';
+import { sqliteRaw } from './drivers/sqlite.js';
 import type { WorkItemAuthorKind } from './work-items.js';
 
 export interface WorkItemNote {
@@ -24,7 +50,7 @@ export function addWorkItemNote(
     author_id?: string | null;
     note: string;
   },
-  db: Database.Database = getRawDb(),
+  db: Database.Database = sqliteRaw(getDb()),
 ): WorkItemNote {
   const ts = new Date().toISOString();
   const result = db
@@ -49,7 +75,11 @@ export function addWorkItemNote(
   };
 }
 
-export function listWorkItemNotes(workItemId: string, limit = 100, db: Database.Database = getRawDb()): WorkItemNote[] {
+export function listWorkItemNotes(
+  workItemId: string,
+  limit = 100,
+  db: Database.Database = sqliteRaw(getDb()),
+): WorkItemNote[] {
   // Newest N in chronological order (subquery keeps the cap on the newest end).
   return db
     .prepare(
@@ -60,7 +90,7 @@ export function listWorkItemNotes(workItemId: string, limit = 100, db: Database.
     .all(workItemId, limit) as WorkItemNote[];
 }
 
-export function countWorkItemNotes(workItemId: string, db: Database.Database = getRawDb()): number {
+export function countWorkItemNotes(workItemId: string, db: Database.Database = sqliteRaw(getDb())): number {
   return (
     db.prepare('SELECT COUNT(*) AS c FROM work_item_notes WHERE work_item_id = ?').get(workItemId) as { c: number }
   ).c;

@@ -2,12 +2,27 @@
  * Dashboard pusher — collects NanoClaw state and POSTs a JSON
  * snapshot to the dashboard's /api/ingest endpoint every interval.
  */
+import {
+  getAdminsOfAgentGroupSync,
+  getAgentGroupSync,
+  getAllAgentGroupsSync,
+  getAllMessagingGroupsSync,
+  getAllUsersSync,
+  getDestinationsSync,
+  getLiveContainerConfigSync,
+  getMembersSync,
+  getMessagingGroupAgentsSync,
+  getSessionsByAgentGroupSync,
+  getUserDmsForUserSync,
+  getUserRolesSync,
+  getUserSync,
+  rawDb,
+} from './central-db-sync.js';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import Database from 'better-sqlite3';
 
-import { getAgentGroupSync as getAgentGroup, getAllAgentGroupsSync as getAllAgentGroups } from './db/sqlite-legacy.js';
 import { getRecentAudit } from './db/dashboard-audit.js';
 import { listWikis } from './wiki/discovery.js';
 // Pricing table — USD per 1M tokens. Dashboard cost columns are
@@ -139,26 +154,14 @@ export function computeCostUsd(model: string, tokens: TokenBag): number {
     (tokens.cacheCreationTokens / 1_000_000) * p.cacheWrite
   );
 }
-import { getSessionsByAgentGroupSync as getSessionsByAgentGroup } from './db/sqlite-legacy.js';
-import {
-  getAllMessagingGroupsSync as getAllMessagingGroups,
-  getMessagingGroupAgentsSync as getMessagingGroupAgents,
-} from './db/sqlite-legacy.js';
 // Agent-to-agent and permissions concerns live in module subdirectories in
 // v2, not flat under src/db. Import from their canonical locations.
-import { getDestinationsSync as getDestinations } from './db/sqlite-legacy.js';
-import { getMembersSync as getMembers } from './db/sqlite-legacy.js';
-import { getAllUsersSync as getAllUsers, getUserSync as getUser } from './db/sqlite-legacy.js';
-import { getAdminsOfAgentGroupSync as getAdminsOfAgentGroup, getUserRolesSync as getUserRoles } from './db/sqlite-legacy.js';
-import { getUserDmsForUserSync as getUserDmsForUser } from './db/sqlite-legacy.js';
 import { getActiveAdapters, getRegisteredChannelNames } from './channels/channel-registry.js';
 import { DATA_DIR, ASSISTANT_NAME } from './config.js';
-import { getLiveContainerConfig } from './container-config.js';
 import { getActiveContainerNames } from './container-runner.js';
 import { collectContainerStats, CpuWatchdog, type ContainerStat } from './container-stats.js';
 import { collectTasks, type SessionRef } from './dashboard-tasks.js';
 import { collectWorkItems } from './dashboard-work-items.js';
-import { getRawDb } from './db/sqlite-legacy.js';
 import { log } from './log.js';
 import { getEffortPresets, getModelPresets } from './dashboard-model-presets.js';
 
@@ -352,13 +355,35 @@ function startLogTail(config: PusherConfig): void {
   }, 2000);
 }
 
+// A push that overlaps a slow one (nudge + interval, or a docker stats call
+// stretched by load) is dropped rather than queued: the next tick carries the
+// same data, and stacking pushes is exactly the event-loop pressure this
+// module must not create.
+let pushInFlight = false;
+
 async function push(config: PusherConfig): Promise<void> {
-  const snapshot = collectSnapshot();
-  postJson(config, '/api/ingest', snapshot);
-  log.debug('Dashboard snapshot pushed');
+  if (pushInFlight) return;
+  pushInFlight = true;
+  try {
+    const snapshot = await collectSnapshot();
+    postJson(config, '/api/ingest', snapshot);
+    log.debug('Dashboard snapshot pushed');
+  } finally {
+    pushInFlight = false;
+  }
 }
 
-function collectSnapshot(): Record<string, unknown> {
+/**
+ * Hand the event loop back between collectors. Each collector is synchronous
+ * (better-sqlite3, fs), and running them back to back held the loop for 2s+
+ * every minute — long enough under load to time out the gateway health probe
+ * and the OneCLI createAgent call, which kills or blocks every session.
+ */
+function yieldToLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function collectSnapshot(): Promise<Record<string, unknown>> {
   // Collect sessions + channels once so computeHealth can reuse them
   // without a second pass; everything else is independent.
   const sessions = collectSessions();
@@ -367,7 +392,7 @@ function collectSnapshot(): Record<string, unknown> {
   // Per-container CPU/memory readings for the active set. This is the
   // input to the CPU watchdog AND a snapshot consumer in its own right
   // (rendered as columns on the dashboard Sessions table).
-  const containerStats = collectContainerStats(getActiveContainerNames());
+  const containerStats = await collectContainerStats(getActiveContainerNames());
   cpuWatchdog.record(containerStats);
 
   // Decorate each session row with its current CPU/mem reading so the
@@ -395,7 +420,9 @@ function collectSnapshot(): Record<string, unknown> {
       agentGroupId: s.agent_group_id as string,
       agentGroupName: (s.agent_group_name as string | null) ?? '',
     }));
+  await yieldToLoop();
   const tasks = collectTasks(sessionRefs);
+  await yieldToLoop();
 
   // Collect per-session message stats once, then roll up a lifetime "runs"
   // count per agent group (sum of inbound messages across its sessions). In
@@ -409,8 +436,18 @@ function collectSnapshot(): Record<string, unknown> {
     runCountByGroup.set(m.agentGroupId, (runCountByGroup.get(m.agentGroupId) ?? 0) + m.totalIn);
   }
 
+  await yieldToLoop();
   const agentGroups = collectAgentGroups(runCountByGroup);
   const hiddenAgentGroupCount = agentGroups.filter((g) => g.hidden_in_dashboard).length;
+  await yieldToLoop();
+  const users = collectUsers();
+  const tokens = collectTokens();
+  await yieldToLoop();
+  const contextWindows = collectContextWindows();
+  const activity = collectActivity();
+  await yieldToLoop();
+  const wikis = collectWikis();
+  const workItems = collectWorkItems();
 
   return {
     timestamp: new Date().toISOString(),
@@ -420,14 +457,14 @@ function collectSnapshot(): Record<string, unknown> {
     hidden_agent_group_count: hiddenAgentGroupCount,
     sessions,
     channels,
-    users: collectUsers(),
-    tokens: collectTokens(),
-    context_windows: collectContextWindows(),
-    activity: collectActivity(),
+    users,
+    tokens,
+    context_windows: contextWindows,
+    activity,
     messages,
-    wikis: collectWikis(),
+    wikis,
     tasks,
-    work_items: collectWorkItems(),
+    work_items: workItems,
     system: { containers: containerStats, pinnedSessions: pinned },
     health: computeHealth(sessions, channels, pinned),
     audit: getRecentAudit(200),
@@ -490,7 +527,7 @@ function errorLogTouchedRecently(thresholdMs = 5 * 60 * 1000): boolean {
 }
 
 function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
-  const allAgentGroups = getAllAgentGroups();
+  const allAgentGroups = getAllAgentGroupsSync();
   const agentById = new Map(allAgentGroups.map((g) => [g.id, g] as const));
 
   // Pre-fetch container config per group once so we can resolve effective
@@ -498,7 +535,7 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   // an N+1 lookup. The dashboard surfaces the same value the runtime would
   // pick — agent_groups.agent_provider falls through to container_configs.provider
   // (mirroring resolveProviderName in container-runner.ts), and similarly for model.
-  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfig(g.id)] as const));
+  const containerConfigById = new Map(allAgentGroups.map((g) => [g.id, getLiveContainerConfigSync(g.id)] as const));
   const effectiveProvider = (gid: string): string | null => {
     const ag = agentById.get(gid);
     return ag?.agent_provider || containerConfigById.get(gid)?.provider || null;
@@ -510,13 +547,13 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
 
   // Pre-compute parent + sub-agent-count for every group based on the
   // `parent` destination convention that create_agent sets up. Cheap: one
-  // getDestinations() per group, reused below. Agents not created via
+  // getDestinationsSync() per group, reused below. Agents not created via
   // create_agent (e.g. the Content Team built by scripts) may lack this
   // row and render as top-level, which is correct.
   const parentByChild = new Map<string, string>(); // childId → parentId
   const subAgentCount = new Map<string, number>(); // parentId → count
   for (const ag of allAgentGroups) {
-    const dests = getDestinations(ag.id);
+    const dests = getDestinationsSync(ag.id);
     for (const d of dests) {
       if (d.target_type === 'agent' && d.local_name === 'parent') {
         parentByChild.set(ag.id, d.target_id);
@@ -526,14 +563,14 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
   }
 
   return allAgentGroups.map((g) => {
-    const sessions = getSessionsByAgentGroup(g.id);
+    const sessions = getSessionsByAgentGroupSync(g.id);
     const running = sessions.filter((s) => s.container_status === 'running' || s.container_status === 'idle');
     // Enrich destinations so the UI can render agent vs channel rows
     // differently without a second lookup per row. For agent-type rows
     // include the target's display name, provider, and model so the
     // sub-agent table can show "claude · opus[1m]" / "codex · gpt-5.4"
     // / "claude · default" without extra API calls.
-    const destinations = getDestinations(g.id).map((d) => {
+    const destinations = getDestinationsSync(g.id).map((d) => {
       if (d.target_type !== 'agent') return d;
       const t = agentById.get(d.target_id);
       return {
@@ -543,17 +580,17 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
         target_model: effectiveModel(d.target_id),
       };
     });
-    const members = getMembers(g.id).map((m) => {
-      const user = getUser(m.user_id);
+    const members = getMembersSync(g.id).map((m) => {
+      const user = getUserSync(m.user_id);
       return { ...m, display_name: user?.display_name ?? null };
     });
-    const admins = getAdminsOfAgentGroup(g.id).map((a) => {
-      const user = getUser(a.user_id);
+    const admins = getAdminsOfAgentGroupSync(g.id).map((a) => {
+      const user = getUserSync(a.user_id);
       return { ...a, display_name: user?.display_name ?? null };
     });
 
     // Wirings
-    const db = getRawDb();
+    const db = rawDb();
     const wirings = db
       .prepare(
         `SELECT mga.*, mg.channel_type, mg.platform_id, mg.name as mg_name, mg.is_group, mg.unknown_sender_policy
@@ -602,7 +639,7 @@ function collectAgentGroups(runCountByGroup: Map<string, number> = new Map()) {
 }
 
 function collectSessions() {
-  const db = getRawDb();
+  const db = rawDb();
   return db
     .prepare(
       `SELECT s.*, ag.name as agent_group_name, ag.folder as agent_group_folder,
@@ -616,7 +653,7 @@ function collectSessions() {
 }
 
 function collectChannels() {
-  const messagingGroups = getAllMessagingGroups();
+  const messagingGroups = getAllMessagingGroupsSync();
   const liveAdapters = getActiveAdapters().map((a) => a.channelType);
   const registeredChannels = getRegisteredChannelNames();
 
@@ -632,8 +669,8 @@ function collectChannels() {
       };
     }
 
-    const agents = getMessagingGroupAgents(mg.id).map((a) => {
-      const group = getAgentGroup(a.agent_group_id);
+    const agents = getMessagingGroupAgentsSync(mg.id).map((a) => {
+      const group = getAgentGroupSync(a.agent_group_id);
       return { agent_group_id: a.agent_group_id, agent_group_name: group?.name ?? null, priority: a.priority };
     });
 
@@ -660,11 +697,11 @@ function collectChannels() {
 }
 
 function collectUsers() {
-  return getAllUsers().map((u) => {
-    const roles = getUserRoles(u.id);
-    const dms = getUserDmsForUser(u.id);
+  return getAllUsersSync().map((u) => {
+    const roles = getUserRolesSync(u.id);
+    const dms = getUserDmsForUserSync(u.id);
 
-    const db = getRawDb();
+    const db = rawDb();
     const memberships = db
       .prepare(
         `SELECT agm.agent_group_id, ag.name as agent_group_name
@@ -696,7 +733,7 @@ function collectUsers() {
 function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
   const sessionsDir = path.join(DATA_DIR, 'v2-sessions');
   const allEntries: Array<TokenEntry & { agentGroupId: string }> = [];
-  const agentGroups = getAllAgentGroups();
+  const agentGroups = getAllAgentGroupsSync();
   const nameMap = new Map(agentGroups.map((g) => [g.id, g.name]));
 
   if (fs.existsSync(sessionsDir)) {
@@ -704,7 +741,7 @@ function collectTokens(range: RangeKey = 'all', nowMs = Date.now()) {
       // Claude Code transcript (.claude-shared/projects/*.jsonl)
       const claudeEntries = scanJsonlTokens(path.join(sessionsDir, agDir));
       allEntries.push(...claudeEntries.map((e) => ({ ...e, agentGroupId: agDir })));
-      // Codex app-server trace log (per-group .codex-shared/logs_2.sqlite)
+      // Codex app-server logs (logs_2.sqlite per session)
       const codexEntries = scanCodexTokens(path.join(sessionsDir, agDir));
       allEntries.push(...codexEntries.map((e) => ({ ...e, agentGroupId: agDir })));
     }
@@ -824,115 +861,160 @@ interface TokenEntry {
   timestamp: string;
 }
 
-function scanJsonlTokens(agentDir: string): TokenEntry[] {
+/**
+ * Per-transcript parse cache. Transcripts are append-only, so each pass reads
+ * only the bytes added since the last one (from the last complete line). A
+ * file that shrank or was replaced (rotation) is re-read from the start.
+ * Re-parsing every transcript every minute (~140MB here) was ~1s of blocked
+ * event loop per push.
+ */
+interface TranscriptCacheEntry {
+  ino: number;
+  offset: number; // byte offset just past the last complete line parsed
+  entries: TokenEntry[];
+}
+const transcriptCache = new Map<string, TranscriptCacheEntry>();
+
+function parseUsageLine(line: string): TokenEntry | null {
+  if (!line.trim()) return null;
+  try {
+    const r = JSON.parse(line);
+    if (r.type !== 'assistant' || !r.message?.usage) return null;
+    // Skip `<synthetic>` entries — Claude Code's marker for fabricated
+    // assistant turns that don't hit the API (zero tokens, zero cost, pure
+    // control-flow plumbing). Including them pollutes the By Model table with
+    // a row that's always zeros and grows unboundedly.
+    if (r.message.model === '<synthetic>') return null;
+    const u = r.message.usage;
+    return {
+      model: r.message.model || 'unknown',
+      inputTokens: u.input_tokens || 0,
+      outputTokens: u.output_tokens || 0,
+      cacheReadTokens: u.cache_read_input_tokens || 0,
+      cacheCreationTokens: u.cache_creation_input_tokens || 0,
+      timestamp: typeof r.timestamp === 'string' ? r.timestamp : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Usage entries for one transcript, oldest first. Shared array — do not mutate. */
+export function readTranscriptUsage(file: string): TokenEntry[] {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    transcriptCache.delete(file);
+    return [];
+  }
+  let cached = transcriptCache.get(file);
+  if (!cached || cached.ino !== stat.ino || stat.size < cached.offset) {
+    cached = { ino: stat.ino, offset: 0, entries: [] };
+    transcriptCache.set(file, cached);
+  }
+  if (stat.size === cached.offset) return cached.entries;
+
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(stat.size - cached.offset);
+    const read = fs.readSync(fd, buf, 0, buf.length, cached.offset);
+    // Parse complete lines only; a partially written last line waits for the
+    // next pass.
+    const lastNl = buf.lastIndexOf(0x0a, read - 1);
+    if (lastNl < 0) return cached.entries;
+    for (const line of buf.toString('utf-8', 0, lastNl).split('\n')) {
+      const e = parseUsageLine(line);
+      if (e) cached.entries.push(e);
+    }
+    cached.offset += lastNl + 1;
+  } catch {
+    /* keep what we have */
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+  return cached.entries;
+}
+
+function listTranscripts(agentDir: string): string[] {
   const claudeDir = path.join(agentDir, '.claude-shared', 'projects');
-  if (!fs.existsSync(claudeDir)) return [];
-
-  const entries: TokenEntry[] = [];
-
+  const files: string[] = [];
   const walk = (dir: string): void => {
     try {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.jsonl')) {
-          try {
-            for (const line of fs.readFileSync(full, 'utf-8').split('\n')) {
-              if (!line.trim()) continue;
-              try {
-                const r = JSON.parse(line);
-                if (r.type === 'assistant' && r.message?.usage) {
-                  // Skip `<synthetic>` entries — Claude Code's marker for
-                  // fabricated assistant turns that don't hit the API
-                  // (zero tokens, zero cost, pure control-flow plumbing).
-                  // Including them pollutes the By Model table with a
-                  // row that's always zeros and grows unboundedly.
-                  if (r.message.model === '<synthetic>') continue;
-                  const u = r.message.usage;
-                  entries.push({
-                    model: r.message.model || 'unknown',
-                    inputTokens: u.input_tokens || 0,
-                    outputTokens: u.output_tokens || 0,
-                    cacheReadTokens: u.cache_read_input_tokens || 0,
-                    cacheCreationTokens: u.cache_creation_input_tokens || 0,
-                    timestamp: typeof r.timestamp === 'string' ? r.timestamp : '',
-                  });
-                }
-              } catch {
-                /* skip line */
-              }
-            }
-          } catch {
-            /* skip file */
-          }
-        }
+        else if (entry.name.endsWith('.jsonl')) files.push(full);
       }
     } catch {
       /* skip dir */
     }
   };
-  walk(claudeDir);
+  if (fs.existsSync(claudeDir)) walk(claudeDir);
+  return files;
+}
+
+function scanJsonlTokens(agentDir: string): TokenEntry[] {
+  const entries: TokenEntry[] = [];
+  for (const file of listTranscripts(agentDir)) {
+    for (const e of readTranscriptUsage(file)) entries.push(e);
+  }
   return entries;
 }
 
 /**
- * Pull Codex per-turn token usage from a group's app-server trace log.
+ * Pull Codex per-turn token usage from each session's app-server logs.
  *
- * Codex writes a `logs_2.sqlite` feedback-trace DB under its CODEX_HOME. The
- * current /add-codex layout mounts CODEX_HOME from a per-GROUP `.codex-shared`
- * dir, so the DB is per group. (The old hand-backported provider used a
- * per-SESSION `<sess>/codex/` CODEX_HOME, so this used to scan
- * `<sess>/codex/logs_2.sqlite` — a path the new layout never creates, which
- * left the Codex token panel silently empty.) We locate the DB anywhere under
- * `.codex-shared` (codex's exact subpath has drifted across versions) and
- * degrade to no entries if it's absent or its schema differs.
- *
- * Each `response.completed` body carries a JSON usage block like:
+ * Codex stores structured trace data in `<session>/codex/logs_2.sqlite`;
+ * every `response.completed` SSE event carries a JSON usage block like:
  *   "usage":{"input_tokens":N,"input_tokens_details":{"cached_tokens":C},"output_tokens":M,...}
- * Model name appears as `model=<name>` in the same body. We pair the two into
- * an entry shaped like the Claude-side bag so both feed the same totals.
+ * Model name is earlier in the same log body as `model=<name>` in the
+ * tracing spans. We pair the two to synthesise an entry shaped like the
+ * Claude-side bag so both feed the same totals.
  *
  * Cache semantics differ: Claude reports cache read + creation separately,
  * Codex reports cached_tokens (reads only). We bucket them as cacheReadTokens
  * and leave cacheCreationTokens=0 for Codex.
- *
- * NOTE: unverified against a live codex@0.138 run (needs vault auth + a real
- * turn — no `.codex-shared` exists until then). If the panel stays empty once
- * a codex group runs, the fallback is to capture usage from the provider's
- * app-server `turn/completed` stream and persist it ourselves rather than
- * scraping codex's internal DB.
  */
-function findCodexTraceDbs(root: string, maxDepth = 3): string[] {
-  const found: string[] = [];
-  const walk = (dir: string, depth: number): void => {
-    let ents: fs.Dirent[];
+const codexCache = new Map<string, { sig: string; entries: TokenEntry[] }>();
+
+function sqliteSignature(dbPath: string): string {
+  const part = (p: string): string => {
     try {
-      ents = fs.readdirSync(dir, { withFileTypes: true });
+      const st = fs.statSync(p);
+      return `${st.ino}:${st.size}:${st.mtimeMs}`;
     } catch {
-      return;
-    }
-    for (const e of ents) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && e.name === 'logs_2.sqlite') found.push(full);
-      else if (e.isDirectory() && depth > 0) walk(full, depth - 1);
+      return '-';
     }
   };
-  walk(root, maxDepth);
-  return found;
+  return `${part(dbPath)}|${part(dbPath + '-wal')}`;
 }
 
 function scanCodexTokens(agentDir: string): TokenEntry[] {
   const entries: TokenEntry[] = [];
-  const dbPaths = findCodexTraceDbs(path.join(agentDir, '.codex-shared'));
-  if (dbPaths.length === 0) return entries;
-
+  let sessNames: string[];
+  try {
+    sessNames = fs.readdirSync(agentDir).filter((d) => d.startsWith('sess-'));
+  } catch {
+    return entries;
+  }
   const usageRe = /"usage":\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/;
   // Best-effort ISO timestamp scrape from the log body — matches the standard
   // 2025-01-02T03:04:05(.000)Z shape that Codex's tracing layer emits. If we
   // can't find one, the entry gets `timestamp: ''` and is treated as
   // "always include" by the range filter (matches the pre-range behavior).
   const tsRe = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\b/;
-  for (const dbPath of dbPaths) {
+  for (const sess of sessNames) {
+    const dbPath = path.join(agentDir, sess, 'codex', 'logs_2.sqlite');
+    if (!fs.existsSync(dbPath)) continue;
+    const sig = sqliteSignature(dbPath);
+    const hit = codexCache.get(dbPath);
+    if (hit && hit.sig === sig) {
+      for (const e of hit.entries) entries.push(e);
+      continue;
+    }
+    const sessEntries: TokenEntry[] = [];
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true });
@@ -957,7 +1039,7 @@ function scanCodexTokens(agentDir: string): TokenEntry[] {
         const details = (usage.input_tokens_details as { cached_tokens?: number } | undefined) ?? {};
         const cached = Number(details.cached_tokens) || 0;
         const tsMatch = body.match(tsRe);
-        entries.push({
+        sessEntries.push({
           model,
           // Anthropic semantics: input_tokens = fresh (excludes cached).
           // Codex reports total input + cached separately — subtract to match.
@@ -968,11 +1050,13 @@ function scanCodexTokens(agentDir: string): TokenEntry[] {
           timestamp: tsMatch ? tsMatch[1] : '',
         });
       }
+      codexCache.set(dbPath, { sig, entries: sessEntries });
     } catch {
-      /* missing `logs` table / different schema / locked DB — skip */
+      /* skip session */
     } finally {
       db?.close();
     }
+    for (const e of sessEntries) entries.push(e);
   }
   return entries;
 }
@@ -982,76 +1066,51 @@ function collectContextWindows() {
   if (!fs.existsSync(sessionsDir)) return [];
 
   const results: unknown[] = [];
-  const agentGroups = getAllAgentGroups();
+  const agentGroups = getAllAgentGroupsSync();
   const nameMap = new Map(agentGroups.map((g) => [g.id, g.name]));
 
   for (const agDir of fs.readdirSync(sessionsDir).filter((d) => d.startsWith('ag-'))) {
-    const claudeDir = path.join(sessionsDir, agDir, '.claude-shared', 'projects');
-    if (!fs.existsSync(claudeDir)) continue;
-
-    // Find most recent JSONL
-    const jsonlFiles: string[] = [];
-    const walk = (dir: string): void => {
-      try {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, entry.name);
-          if (entry.isDirectory()) walk(full);
-          else if (entry.name.endsWith('.jsonl')) jsonlFiles.push(full);
-        }
-      } catch {
-        /* skip */
-      }
-    };
-    walk(claudeDir);
+    const jsonlFiles = listTranscripts(path.join(sessionsDir, agDir));
     if (jsonlFiles.length === 0) continue;
 
-    jsonlFiles.sort((a, b) => {
+    // Newest transcript by mtime (stat once per file, not per comparison).
+    let newest = '';
+    let newestMtime = -Infinity;
+    for (const f of jsonlFiles) {
       try {
-        return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
-      } catch {
-        return 0;
-      }
-    });
-
-    // Read last assistant turn from newest file
-    const content = fs.readFileSync(jsonlFiles[0], 'utf-8');
-    const lines = content.split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].trim()) continue;
-      try {
-        const r = JSON.parse(lines[i]);
-        if (r.type === 'assistant' && r.message?.usage) {
-          const u = r.message.usage;
-          const model = r.message.model || 'unknown';
-          const ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-          // Max context is 1M when the agent group's configured model has a
-          // `[1m]` suffix — which is how we flip the Claude Code SDK into its
-          // context-1m beta. Otherwise standard 200K. Read from the DB rather
-          // than the JSONL because the JSONL only records the full model id
-          // (e.g. `claude-opus-4-7`) with no beta indicator.
-          // agent_groups schema in this fork has no `model` column, so we
-          // can't infer the 1M-context beta flag from the row. Default to
-          // 200K — the dashboard's percent gauge will read conservatively.
-          const max = 200_000;
-          results.push({
-            agentGroupId: agDir,
-            agentGroupName: nameMap.get(agDir),
-            sessionId: path.basename(jsonlFiles[0], '.jsonl'),
-            model,
-            contextTokens: ctx,
-            outputTokens: u.output_tokens || 0,
-            cacheReadTokens: u.cache_read_input_tokens || 0,
-            cacheCreationTokens: u.cache_creation_input_tokens || 0,
-            maxContext: max,
-            usagePercent: max > 0 ? Math.round((ctx / max) * 100) : 0,
-            timestamp: r.timestamp || '',
-          });
-          break;
+        const m = fs.statSync(f).mtimeMs;
+        if (m > newestMtime) {
+          newestMtime = m;
+          newest = f;
         }
       } catch {
         /* skip */
       }
     }
+    if (!newest) continue;
+
+    // Last real assistant turn, from the incremental parse cache (no full
+    // re-read of the newest transcript every push).
+    const usage = readTranscriptUsage(newest);
+    const last = usage[usage.length - 1];
+    if (!last) continue;
+    const ctx = last.inputTokens + last.cacheReadTokens + last.cacheCreationTokens;
+    // agent_groups schema in this fork has no reliable 1M-context flag, so
+    // default to 200K — the dashboard's percent gauge reads conservatively.
+    const max = 200_000;
+    results.push({
+      agentGroupId: agDir,
+      agentGroupName: nameMap.get(agDir),
+      sessionId: path.basename(newest, '.jsonl'),
+      model: last.model,
+      contextTokens: ctx,
+      outputTokens: last.outputTokens,
+      cacheReadTokens: last.cacheReadTokens,
+      cacheCreationTokens: last.cacheCreationTokens,
+      maxContext: max,
+      usagePercent: max > 0 ? Math.round((ctx / max) * 100) : 0,
+      timestamp: last.timestamp,
+    });
   }
 
   return results;
@@ -1199,7 +1258,7 @@ function collectMessages() {
 }
 
 function collectWikis() {
-  const groups = getAllAgentGroups().map((g) => ({
+  const groups = getAllAgentGroupsSync().map((g) => ({
     id: g.id,
     name: g.name,
     folder: g.folder,

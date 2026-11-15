@@ -10,11 +10,21 @@
  * dashboard-pusher.ts uses the readings to flag any container pinned at
  * high CPU for a sustained window.
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 import { CONTAINER_INSTALL_LABEL } from './config.js';
+
+/** Label carrying the pre-seam human-readable container name (`nanoclaw-v2-<folder>-<epoch>`). */
+const HUMAN_NAME_LABEL = 'nanoclaw-container-name';
 import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { log } from './log.js';
+
+// Async on purpose: `docker stats --no-stream` samples for ~2s (longer under
+// load). Run synchronously from the 60s dashboard push it froze the host event
+// loop long enough to trip the gateway's 5s health probe and kill every live
+// session.
+const execFileAsync = promisify(execFile);
 
 export interface ContainerStat {
   /** Container name (e.g. `nanoclaw-v2-foo-1700000000000`). */
@@ -80,7 +90,16 @@ export function parsePercent(token: string | undefined): number {
  * Parse one JSONL line from `docker stats --format '{{json .}}'`. Returns
  * null on garbage so callers can `.filter(Boolean)`.
  */
-export function parseStatsRow(json: string, containerNameToSession: Map<string, string>): ContainerStat | null {
+export function parseStatsRow(
+  json: string,
+  containerNameToSession: Map<string, string>,
+  /**
+   * Runtime name (`ncl-…`) → the human-readable `nanoclaw-container-name`
+   * label. `docker stats` only reports the runtime name, while the session
+   * map and the folder parse are both keyed on the human name.
+   */
+  runtimeToHumanName?: Map<string, string>,
+): ContainerStat | null {
   let row: DockerStatsRow;
   try {
     row = JSON.parse(json) as DockerStatsRow;
@@ -89,11 +108,12 @@ export function parseStatsRow(json: string, containerNameToSession: Map<string, 
   }
   if (!row.Name) return null;
 
+  const humanName = runtimeToHumanName?.get(row.Name) ?? row.Name;
   const mem = parseMemUsage(row.MemUsage);
   return {
-    name: row.Name,
-    sessionId: containerNameToSession.get(row.Name) ?? null,
-    folder: parseFolderFromName(row.Name),
+    name: humanName,
+    sessionId: containerNameToSession.get(humanName) ?? null,
+    folder: parseFolderFromName(humanName),
     cpuPercent: parsePercent(row.CPUPerc),
     memUsageBytes: mem.used,
     memLimitBytes: mem.limit,
@@ -105,6 +125,10 @@ export function parseStatsRow(json: string, containerNameToSession: Map<string, 
  * Pull the folder out of a `nanoclaw-v2-<folder>-<epoch>` container name.
  * Folder names can contain hyphens, so strip the trailing `-<digits>` epoch
  * and the `nanoclaw-v2-` prefix. Returns null if the pattern doesn't match.
+ *
+ * Since the session-driver seam, the RUNTIME name is a key-derived `ncl-…`
+ * string, so this must be given the human-readable name carried on the
+ * `nanoclaw-container-name` label — never `{{.Names}}`.
  */
 export function parseFolderFromName(name: string): string | null {
   const m = name.match(/^nanoclaw-v2-(.+)-\d+$/);
@@ -118,16 +142,35 @@ export function parseFolderFromName(name: string): string | null {
  * (because `docker stats --filter` only supports id/name), then pass those
  * names into `docker stats --no-stream`. Returns [] on any failure — stats
  * are best-effort and shouldn't take down the snapshot push.
+ *
+ * Since the session-driver seam the runtime name is key-derived (`ncl-…`),
+ * so `ps` also reads the `nanoclaw-container-name` label: `stats` is invoked
+ * with runtime names, but the session join and the folder parse both need the
+ * human-readable name. Without the label the join silently misses every row
+ * and the dashboard's CPU/memory columns go blank.
  */
-export function collectContainerStats(activeContainers: Map<string, string>): ContainerStat[] {
+export async function collectContainerStats(activeContainers: Map<string, string>): Promise<ContainerStat[]> {
   let names: string[];
+  const runtimeToHumanName = new Map<string, string>();
   try {
-    const out = execFileSync(
+    const { stdout: out } = await execFileAsync(
       CONTAINER_RUNTIME_BIN,
-      ['ps', '--filter', `label=${CONTAINER_INSTALL_LABEL}`, '--format', '{{.Names}}'],
-      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] },
+      [
+        'ps',
+        '--filter',
+        `label=${CONTAINER_INSTALL_LABEL}`,
+        '--format',
+        `{{.Names}}\t{{.Label "${HUMAN_NAME_LABEL}"}}`,
+      ],
+      { encoding: 'utf-8', timeout: 5000 },
     );
-    names = out.trim().split('\n').filter(Boolean);
+    names = [];
+    for (const line of out.trim().split('\n').filter(Boolean)) {
+      const [runtimeName, humanName] = line.split('\t');
+      if (!runtimeName) continue;
+      names.push(runtimeName);
+      if (humanName) runtimeToHumanName.set(runtimeName, humanName);
+    }
   } catch (err) {
     log.debug('container-stats: docker ps failed', { err });
     return [];
@@ -139,11 +182,11 @@ export function collectContainerStats(activeContainers: Map<string, string>): Co
 
   let raw: string;
   try {
-    raw = execFileSync(CONTAINER_RUNTIME_BIN, ['stats', '--no-stream', '--format', '{{json .}}', ...names], {
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    ({ stdout: raw } = await execFileAsync(
+      CONTAINER_RUNTIME_BIN,
+      ['stats', '--no-stream', '--format', '{{json .}}', ...names],
+      { encoding: 'utf-8', timeout: 10000 },
+    ));
   } catch (err) {
     log.debug('container-stats: docker stats failed', { err });
     return [];
@@ -152,7 +195,7 @@ export function collectContainerStats(activeContainers: Map<string, string>): Co
   const stats: ContainerStat[] = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
-    const stat = parseStatsRow(line, nameToSession);
+    const stat = parseStatsRow(line, nameToSession, runtimeToHumanName);
     if (stat) stats.push(stat);
   }
   return stats;
@@ -174,34 +217,19 @@ export class CpuWatchdog {
     private readonly thresholdPercent: number = 80,
   ) {}
 
-  /**
-   * Record this round's stats. `activeSessionIds`, when provided, is the set
-   * of sessions that currently have a live container (from the host's active
-   * container map). History is GC'd against *that* set — NOT against which
-   * sessions happened to appear in this stats batch.
-   *
-   * This distinction is load-bearing: `collectContainerStats` returns [] on
-   * any transient `docker ps`/`docker stats` failure. GC'ing on "present in
-   * this sample" would wipe the entire window on every such hiccup and reset
-   * the 5-sample counter, letting a genuinely pinned container dodge the
-   * watchdog indefinitely under noisy runtime conditions. Keying GC to the
-   * active session set means a stats blip leaves history intact.
-   *
-   * When `activeSessionIds` is omitted, no GC runs (history is bounded only
-   * by the active set at the call site).
-   */
-  record(stats: ContainerStat[], activeSessionIds?: Set<string>): void {
+  /** Record this round's stats. Drops history for any session not present. */
+  record(stats: ContainerStat[]): void {
+    const seen = new Set<string>();
     for (const s of stats) {
       if (!s.sessionId) continue;
+      seen.add(s.sessionId);
       const arr = this.history.get(s.sessionId) ?? [];
       arr.push(s.cpuPercent);
       while (arr.length > this.maxSamples) arr.shift();
       this.history.set(s.sessionId, arr);
     }
-    if (activeSessionIds) {
-      for (const sid of [...this.history.keys()]) {
-        if (!activeSessionIds.has(sid)) this.history.delete(sid);
-      }
+    for (const sid of [...this.history.keys()]) {
+      if (!seen.has(sid)) this.history.delete(sid);
     }
   }
 

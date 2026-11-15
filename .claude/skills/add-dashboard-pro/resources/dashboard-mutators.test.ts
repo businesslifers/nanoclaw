@@ -9,9 +9,8 @@ vi.mock('./config.js', async (importOriginal) => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-dashboard-mutators-test' };
 });
 
-import { closeDb, createAgentGroup, initTestDb } from './db/index.js';
-// Sync mirrors — assertions read committed state; see src/db/sqlite-legacy.ts.
-import { getAgentGroupSync as getAgentGroup, getContainerConfigSync as getContainerConfig } from './db/sqlite-legacy.js';
+import { closeDb, createAgentGroup, getAgentGroup, initTestDb } from './db/index.js';
+import { getContainerConfig } from './db/container-configs.js';
 import { runMigrations } from './db/migrations/index.js';
 import { getRecentAudit } from './db/dashboard-audit.js';
 import { createSession } from './db/sessions.js';
@@ -45,7 +44,7 @@ function now() {
 }
 
 async function seedAgentGroup(id: string, name: string) {
-  await createAgentGroup({ id, name, folder: id, agent_provider: null, created_at: now() });
+  await createAgentGroup({ id, name, folder: id, agent_provider: null, model: null, created_at: now() });
 }
 
 async function seedUserWithRole(userId: string, role: 'owner' | 'admin', scope: string | null) {
@@ -57,6 +56,8 @@ async function seedUserAsMember(userId: string, agentGroupId: string) {
   await createUser({ id: userId, kind: 'discord', display_name: null, created_at: now() });
   await addMember({ user_id: userId, agent_group_id: agentGroupId, added_by: null, added_at: now() });
 }
+
+const FUTURE_PROCESS_AFTER = '2099-04-30T09:00:00.000Z';
 
 async function seedSessionWithTasks(
   sessionId: string,
@@ -77,6 +78,7 @@ async function seedSessionWithTasks(
     messaging_group_id: null,
     thread_id: null,
     agent_provider: null,
+    model: null,
     status: 'active',
     container_status: 'stopped',
     last_active: now(),
@@ -92,10 +94,10 @@ async function seedSessionWithTasks(
     insertTaskRow(inDb, {
       id: row.id,
       seriesId: row.seriesId ?? row.id,
-      // Must stay in the FUTURE: updateTask only touches paused rows or
-      // pending rows whose process_after has not passed, so a fixed literal
-      // date silently expires the fixture (it did, on 2026-04-30).
-      processAfter: row.processAfter ?? new Date(Date.now() + 86_400_000).toISOString(),
+      // Far future by default: upstream's updateTask refuses already-due
+      // occurrences (only paused or future-pending rows are mutable), so a
+      // past fixture makes every update test fail as "no live row in chain".
+      processAfter: row.processAfter ?? FUTURE_PROCESS_AFTER,
       recurrence: row.recurrence ?? null,
       content: JSON.stringify({ prompt: row.prompt ?? 'test prompt', script: row.script ?? null }),
     });
@@ -108,9 +110,7 @@ async function seedSessionWithTasks(
 }
 
 beforeEach(async () => {
-  await initTestDb();
-  await runMigrations(await initTestDb()); // idempotent — table already there from initTestDb but migrations need to run on it
-  // initTestDb returns a fresh DB; rerun to ensure migrations applied.
+  await runMigrations(await initTestDb());
   vi.mocked(nudgePusher).mockClear();
   vi.mocked(killContainer).mockClear();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
@@ -132,7 +132,7 @@ describe('renameAgentGroup', () => {
 
     const result = renameAgentGroup({ id: 'ag-1', name: 'New' }, 'u-owner');
     expect(result).toEqual({ id: 'ag-1', name: 'New' });
-    expect(getAgentGroup('ag-1')!.name).toBe('New');
+    expect((await getAgentGroup('ag-1'))!.name).toBe('New');
     expect(nudgePusher).toHaveBeenCalledTimes(1);
 
     const audit = getRecentAudit(10);
@@ -148,7 +148,7 @@ describe('renameAgentGroup', () => {
     await seedAgentGroup('ag-1', 'Old');
     await seedUserWithRole('u-ga', 'admin', null);
     expect(() => renameAgentGroup({ id: 'ag-1', name: 'New' }, 'u-ga')).not.toThrow();
-    expect(getAgentGroup('ag-1')!.name).toBe('New');
+    expect((await getAgentGroup('ag-1'))!.name).toBe('New');
   });
 
   it('renames when actor is scoped admin of this group', async () => {
@@ -214,7 +214,7 @@ describe('renameAgentGroup', () => {
     await seedUserWithRole('u-owner', 'owner', null);
     const result = renameAgentGroup({ id: 'ag-1', name: '  Trimmed  ' }, 'u-owner');
     expect(result.name).toBe('Trimmed');
-    expect(getAgentGroup('ag-1')!.name).toBe('Trimmed');
+    expect((await getAgentGroup('ag-1'))!.name).toBe('Trimmed');
   });
 });
 
@@ -222,8 +222,8 @@ describe('updateAgentGroupModel', () => {
   // Self-contained seeding (deliberately NOT reusing seedSessionWithTasks —
   // that helper diverges between the installed and skill-resource copies of
   // this test file; this block must stay identical in both).
-  function seedBareSession(id: string, agentGroupId: string, containerStatus: 'running' | 'idle' | 'stopped') {
-    createSession({
+  async function seedBareSession(id: string, agentGroupId: string, containerStatus: 'running' | 'idle' | 'stopped') {
+    await createSession({
       id,
       agent_group_id: agentGroupId,
       messaging_group_id: null,
@@ -242,7 +242,7 @@ describe('updateAgentGroupModel', () => {
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: 'opus' }, 'u-owner');
     expect(result).toEqual({ id: 'ag-1', model: 'opus', effort: null, killed: 0 });
-    expect(getAgentGroup('ag-1')!.model).toBe('opus');
+    expect((await getAgentGroup('ag-1'))!.model).toBe('opus');
     expect(nudgePusher).toHaveBeenCalledTimes(1);
     expect(killContainer).not.toHaveBeenCalled();
 
@@ -262,7 +262,7 @@ describe('updateAgentGroupModel', () => {
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: null }, 'u-owner');
     expect(result.model).toBeNull();
-    expect(getAgentGroup('ag-1')!.model).toBeNull();
+    expect((await getAgentGroup('ag-1'))!.model).toBeNull();
 
     const audit = getRecentAudit(10);
     expect(audit).toHaveLength(2);
@@ -275,10 +275,10 @@ describe('updateAgentGroupModel', () => {
     await seedUserWithRole('u-owner', 'owner', null);
 
     expect(updateAgentGroupModel({ id: 'ag-1', model: '  sonnet[1m]  ' }, 'u-owner').model).toBe('sonnet[1m]');
-    expect(getAgentGroup('ag-1')!.model).toBe('sonnet[1m]');
+    expect((await getAgentGroup('ag-1'))!.model).toBe('sonnet[1m]');
 
     expect(updateAgentGroupModel({ id: 'ag-1', model: '   ' }, 'u-owner').model).toBeNull();
-    expect(getAgentGroup('ag-1')!.model).toBeNull();
+    expect((await getAgentGroup('ag-1'))!.model).toBeNull();
   });
 
   it('rejects non-string non-null model', async () => {
@@ -331,9 +331,9 @@ describe('updateAgentGroupModel', () => {
   it('restart kills only running/idle containers of the group', async () => {
     await seedAgentGroup('ag-1', 'Team');
     await seedUserWithRole('u-owner', 'owner', null);
-    seedBareSession('s-run', 'ag-1', 'running');
-    seedBareSession('s-idle', 'ag-1', 'idle');
-    seedBareSession('s-stop', 'ag-1', 'stopped');
+    await seedBareSession('s-run', 'ag-1', 'running');
+    await seedBareSession('s-idle', 'ag-1', 'idle');
+    await seedBareSession('s-stop', 'ag-1', 'stopped');
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: 'haiku', restart: true }, 'u-owner');
     expect(result.killed).toBe(2);
@@ -346,7 +346,7 @@ describe('updateAgentGroupModel', () => {
   it('restart with unchanged model still kills, but writes no audit', async () => {
     await seedAgentGroup('ag-1', 'Team');
     await seedUserWithRole('u-owner', 'owner', null);
-    seedBareSession('s-run', 'ag-1', 'running');
+    await seedBareSession('s-run', 'ag-1', 'running');
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: null, restart: true }, 'u-owner');
     expect(result).toEqual({ id: 'ag-1', model: null, effort: null, killed: 1 });
@@ -361,7 +361,7 @@ describe('updateAgentGroupModel', () => {
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'medium' }, 'u-owner');
     expect(result).toEqual({ id: 'ag-1', model: null, effort: 'medium', killed: 0 });
-    expect(getContainerConfig('ag-1')!.effort).toBe('medium');
+    expect((await getContainerConfig('ag-1'))!.effort).toBe('medium');
     expect(nudgePusher).toHaveBeenCalledTimes(1);
 
     const audit = getRecentAudit(10);
@@ -377,8 +377,8 @@ describe('updateAgentGroupModel', () => {
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: 'opus', effort: 'xhigh' }, 'u-owner');
     expect(result).toEqual({ id: 'ag-1', model: 'opus', effort: 'xhigh', killed: 0 });
-    expect(getAgentGroup('ag-1')!.model).toBe('opus');
-    expect(getContainerConfig('ag-1')!.effort).toBe('xhigh');
+    expect((await getAgentGroup('ag-1'))!.model).toBe('opus');
+    expect((await getContainerConfig('ag-1'))!.effort).toBe('xhigh');
 
     const actions = getRecentAudit(10).map((a) => a.action);
     expect(actions.sort()).toEqual(['agent_group.set_effort', 'agent_group.set_model']);
@@ -389,15 +389,15 @@ describe('updateAgentGroupModel', () => {
     await seedAgentGroup('ag-1', 'Team');
     await seedUserWithRole('u-owner', 'owner', null);
     updateAgentGroupModel({ id: 'ag-1', model: null, effort: '  HIGH ' }, 'u-owner');
-    expect(getContainerConfig('ag-1')!.effort).toBe('high');
+    expect((await getContainerConfig('ag-1'))!.effort).toBe('high');
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: null, effort: null }, 'u-owner');
     expect(result.effort).toBeNull();
-    expect(getContainerConfig('ag-1')!.effort).toBeNull();
+    expect((await getContainerConfig('ag-1'))!.effort).toBeNull();
 
     updateAgentGroupModel({ id: 'ag-1', model: null, effort: 'low' }, 'u-owner');
     expect(updateAgentGroupModel({ id: 'ag-1', model: null, effort: '   ' }, 'u-owner').effort).toBeNull();
-    expect(getContainerConfig('ag-1')!.effort).toBeNull();
+    expect((await getContainerConfig('ag-1'))!.effort).toBeNull();
   });
 
   it('absent effort field leaves the stored effort untouched', async () => {
@@ -408,7 +408,7 @@ describe('updateAgentGroupModel', () => {
 
     const result = updateAgentGroupModel({ id: 'ag-1', model: 'sonnet' }, 'u-owner');
     expect(result.effort).toBe('max');
-    expect(getContainerConfig('ag-1')!.effort).toBe('max');
+    expect((await getContainerConfig('ag-1'))!.effort).toBe('max');
     // Only the model audit row was added.
     const actions = getRecentAudit(10).map((a) => a.action);
     expect(actions.filter((a) => a === 'agent_group.set_effort')).toHaveLength(1);

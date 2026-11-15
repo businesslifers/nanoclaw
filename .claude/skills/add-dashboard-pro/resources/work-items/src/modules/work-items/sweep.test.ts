@@ -5,17 +5,32 @@
  *   deliverable tier cascade   ← dependency-cascade.mjs
  *   cadence weekly RAG         ← cadence-health.mjs
  * All against the pure decision functions — no DB, no timers.
+ *
+ * The final describe block below is the exception: an integration test
+ * against the real `sweepWorkItems()` DB path, covering the one thing the
+ * pure decision functions can't — that a no-session team's items are never
+ * stamped (see the "skip stamps only for no-session teams" fix).
  */
-import { describe, it, expect } from 'vitest';
+import { sqliteRaw } from '../../db/drivers/sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   DELEGATION_NAG_INTERVAL_MS,
+  computeDailyRagRollup,
   decideCadenceOverdue,
   decideDelegationNag,
   decideDeliverableTier,
   decideSweepActions,
+  sweepWorkItems,
 } from './sweep.js';
 import type { WorkItem } from '../../db/work-items.js';
+import { initTestDb, closeDb, runMigrations, createAgentGroup } from '../../db/index.js';
+import { createWorkItem, generateWorkItemId } from '../../db/work-items.js';
+import { createSession } from '../../db/sessions.js';
+import { getDb } from '../../db/connection.js';
+import { isoWeek } from './period.js';
+
+vi.mock('../approvals/primitive.js', () => ({ notifyAgent: vi.fn() }));
 
 const TZ = 'UTC';
 const NOW = Date.parse('2026-07-02T10:00:00Z');
@@ -152,6 +167,80 @@ describe('cadence weekly RAG (cadence-health port)', () => {
     expect(decideCadenceOverdue(cadence(1, null, TODAY), TODAY, TZ)).toBe(false);
     expect(decideCadenceOverdue(cadence(1, null, '2026-07-01'), TODAY, TZ)).toBe(true);
   });
+
+  it('a blocked stream still triggers dedup accounting but not escalation', () => {
+    expect(decideCadenceOverdue({ ...cadence(1, null, null), status: 'blocked' }, TODAY, TZ)).toBe(true);
+  });
+});
+
+describe('blocked cadence items never stand up a wake on their own (parity with cadence-health.mjs blockedStreams)', () => {
+  function blockedCadence(overrides: Partial<WorkItem> = {}) {
+    return base({
+      id: 'wi-blocked',
+      kind: 'cadence',
+      status: 'blocked',
+      status_detail: 'waiting on the email platform to go live',
+      cadence_expected_dow: 1,
+      owner_agent_group_id: 'ag-lpg',
+      ...overrides,
+    });
+  }
+
+  it('blocked-alone: no wake, no stamp (silent — reconsidered next tick, not tomorrow)', () => {
+    const { wakes, stamps } = decideSweepActions([blockedCadence()], { nowMs: NOW, today: TODAY, tz: TZ });
+    expect(wakes.has('ag-lpg')).toBe(false);
+    expect(stamps).toHaveLength(0);
+  });
+
+  it('rides along informationally when the same team is already woken by another item', () => {
+    const items = [
+      blockedCadence(),
+      base({
+        id: 'wi-other',
+        kind: 'delegation',
+        follow_up_at: '2026-07-02T08:00:00Z',
+        owner_agent_group_id: 'ag-lpg',
+      }),
+    ];
+    const { wakes, stamps } = decideSweepActions(items, { nowMs: NOW, today: TODAY, tz: TZ });
+    const lines = wakes.get('ag-lpg');
+    expect(lines).toHaveLength(2);
+    const blockedLine = lines?.find((l) => l.includes('BLOCKED'));
+    expect(blockedLine).toContain('waiting on the email platform to go live');
+    expect(blockedLine).not.toContain('alert the owners');
+    expect(stamps.map((s) => s.id).sort()).toEqual(['wi-blocked', 'wi-other']);
+  });
+
+  it('rides along regardless of array order (order-independence)', () => {
+    // Same as above but the waking item comes BEFORE the blocked item in
+    // the array — `wakes.has(team)` must reflect the full tick, not
+    // whatever's been seen so far.
+    const items = [
+      base({
+        id: 'wi-other',
+        kind: 'delegation',
+        follow_up_at: '2026-07-02T08:00:00Z',
+        owner_agent_group_id: 'ag-lpg',
+      }),
+      blockedCadence(),
+    ];
+    const { wakes } = decideSweepActions(items, { nowMs: NOW, today: TODAY, tz: TZ });
+    expect(wakes.get('ag-lpg')?.some((l) => l.includes('BLOCKED'))).toBe(true);
+  });
+
+  it('falls back to a generic note when status_detail is unset', () => {
+    const items = [
+      blockedCadence({ id: 'wi-blocked-2', status_detail: null }),
+      base({
+        id: 'wi-other',
+        kind: 'delegation',
+        follow_up_at: '2026-07-02T08:00:00Z',
+        owner_agent_group_id: 'ag-lpg',
+      }),
+    ];
+    const { wakes } = decideSweepActions(items, { nowMs: NOW, today: TODAY, tz: TZ });
+    expect(wakes.get('ag-lpg')?.some((l) => l.includes('no detail recorded'))).toBe(true);
+  });
 });
 
 describe('decideSweepActions consolidation', () => {
@@ -173,5 +262,234 @@ describe('decideSweepActions consolidation', () => {
     const { wakes, stamps } = decideSweepActions(items, { nowMs: NOW, today: TODAY, tz: TZ });
     expect(wakes.size).toBe(0);
     expect(stamps).toHaveLength(0);
+  });
+});
+
+describe('computeDailyRagRollup (cadence-health.mjs RAG parity — dormant, not yet wired to a live wake)', () => {
+  it('GREEN when nothing is overdue or due soon', () => {
+    const items = [
+      base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-08-20', owner_agent_group_id: 'ag-lpg' }),
+      base({ id: 'wi-2', kind: 'cadence', cadence_expected_dow: 6, owner_agent_group_id: 'ag-lpg' }),
+    ];
+    const rollup = computeDailyRagRollup(items, { today: TODAY, tz: TZ });
+    expect(rollup.get('ag-lpg')?.rag).toBe('GREEN');
+  });
+
+  it('RED when a deliverable is overdue, even if something else is also AMBER-worthy', () => {
+    const items = [
+      base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-06-01', owner_agent_group_id: 'ag-lpg' }),
+      base({ id: 'wi-2', kind: 'deliverable', due_at: '2026-07-05', owner_agent_group_id: 'ag-lpg' }),
+    ];
+    const rollup = computeDailyRagRollup(items, { today: TODAY, tz: TZ })?.get('ag-lpg');
+    expect(rollup?.rag).toBe('RED');
+    expect(rollup?.overdueDeliverables.map((i) => i.id)).toEqual(['wi-1']);
+    expect(rollup?.soonDeliverables.map((i) => i.id)).toEqual(['wi-2']);
+  });
+
+  it('AMBER when a deliverable is due within 3 days (soonDeps parity — inclusive of day 3, exclusive of overdue)', () => {
+    const soon = computeDailyRagRollup(
+      [base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-07-05', owner_agent_group_id: 'ag-lpg' })],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(soon?.rag).toBe('AMBER');
+
+    const tooFar = computeDailyRagRollup(
+      [base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-07-06', owner_agent_group_id: 'ag-lpg' })],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(tooFar?.rag).toBe('GREEN');
+  });
+
+  it('AMBER when a non-blocked cadence stream is overdue', () => {
+    const rollup = computeDailyRagRollup(
+      [base({ id: 'wi-1', kind: 'cadence', cadence_expected_dow: 1, owner_agent_group_id: 'ag-lpg' })],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(rollup?.rag).toBe('AMBER');
+    expect(rollup?.overdueStreams.map((i) => i.id)).toEqual(['wi-1']);
+  });
+
+  it('a BLOCKED cadence stream never affects RAG on its own — informational only, parity with blockedStreams', () => {
+    const rollup = computeDailyRagRollup(
+      [
+        base({
+          id: 'wi-1',
+          kind: 'cadence',
+          cadence_expected_dow: 1,
+          status: 'blocked',
+          owner_agent_group_id: 'ag-lpg',
+        }),
+      ],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(rollup?.rag).toBe('GREEN');
+    expect(rollup?.blockedStreams.map((i) => i.id)).toEqual(['wi-1']);
+    expect(rollup?.overdueStreams).toEqual([]);
+  });
+
+  it('a blocked stream does not suppress RED/AMBER raised by something else on the same team', () => {
+    const rollup = computeDailyRagRollup(
+      [
+        base({
+          id: 'wi-1',
+          kind: 'cadence',
+          cadence_expected_dow: 1,
+          status: 'blocked',
+          owner_agent_group_id: 'ag-lpg',
+        }),
+        base({ id: 'wi-2', kind: 'deliverable', due_at: '2026-06-01', owner_agent_group_id: 'ag-lpg' }),
+      ],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(rollup?.rag).toBe('RED');
+    expect(rollup?.blockedStreams.map((i) => i.id)).toEqual(['wi-1']);
+  });
+
+  it('done/cancelled items never contribute, regardless of kind or due date', () => {
+    const rollup = computeDailyRagRollup(
+      [
+        base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-06-01', status: 'done', owner_agent_group_id: 'ag-lpg' }),
+        base({
+          id: 'wi-2',
+          kind: 'cadence',
+          cadence_expected_dow: 1,
+          status: 'cancelled',
+          owner_agent_group_id: 'ag-lpg',
+        }),
+      ],
+      { today: TODAY, tz: TZ },
+    );
+    expect(rollup.get('ag-lpg')).toBeUndefined();
+  });
+
+  it('a cadence stream already completed this ISO week is not overdue (team reports GREEN, not untracked)', () => {
+    const rollup = computeDailyRagRollup(
+      [
+        base({
+          id: 'wi-1',
+          kind: 'cadence',
+          cadence_expected_dow: 1,
+          cadence_last_completed_period: isoWeek(TODAY),
+          owner_agent_group_id: 'ag-lpg',
+        }),
+      ],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(rollup?.rag).toBe('GREEN');
+    expect(rollup?.overdueStreams).toEqual([]);
+  });
+
+  it('a cadence stream is not overdue before its expected ISO weekday arrives (team reports GREEN, not untracked)', () => {
+    // TODAY is ISO dow 4 (Thursday); expected_dow 5 (Friday) hasn't arrived yet.
+    const rollup = computeDailyRagRollup(
+      [base({ id: 'wi-1', kind: 'cadence', cadence_expected_dow: 5, owner_agent_group_id: 'ag-lpg' })],
+      { today: TODAY, tz: TZ },
+    ).get('ag-lpg');
+    expect(rollup?.rag).toBe('GREEN');
+    expect(rollup?.overdueStreams).toEqual([]);
+  });
+
+  it('classifies multiple teams independently in one pass', () => {
+    const items = [
+      base({ id: 'wi-1', kind: 'deliverable', due_at: '2026-06-01', owner_agent_group_id: 'ag-lpg' }),
+      base({ id: 'wi-2', kind: 'deliverable', due_at: '2026-08-20', owner_agent_group_id: 'ag-other' }),
+    ];
+    const rollup = computeDailyRagRollup(items, { today: TODAY, tz: TZ });
+    expect(rollup.get('ag-lpg')?.rag).toBe('RED');
+    expect(rollup.get('ag-other')?.rag).toBe('GREEN');
+  });
+
+  it('ignores kinds outside deliverable/cadence (delegation, task) entirely', () => {
+    const rollup = computeDailyRagRollup(
+      [
+        base({ id: 'wi-1', kind: 'delegation', follow_up_at: '2026-06-01T00:00:00Z', owner_agent_group_id: 'ag-lpg' }),
+        base({ id: 'wi-2', kind: 'task', owner_agent_group_id: 'ag-lpg' }),
+      ],
+      { today: TODAY, tz: TZ },
+    );
+    expect(rollup.get('ag-lpg')).toBeUndefined();
+  });
+});
+
+describe('sweepWorkItems: no-session teams never get stamped (integration)', () => {
+  const TEAM_LIVE = 'ag-team-live';
+  const TEAM_COLD = 'ag-team-cold';
+  // Far enough in the past to be overdue on any real test-run date.
+  const LONG_OVERDUE = '2020-01-01T00:00:00Z';
+
+  beforeEach(async () => {
+    const db = await initTestDb();
+    await runMigrations(db);
+    for (const id of [TEAM_LIVE, TEAM_COLD]) {
+      await createAgentGroup({ id, name: id, folder: id, agent_provider: null, created_at: new Date().toISOString() });
+    }
+    await createSession({
+      id: 'sess-live',
+      agent_group_id: TEAM_LIVE,
+      messaging_group_id: null,
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'running',
+      last_active: null,
+      created_at: new Date().toISOString(),
+    });
+    // TEAM_COLD deliberately gets no session row.
+  });
+
+  afterEach(async () => {
+    await closeDb();
+    vi.clearAllMocks();
+  });
+
+  it('stamps + wakes the live team, but skips the stamp for the session-less team', async () => {
+    const live = createWorkItem({
+      id: generateWorkItemId(),
+      owner_agent_group_id: TEAM_LIVE,
+      title: 'chase this',
+      follow_up_at: LONG_OVERDUE,
+      created_by_kind: 'agent',
+    });
+    const cold = createWorkItem({
+      id: generateWorkItemId(),
+      owner_agent_group_id: TEAM_COLD,
+      title: 'nobody home',
+      follow_up_at: LONG_OVERDUE,
+      created_by_kind: 'agent',
+    });
+
+    await sweepWorkItems();
+
+    const { notifyAgent } = await import('../approvals/primitive.js');
+    expect(notifyAgent).toHaveBeenCalledTimes(1);
+
+    const db = sqliteRaw(getDb());
+    const liveRow = db.prepare('SELECT reminder_last_sent_at FROM work_items WHERE id = ?').get(live.id) as {
+      reminder_last_sent_at: string | null;
+    };
+    const coldRow = db.prepare('SELECT reminder_last_sent_at FROM work_items WHERE id = ?').get(cold.id) as {
+      reminder_last_sent_at: string | null;
+    };
+    expect(liveRow.reminder_last_sent_at).not.toBeNull();
+    expect(coldRow.reminder_last_sent_at).toBeNull();
+  });
+
+  it('a still-cold team keeps retrying on the next tick (stamp remains unset)', async () => {
+    const cold = createWorkItem({
+      id: generateWorkItemId(),
+      owner_agent_group_id: TEAM_COLD,
+      title: 'nobody home',
+      follow_up_at: LONG_OVERDUE,
+      created_by_kind: 'agent',
+    });
+
+    await sweepWorkItems();
+    await sweepWorkItems();
+
+    const db = sqliteRaw(getDb());
+    const coldRow = db.prepare('SELECT reminder_last_sent_at FROM work_items WHERE id = ?').get(cold.id) as {
+      reminder_last_sent_at: string | null;
+    };
+    expect(coldRow.reminder_last_sent_at).toBeNull();
   });
 });

@@ -16,7 +16,7 @@ import { MutatorAuthError, MutatorValidationError, MutatorNotFoundError } from '
 
 vi.mock('./modules/work-items/wake.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./modules/work-items/wake.js')>();
-  return { ...actual, refreshAndWake: vi.fn(async () => {}) };
+  return { ...actual, refreshAndWake: vi.fn() };
 });
 
 import { refreshAndWake } from './modules/work-items/wake.js';
@@ -47,16 +47,16 @@ beforeEach(async () => {
   for (const id of [TEAM_A, TEAM_B]) {
     await createAgentGroup({ id, name: id, folder: id, agent_provider: null, model: null, created_at: now() } as never);
   }
-  createUser({ id: OWNER_USER, kind: 'discord', display_name: 'Owner', created_at: now() });
-  grantRole({ user_id: OWNER_USER, role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+  await createUser({ id: OWNER_USER, kind: 'discord', display_name: 'Owner', created_at: now() });
+  await grantRole({ user_id: OWNER_USER, role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
   for (const [id, team] of [
     [MEMBER_A, TEAM_A],
     [MEMBER_B, TEAM_B],
   ] as const) {
-    createUser({ id, kind: 'discord', display_name: id, created_at: now() });
-    addMember({ user_id: id, agent_group_id: team, added_by: null, added_at: now() });
+    await createUser({ id, kind: 'discord', display_name: id, created_at: now() });
+    await addMember({ user_id: id, agent_group_id: team, added_by: null, added_at: now() });
   }
-  createUser({ id: OUTSIDER, kind: 'discord', display_name: 'Outsider', created_at: now() });
+  await createUser({ id: OUTSIDER, kind: 'discord', display_name: 'Outsider', created_at: now() });
 });
 
 afterEach(async () => {

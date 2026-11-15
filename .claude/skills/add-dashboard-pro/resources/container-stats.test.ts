@@ -129,32 +129,12 @@ describe('CpuWatchdog', () => {
     expect(w.pinned()).toEqual([]);
   });
 
-  it('garbage-collects sessions absent from the active set', () => {
-    const w = new CpuWatchdog(3, 80);
-    w.record([stat('sess-a', 95)], new Set(['sess-a']));
-    expect(w._historyFor('sess-a')).toBeDefined();
-    w.record([], new Set()); // sess-a no longer active
-    expect(w._historyFor('sess-a')).toBeUndefined();
-  });
-
-  it('keeps history when stats are empty but the session is still active', () => {
-    // collectContainerStats returns [] on a transient docker failure. The
-    // window must survive that, or a pinned container would dodge the flag.
-    const w = new CpuWatchdog(3, 80);
-    const active = new Set(['sess-a']);
-    w.record([stat('sess-a', 95)], active);
-    w.record([stat('sess-a', 95)], active);
-    w.record([], active); // docker stats hiccup — session still live
-    expect(w._historyFor('sess-a')).toHaveLength(2);
-    w.record([stat('sess-a', 95)], active);
-    expect(w.pinned()).toHaveLength(1); // window intact across the blip
-  });
-
-  it('does not GC when no active set is provided', () => {
+  it('garbage-collects sessions that disappear from the active set', () => {
     const w = new CpuWatchdog(3, 80);
     w.record([stat('sess-a', 95)]);
-    w.record([]); // no active set → history preserved
     expect(w._historyFor('sess-a')).toBeDefined();
+    w.record([]); // sess-a gone
+    expect(w._historyFor('sess-a')).toBeUndefined();
   });
 
   it('ignores stats without a sessionId', () => {
@@ -170,5 +150,36 @@ describe('CpuWatchdog', () => {
     w.record([stat('sess-a', 95)]);
     const [p] = w.pinned();
     expect(p.minPercent).toBe(81);
+  });
+});
+
+describe('runtime-name → human-name mapping (session-driver seam)', () => {
+  it('joins on the nanoclaw-container-name label, not the ncl-… runtime name', () => {
+    const sessions = new Map([['nanoclaw-v2-foo-1700000000000', 'sess-1']]);
+    const runtimeToHuman = new Map([['ncl-abc123', 'nanoclaw-v2-foo-1700000000000']]);
+    const row = JSON.stringify({
+      Name: 'ncl-abc123',
+      CPUPerc: '12.5%',
+      MemUsage: '100MiB / 1GiB',
+      MemPerc: '9.8%',
+    });
+
+    const stat = parseStatsRow(row, sessions, runtimeToHuman);
+    expect(stat?.sessionId).toBe('sess-1');
+    expect(stat?.folder).toBe('foo');
+    expect(stat?.name).toBe('nanoclaw-v2-foo-1700000000000');
+  });
+
+  it('falls back to the runtime name when the label is absent', () => {
+    const row = JSON.stringify({
+      Name: 'ncl-abc123',
+      CPUPerc: '1%',
+      MemUsage: '1MiB / 1GiB',
+      MemPerc: '0.1%',
+    });
+    const stat = parseStatsRow(row, new Map(), new Map());
+    expect(stat?.sessionId).toBeNull();
+    expect(stat?.folder).toBeNull();
+    expect(stat?.name).toBe('ncl-abc123');
   });
 });
