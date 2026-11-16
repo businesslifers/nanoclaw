@@ -5,7 +5,7 @@ description: Add the Impeccable design discipline (1 skill + 23 sub-commands + a
 
 # Add Impeccable
 
-This skill gives NanoClaw agents access to [Impeccable](https://github.com/pbakaus/impeccable) — a design language with 7 domain references (typography, color, spatial, motion, interaction, responsive, UX writing), 23 sub-commands (`/impeccable polish`, `/impeccable critique`, …), and a CLI that detects 24+ deterministic anti-patterns. It mirrors the install shape of `/add-vercel` and `/add-supabase`: drop a container skill into `container/skills/`, add a pinned CLI to the agent Dockerfile, sync running sessions, restart containers.
+This skill gives NanoClaw agents access to [Impeccable](https://github.com/pbakaus/impeccable) — a design language with 7 domain references (typography, color, spatial, motion, interaction, responsive, UX writing), 23 sub-commands (`/impeccable polish`, `/impeccable critique`, …), and a CLI that detects 24+ deterministic anti-patterns. It mirrors the install shape of `/add-vercel` and `/add-supabase`: drop a container skill into `container/skills/`, add a pinned CLI to `container/cli-tools.json`, sync running sessions, restart containers.
 
 **Principle:** Do the work — don't tell the user to do it. No tokens, no OAuth, no manual steps. Pure install.
 
@@ -91,16 +91,16 @@ Verify the frontmatter is still at the top and the path-mapping note appears imm
 
 ## Phase 3: Add the Impeccable CLI to the agent image
 
-Pin `impeccable` in the pnpm-global block of `container/Dockerfile`. This mirrors how `vercel`, `agent-browser`, and `claude-code` are wired.
+Pin `impeccable` in `container/cli-tools.json` — the manifest the image installs global Node CLIs from (via pnpm, exact versions only). This mirrors how `vercel`, `agent-browser`, and `claude-code` are wired; never add it to the Dockerfile.
 
 ```bash
-grep -q 'IMPECCABLE_VERSION' container/Dockerfile && echo "PRESENT" || echo "MISSING"
+grep -q '"impeccable"' container/cli-tools.json && echo "PRESENT" || echo "MISSING"
 ```
 
 If `MISSING`:
 
-1. Add `ARG IMPECCABLE_VERSION=2.1.9` next to the existing `ARG VERCEL_VERSION=...` line.
-2. Add `pnpm install -g "impeccable@${IMPECCABLE_VERSION}"` in the same `RUN` block that installs `vercel` and `agent-browser`. Match its indentation and continuation style exactly.
+1. Append `{ "name": "impeccable", "version": "2.1.9" }` to the array in `container/cli-tools.json` (exact version — the manifest test rejects ranges).
+2. If an older install still has `ARG IMPECCABLE_VERSION` and a `pnpm install -g "impeccable@…"` block in `container/Dockerfile`, delete both.
 3. Rebuild:
 
    ```bash
@@ -113,7 +113,7 @@ If `MISSING`:
    docker run --rm --entrypoint sh "$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^nanoclaw-agent-v2-' | head -1)" -c 'impeccable --version'
    ```
 
-If `PRESENT`, skip — the image already has the CLI. (Bump the `ARG` value if you're upgrading; that path is a `MISSING`-treated rebuild.)
+If `PRESENT`, skip — the image already has the CLI. (To upgrade, change its `version` in `cli-tools.json` and rebuild.)
 
 ## Phase 4: Sync the skill to running agent groups
 
@@ -167,5 +167,5 @@ To roll forward:
 
 1. Edit the **Pinned versions** block in this SKILL.md (`IMPECCABLE_SKILL_TAG` and `IMPECCABLE_VERSION`).
 2. Re-run `/add-impeccable`. The Phase 1 preflight will detect `INSTALLED`; choose "re-fetch and overwrite".
-3. Bump `ARG IMPECCABLE_VERSION` in `container/Dockerfile` if the CLI version moved (this triggers the rebuild path in Phase 3).
-4. Commit both files (this SKILL.md and the Dockerfile) on `main` and on `private-skills/skill/add-impeccable`. Per repo convention, private skill edits land in two places.
+3. Bump the `impeccable` entry in `container/cli-tools.json` if the CLI version moved, then `./container/build.sh`.
+4. Commit both files (this SKILL.md and `cli-tools.json`) on `main` and on `private-skills/skill/add-impeccable`. Per repo convention, private skill edits land in two places.
