@@ -25,8 +25,8 @@ Tools exposed to the agent (as `mcp__figma__<name>`):
 problems=()
 [ -f container/Dockerfile ]               || problems+=("container/Dockerfile missing — wrong working directory?")
 [ -f src/container-runner.ts ]            || problems+=("src/container-runner.ts missing — not a NanoClaw v2 install")
-grep -q 'FIGMA_DEVELOPER_MCP_VERSION' container/Dockerfile 2>/dev/null \
-  && problems+=("FIGMA_DEVELOPER_MCP_VERSION already in Dockerfile — skill may already be applied")
+grep -q '"figma-developer-mcp"' container/cli-tools.json 2>/dev/null \
+  && problems+=("figma-developer-mcp already in container/cli-tools.json — skill may already be applied")
 [ ! -d container/skills/figma ] \
   || problems+=("container/skills/figma/ already exists — skill may already be applied")
 if [ ${#problems[@]} -gt 0 ]; then
@@ -39,29 +39,15 @@ echo 'Preconditions OK — safe to apply.'
 
 ## Phase 1: Apply
 
-### 1. Pin the figma-developer-mcp version in the Dockerfile
+### 1. Pin the figma-developer-mcp version in cli-tools.json
 
-Edit `container/Dockerfile`:
+Append to the array in `container/cli-tools.json` (the manifest the image installs global Node CLIs from — never the Dockerfile):
 
-```diff
- ARG CLAUDE_CODE_VERSION=2.1.116
- ARG AGENT_BROWSER_VERSION=latest
- ARG VERCEL_VERSION=latest
- ARG BUN_VERSION=1.3.12
-+ARG FIGMA_DEVELOPER_MCP_VERSION=0.11.0
+```json
+{ "name": "figma-developer-mcp", "version": "0.11.0" }
 ```
 
-And add a new pnpm-install block after the `claude-code` block:
-
-```diff
- RUN --mount=type=cache,target=/root/.cache/pnpm \
-     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-+
-+RUN --mount=type=cache,target=/root/.cache/pnpm \
-+    pnpm install -g "figma-developer-mcp@${FIGMA_DEVELOPER_MCP_VERSION}"
-```
-
-Bump the version deliberately when needed — `figma-developer-mcp` does not have a `minimumReleaseAge` policy applied since it's installed via the Dockerfile pnpm-global path, not the project lockfile.
+Keep it an exact version (the manifest test rejects ranges) and bump it deliberately — `figma-developer-mcp` does not have a `minimumReleaseAge` policy applied since it's installed via the image's pnpm-global path, not the project lockfile. If an older install still has `ARG FIGMA_DEVELOPER_MCP_VERSION` and its `pnpm install -g` block in `container/Dockerfile`, delete both.
 
 ### 2. Forward the API key from host env to the container
 
@@ -176,9 +162,8 @@ If the call fails with the launcher's `FIGMA_API_KEY not set` message:
 ## Rollback
 
 ```bash
-# Remove from the Dockerfile
-sed -i '/FIGMA_DEVELOPER_MCP_VERSION/d' container/Dockerfile
-sed -i '/figma-developer-mcp@/,/CACHE/d' container/Dockerfile  # may need manual cleanup
+# Remove from the CLI manifest
+node -e 'const f="container/cli-tools.json",fs=require("fs");fs.writeFileSync(f,JSON.stringify(JSON.parse(fs.readFileSync(f)).filter(t=>t.name!=="figma-developer-mcp"),null,2)+"\n")'
 
 # Remove host-side env injection
 # (manually revert the FIGMA_API_KEY hunk in src/container-runner.ts)
@@ -202,7 +187,7 @@ systemctl --user restart nanoclaw
 Distributed via the `private` remote on branch `skill/figma-tool`. Re-running `/update-private-skills` pulls new commits when the `figma-developer-mcp` version pin is bumped or the agent instructions are tuned.
 
 To bump the figma-developer-mcp version:
-1. Edit `container/Dockerfile` ARG default
+1. Edit the `figma-developer-mcp` version in `container/cli-tools.json`
 2. `./container/build.sh`
 3. Restart NanoClaw
 
