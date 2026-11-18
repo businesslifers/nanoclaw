@@ -44,7 +44,7 @@ echo 'Preconditions OK — safe to apply.'
 Append to the array in `container/cli-tools.json` (the manifest the image installs global Node CLIs from — never the Dockerfile):
 
 ```json
-{ "name": "figma-developer-mcp", "version": "0.11.0" }
+{ "name": "figma-developer-mcp", "version": "0.13.2" }
 ```
 
 Keep it an exact version (the manifest test rejects ranges) and bump it deliberately — `figma-developer-mcp` does not have a `minimumReleaseAge` policy applied since it's installed via the image's pnpm-global path, not the project lockfile. If an older install still has `ARG FIGMA_DEVELOPER_MCP_VERSION` and its `pnpm install -g` block in `container/Dockerfile`, delete both.
@@ -84,7 +84,7 @@ This is the agent's how-to-use-Figma instructions — workflow, URL parsing rule
 ./container/build.sh
 ```
 
-This pulls `figma-developer-mcp@0.11.0` into the image at `/pnpm/figma-developer-mcp` (on `PATH`).
+This pulls `figma-developer-mcp@0.13.2` into the image at `/pnpm/figma-developer-mcp` (on `PATH`).
 
 ### 5. Compile the host
 
