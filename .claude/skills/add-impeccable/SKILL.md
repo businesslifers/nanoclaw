@@ -117,18 +117,19 @@ If `MISSING`:
 
 If `PRESENT`, skip — the image already has the CLI. (To upgrade, change its `version` in `cli-tools.json` and rebuild.)
 
-## Phase 4: Sync the skill to running agent groups
+## Phase 4: Clear stale per-group copies
 
-Per-session `.claude-shared/skills/` directories are seeded at session creation; they don't auto-pick-up new container skills. Push the new directory into each existing session's shared-skills dir, matching the pattern used by `/add-supabase` and `/add-vercel`:
+No sync is needed. At every spawn the host links each selected shared skill into the group's `.claude-shared/skills/` as a symlink to `/app/skills/<name>`. That path is the read-only mount of `container/skills/`, so a re-fetch reaches every group as its sessions recycle.
+
+The one thing that blocks it is a real directory left by older installs of this skill, which rsync'd a copy into each session. The host skips real entries rather than overwrite them, so that stale copy shadows the new bundle for good. Replace any such copy with the symlink:
 
 ```bash
-for session_dir in data/v2-sessions/ag-*; do
-  if [ -d "$session_dir/.claude-shared/skills" ]; then
-    rsync -a --delete container/skills/impeccable/ "$session_dir/.claude-shared/skills/impeccable/"  # --delete drops files a bump removed
-    echo "Synced impeccable to: $session_dir"
-  fi
+for d in data/v2-sessions/*/.claude-shared/skills/impeccable; do
+  [ -e "$d" ] && [ ! -L "$d" ] && rm -rf "$d" && ln -s /app/skills/impeccable "$d" && echo "relinked $d"
 done
 ```
+
+Check for local edits first (`diff -rq container/skills/impeccable <dir>`, ignoring the version bump itself). Groups that don't select `impeccable` have no entry and are untouched.
 
 ## Phase 5: Restart running containers
 
