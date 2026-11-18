@@ -13,10 +13,10 @@ This skill gives NanoClaw agents access to [Impeccable](https://github.com/pbaka
 
 This skill installs:
 
-- **Impeccable skill bundle** — `skill-v3.1.1` (tag on `pbakaus/impeccable`)
-- **Impeccable CLI** — `impeccable@2.1.9` (npm)
+- **Impeccable skill bundle** — `skill-v4.9.1` (tag on `pbakaus/impeccable`)
+- **Impeccable CLI** — `impeccable@4.9.1` (npm)
 
-Bump these together when a new release lands. Skill and CLI version independently upstream; check both before bumping.
+Bump these together. Since 4.x the skill's `scripts/impeccable` launcher pins an engine version (`scripts/VERSION`), and the npm CLI is a shim over a platform binary (`@impeccable/cli-<os>-<arch>`, an optional dependency pnpm installs alongside it). The launcher only uses the `impeccable` on `PATH` when its `engine-probe` reports that same engine version. On a mismatch it tries to download the engine at runtime into `~/.impeccable/`, which needs network inside the container. Before bumping, check the pair: `scripts/VERSION` at the skill tag must equal the npm CLI's `@impeccable/cli-linux-x64` optionalDependency version. Both must also be past the 3-day release-age window.
 
 ## Phase 1: Pre-flight
 
@@ -42,7 +42,7 @@ If `GH_MISSING`, install `gh` first (`apt install gh` on Linux, `brew install gh
 Fetch the upstream impeccable bundle at the pinned tag into `container/skills/impeccable/`. Use a temp clone with a sparse checkout — smaller than tarball download for a multi-MB subdirectory, and gives a clean source for diffing on later bumps.
 
 ```bash
-IMPECCABLE_SKILL_TAG="skill-v3.1.1"
+IMPECCABLE_SKILL_TAG="skill-v4.9.1"
 tmp=$(mktemp -d)
 git -C "$tmp" init -q
 git -C "$tmp" remote add origin https://github.com/pbakaus/impeccable.git
@@ -99,7 +99,7 @@ grep -q '"impeccable"' container/cli-tools.json && echo "PRESENT" || echo "MISSI
 
 If `MISSING`:
 
-1. Append `{ "name": "impeccable", "version": "2.1.9" }` to the array in `container/cli-tools.json` (exact version — the manifest test rejects ranges).
+1. Append `{ "name": "impeccable", "version": "4.9.1" }` to the array in `container/cli-tools.json` (exact version — the manifest test rejects ranges).
 2. If an older install still has `ARG IMPECCABLE_VERSION` and a `pnpm install -g "impeccable@…"` block in `container/Dockerfile`, delete both.
 3. Rebuild:
 
@@ -110,7 +110,9 @@ If `MISSING`:
 4. Verify the binary lands in the image:
 
    ```bash
-   docker run --rm --entrypoint sh "$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^nanoclaw-agent-v2-' | head -1)" -c 'impeccable --version'
+   docker run --rm --entrypoint sh "$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^nanoclaw-agent-v2-' | head -1)" -c 'impeccable --version; IMPECCABLE_LAUNCHER_PROBE=1 impeccable engine-probe'
+
+   The probe must print `impeccable-engine <v>`, where `<v>` matches `container/skills/impeccable/scripts/VERSION`.
    ```
 
 If `PRESENT`, skip — the image already has the CLI. (To upgrade, change its `version` in `cli-tools.json` and rebuild.)
@@ -122,7 +124,7 @@ Per-session `.claude-shared/skills/` directories are seeded at session creation;
 ```bash
 for session_dir in data/v2-sessions/ag-*; do
   if [ -d "$session_dir/.claude-shared/skills" ]; then
-    rsync -a container/skills/impeccable "$session_dir/.claude-shared/skills/"
+    rsync -a --delete container/skills/impeccable/ "$session_dir/.claude-shared/skills/impeccable/"  # --delete drops files a bump removed
     echo "Synced impeccable to: $session_dir"
   fi
 done
@@ -153,7 +155,7 @@ Verify by sending a parent agent a message like `"polish the landing page hero"`
 
 Key invocations the agent now understands:
 
-- `/impeccable craft <surface>` — shape-then-build flow with visual iteration
+- `/impeccable shape <surface>` — shape-then-build flow with visual iteration
 - `/impeccable critique <surface>` — UX design review
 - `/impeccable audit <surface>` — technical quality (a11y, perf, responsive)
 - `/impeccable polish <surface>` — shipping-pass alignment
