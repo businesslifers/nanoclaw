@@ -13,8 +13,8 @@ This skill gives NanoClaw agents access to [Impeccable](https://github.com/pbaka
 
 This skill installs:
 
-- **Impeccable skill bundle** — `skill-v4.9.1` (tag on `pbakaus/impeccable`)
-- **Impeccable CLI** — `impeccable@4.9.1` (npm)
+- **Impeccable skill bundle** — `skill-v4.10.0` (tag on `pbakaus/impeccable`)
+- **Impeccable CLI** — `impeccable@4.10.0` (npm)
 
 Bump these together. Since 4.x the skill's `scripts/impeccable` launcher pins an engine version (`scripts/VERSION`), and the npm CLI is a shim over a platform binary (`@impeccable/cli-<os>-<arch>`, an optional dependency pnpm installs alongside it). The launcher only uses the `impeccable` on `PATH` when its `engine-probe` reports that same engine version. On a mismatch it tries to download the engine at runtime into `~/.impeccable/`, which needs network inside the container. Before bumping, check the pair: `scripts/VERSION` at the skill tag must equal the npm CLI's `@impeccable/cli-linux-x64` optionalDependency version. Both must also be past the 3-day release-age window.
 
@@ -42,7 +42,7 @@ If `GH_MISSING`, install `gh` first (`apt install gh` on Linux, `brew install gh
 Fetch the upstream impeccable bundle at the pinned tag into `container/skills/impeccable/`. Use a temp clone with a sparse checkout — smaller than tarball download for a multi-MB subdirectory, and gives a clean source for diffing on later bumps.
 
 ```bash
-IMPECCABLE_SKILL_TAG="skill-v4.9.1"
+IMPECCABLE_SKILL_TAG="skill-v4.10.0"
 tmp=$(mktemp -d)
 git -C "$tmp" init -q
 git -C "$tmp" remote add origin https://github.com/pbakaus/impeccable.git
@@ -99,7 +99,7 @@ grep -q '"impeccable"' container/cli-tools.json && echo "PRESENT" || echo "MISSI
 
 If `MISSING`:
 
-1. Append `{ "name": "impeccable", "version": "4.9.1" }` to the array in `container/cli-tools.json` (exact version — the manifest test rejects ranges).
+1. Append `{ "name": "impeccable", "version": "4.10.0" }` to the array in `container/cli-tools.json` (exact version — the manifest test rejects ranges).
 2. If an older install still has `ARG IMPECCABLE_VERSION` and a `pnpm install -g "impeccable@…"` block in `container/Dockerfile`, delete both.
 3. Rebuild:
 
